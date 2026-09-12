@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
-import { requireScope } from "../core-identity/security.js";
+import { createId, requireScope } from "../core-identity/security.js";
 import { allocatePostedPayment, createPayment, listOutstandingBalances, paymentBalance, postPayment, reversePayment } from "./service.js";
 
 const input = z.object({
@@ -154,7 +154,7 @@ export function createPaymentRoutes(runtime: Runtime) {
       await client.query(
         `INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id)
          VALUES($1,$2,$3,'payment.draft_deleted','payment',$4)`,
-        [`aud_${crypto.randomUUID().replaceAll("-", "")}`, p.organizationId, p.userId, id],
+        [createId("aud"), p.organizationId, p.userId, id],
       );
       await client.query("COMMIT");
       return c.body(null, 204);
