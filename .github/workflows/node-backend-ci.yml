@@ -69,4 +69,5 @@ jobs:
           grep -q '"key":"documents"' /tmp/root.json
           grep -q '"key":"payments"' /tmp/root.json
           grep -q '"key":"banking"' /tmp/root.json
+          grep -q '"key":"budgets"' /tmp/root.json
           grep -q '"key":"reports"' /tmp/root.json

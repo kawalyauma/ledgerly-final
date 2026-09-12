@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
+import { generateBudgetVsActualReport, type BudgetReportFilters } from "../budgets/service.js";
 import { createId, requireScope } from "../core-identity/security.js";
 import { reportContentTypes, type ReportFormat } from "./render.js";
 import { generateReport, reportCatalog, reportTypes, type ReportFilters } from "./service.js";
@@ -14,16 +15,23 @@ const filterSchema = z.object({
   accountId: z.string().min(1).optional(),
   contactId: z.string().min(1).optional(),
   projectId: z.string().min(1).optional(),
+  budgetId: z.string().min(1).optional(),
+  scenario: z.string().min(1).optional(),
+  costCenterId: z.string().min(1).optional(),
+  revenueSourceId: z.string().min(1).optional(),
 });
 const exportInput = z.object({
   format: z.enum(["json","csv","xlsx","pdf"]).default("csv"),
   filters: filterSchema.default({}),
 });
 
-function queryFilters(c: { req: { query: (name: string) => string | undefined } }): ReportFilters {
+type ExtendedReportFilters = z.infer<typeof filterSchema>;
+
+function queryFilters(c: { req: { query: (name: string) => string | undefined } }): ExtendedReportFilters {
   const raw = {
     from: c.req.query("from"), to: c.req.query("to"), asOf: c.req.query("asOf"), accountId: c.req.query("accountId"),
-    contactId: c.req.query("contactId"), projectId: c.req.query("projectId"),
+    contactId: c.req.query("contactId"), projectId: c.req.query("projectId"), budgetId: c.req.query("budgetId"), scenario: c.req.query("scenario"),
+    costCenterId: c.req.query("costCenterId"), revenueSourceId: c.req.query("revenueSourceId"),
   };
   const parsed = filterSchema.safeParse(Object.fromEntries(Object.entries(raw).filter(([,value]) => value !== undefined && value !== "")));
   if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid report filters", parsed.error.flatten());
@@ -35,10 +43,19 @@ function assertReport(type: string) {
   if (!reportTypes.includes(type as never)) throw new AppError(404, "UNKNOWN_REPORT", "Unknown report type");
 }
 
+function effectiveCatalog() {
+  return reportCatalog.map((item) => item.id === "budget-vs-actual" ? { ...item, available: true, dependency: undefined } : item);
+}
+
+async function runReport(runtime: Runtime, organizationId: string, type: string, filters: ExtendedReportFilters) {
+  if (type === "budget-vs-actual") return generateBudgetVsActualReport(runtime, organizationId, filters as BudgetReportFilters);
+  return generateReport(runtime, organizationId, type, filters as ReportFilters);
+}
+
 export function createReportRoutes(runtime: Runtime) {
   const router = new Hono<AppEnv>();
 
-  router.get("/", requireScope("reports:read"), (c) => c.json({ data: reportCatalog }));
+  router.get("/", requireScope("reports:read"), (c) => c.json({ data: effectiveCatalog() }));
 
   router.get("/exports/:id/status", requireScope("reports:read"), async (c) => {
     const principal = c.get("principal");
@@ -73,7 +90,7 @@ export function createReportRoutes(runtime: Runtime) {
     if (parsed.data.filters.from && parsed.data.filters.to && parsed.data.filters.from > parsed.data.filters.to) {
       throw new AppError(422, "INVALID_DATE_RANGE", "Report start date cannot be after end date");
     }
-    const definition = reportCatalog.find((item) => item.id === type)!;
+    const definition = effectiveCatalog().find((item) => item.id === type)!;
     if (!definition.available) throw new AppError(409, "REPORT_DEPENDENCY_NOT_MIGRATED", `${definition.name} requires the ${definition.dependency} feature to be migrated first`);
     const principal = c.get("principal"), id = createId("rpt");
     await runtime.db.query(
@@ -94,7 +111,7 @@ export function createReportRoutes(runtime: Runtime) {
   router.get("/:type", requireScope("reports:read"), async (c) => {
     const type = c.req.param("type"); assertReport(type);
     const principal = c.get("principal");
-    return c.json({ data: await generateReport(runtime, principal.organizationId, type, queryFilters(c)) });
+    return c.json({ data: await runReport(runtime, principal.organizationId, type, queryFilters(c)) });
   });
 
   return router;

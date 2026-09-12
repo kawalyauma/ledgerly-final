@@ -61,6 +61,19 @@ This directory is the independent self-hosted Ledgerly backend. It never imports
 - bank charges and same-currency bank transfers through the journal engine
 - fiscal-period-aware bank charge and transfer posting
 
+### Budgets / Forecasting
+- annual, departmental, cash-flow and rolling-forecast budget types
+- draft, submitted, approved, rejected, active and archived workflow
+- versioned revisions, scenarios, locking and activation
+- none/warning/block enforcement policy with spend-check API
+- hierarchical cost centers and revenue sources linked to revenue accounts
+- monthly budget lines with project/class/department/location dimensions
+- automatic actual refresh from posted ledger journals and hourly durable refresh jobs
+- budget-vs-actual variance, favorable/unfavorable analysis and variance notes
+- manual, actuals-plus-plan, run-rate and percentage forecasts
+- forecast approval/archive lifecycle and forecast-vs-actual variance
+- Budget vs Actual report and queued exports are now enabled
+
 ### Financial Reports
 - Trial Balance, Profit & Loss, Balance Sheet and Cash Flow
 - General Ledger, transaction detail and account activity
@@ -70,10 +83,11 @@ This directory is the independent self-hosted Ledgerly backend. It never imports
 - bank reconciliation, bank transactions, cash/bank and reconciliation summaries
 - document, payment, journal, contact-balance and fiscal-period summaries
 - comparative statements, financial ratios, draft-transaction and finance audit reports
+- Budget vs Actual backed by the migrated budgeting engine
 - queued JSON, CSV, XLSX and PDF exports using the self-hosted durable queue and object storage
-- report catalog marks reports that still depend on unmigrated Inventory, Budgets, Fixed Assets or multi-entity consolidation as unavailable instead of returning misleading data
+- report catalog still marks reports that depend on unmigrated Inventory, Fixed Assets or multi-entity consolidation as unavailable instead of returning misleading data
 
-Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents`, `/api/v1/payments`, `/api/v1/banking` and `/api/v1/reports`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
+Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents`, `/api/v1/payments`, `/api/v1/banking`, `/api/v1/budgets` and `/api/v1/reports`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
 
 ## Local start
 

@@ -5,8 +5,9 @@ import { contactsFeature } from "./contacts/index.js";
 import { documentsFeature } from "./documents/index.js";
 import { paymentsFeature } from "./payments/index.js";
 import { bankingFeature } from "./banking/index.js";
+import { budgetsFeature } from "./budgets/index.js";
 import { reportsFeature } from "./reports/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, reportsFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, reportsFeature];
