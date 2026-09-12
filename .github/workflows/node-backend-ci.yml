@@ -62,20 +62,6 @@ jobs:
           grep -q '"status":"ok"' /tmp/health.json
           curl -fsS http://127.0.0.1:8080/ >/tmp/root.json
           grep -q '"stage":"feature-migration"' /tmp/root.json
-          grep -q '"key":"core-identity"' /tmp/root.json
-          grep -q '"key":"finance-core"' /tmp/root.json
-          grep -q '"key":"fiscal-periods"' /tmp/root.json
-          grep -q '"key":"contacts"' /tmp/root.json
-          grep -q '"key":"documents"' /tmp/root.json
-          grep -q '"key":"payments"' /tmp/root.json
-          grep -q '"key":"banking"' /tmp/root.json
-          grep -q '"key":"budgets"' /tmp/root.json
-          grep -q '"key":"inventory"' /tmp/root.json
-          grep -q '"key":"fixed-assets"' /tmp/root.json
-          grep -q '"key":"dimensions-projects"' /tmp/root.json
-          grep -q '"key":"sales-purchasing"' /tmp/root.json
-          grep -q '"key":"tax"' /tmp/root.json
-          grep -q '"key":"closing"' /tmp/root.json
-          grep -q '"key":"compliance"' /tmp/root.json
-          grep -q '"key":"reports"' /tmp/root.json
-          grep -q '"key":"report-management"' /tmp/root.json
+          for key in core-identity finance-core fiscal-periods contacts documents payments banking budgets inventory fixed-assets dimensions-projects sales-purchasing tax closing compliance reports report-management document-output; do
+            grep -q "\"key\":\"$key\"" /tmp/root.json
+          done
