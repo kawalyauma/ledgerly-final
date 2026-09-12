@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { Pool, PoolClient } from "pg";
 import { z } from "zod";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
@@ -15,7 +16,7 @@ const keySchema = z.object({ name:z.string().min(1).max(120), scopes:z.array(z.s
 async function audit(runtime:Runtime, organizationId:string, actorId:string, action:string, entityType:string, entityId:string, after?:unknown, requestId?:string) {
   await runtime.db.query(`INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id,request_id,after_data) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,[createId("aud"),organizationId,actorId,action,entityType,entityId,requestId??null,after===undefined?null:JSON.stringify(after)]);
 }
-async function outbox(runtime:Runtime, topic:string, aggregateType:string, aggregateId:string, payload:unknown, client=runtime.db) {
+async function outbox(runtime:Runtime, topic:string, aggregateType:string, aggregateId:string, payload:unknown, client:Pool|PoolClient=runtime.db) {
   await client.query(`INSERT INTO backend_outbox_events(id,topic,aggregate_type,aggregate_id,payload) VALUES($1,$2,$3,$4,$5::jsonb)`,[createId("evt"),topic,aggregateType,aggregateId,JSON.stringify(payload)]);
 }
 async function loginEvent(runtime:Runtime,data:{organizationId?:string;userId?:string;identifier:string;eventType:"success"|"failure";ip?:string;userAgent?:string;reason?:string}) {
