@@ -15,7 +15,9 @@ export async function decryptMfaSecret(appSecret: string, stored: string): Promi
   if (!ivPart || !cipherPart) throw new Error("Invalid MFA secret");
   const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`school-mfa:${appSecret}`));
   const key = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
-  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: Buffer.from(ivPart, "base64") }, key, Buffer.from(cipherPart, "base64"));
+  const iv = Uint8Array.from(Buffer.from(ivPart, "base64"));
+  const ciphertext = Uint8Array.from(Buffer.from(cipherPart, "base64"));
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ciphertext);
   return new TextDecoder().decode(plain);
 }
 export function verifyTotp(secret: string, code: string, now = Date.now()): boolean {
