@@ -62,6 +62,6 @@ jobs:
           grep -q '"status":"ok"' /tmp/health.json
           curl -fsS http://127.0.0.1:8080/ >/tmp/root.json
           grep -q '"stage":"feature-migration"' /tmp/root.json
-          for key in core-identity finance-core fiscal-periods contacts documents payments banking budgets inventory fixed-assets dimensions-projects sales-purchasing tax closing compliance reports report-management document-output finance-maintenance integrations modules; do
+          for key in core-identity finance-core fiscal-periods contacts documents payments banking budgets inventory fixed-assets dimensions-projects sales-purchasing tax closing compliance reports report-management document-output finance-maintenance integrations modules finance-mobile; do
             grep -q "\"key\":\"$key\"" /tmp/root.json
           done
