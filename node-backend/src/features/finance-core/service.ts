@@ -19,6 +19,8 @@ export const defaultAccounts = [
   ["6100","Payroll Expense","expense","payroll","debit"],
 ] as const;
 
+type DefaultAccountCode=(typeof defaultAccounts)[number][0];
+
 async function audit(db:Db, organizationId:string, actorId:string, action:string, entityType:string, entityId:string, after?:unknown) {
   await db.query(`INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id,after_data)
     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`, [createId("aud"),organizationId,actorId,action,entityType,entityId,after===undefined?null:JSON.stringify(after)]);
@@ -40,7 +42,7 @@ export async function ensureFinanceProvisioned(runtime:Runtime, organizationId:s
     }
     const expected=new Map(defaultAccounts.map(([code,_name,type,_subtype,normalBalance])=>[code,{type,normalBalance}]));
     const provisioned=await client.query<{code:string;type:string;normalBalance:string}>(`SELECT code,type,normal_balance AS "normalBalance" FROM accounts WHERE organization_id=$1 AND code=ANY($2::text[])`,[organizationId,[...expected.keys()]]);
-    const conflict=provisioned.rows.find(row=>{const wanted=expected.get(row.code);return !wanted||wanted.type!==row.type||wanted.normalBalance!==row.normalBalance;});
+    const conflict=provisioned.rows.find(row=>{const wanted=expected.get(row.code as DefaultAccountCode);return !wanted||wanted.type!==row.type||wanted.normalBalance!==row.normalBalance;});
     if (provisioned.rows.length!==defaultAccounts.length||conflict) throw new AppError(409,"FINANCE_PROVISIONING_CONFLICT","Existing account codes conflict with the default Ledgerly chart of accounts",{accountCode:conflict?.code});
     await client.query(`INSERT INTO finance_tenant_provisioning(organization_id,schema_version,status,provisioned_at,updated_at)
       VALUES($1,1,'completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
