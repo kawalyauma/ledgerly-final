@@ -57,11 +57,34 @@ export function createApp(options: {
       return c.json({ error: { code: error.code, message: error.message, details: error.details, requestId } }, error.status as ErrorStatus);
     }
     if (isPgError(error) && error.code === "P0001") {
-      const match = /^(FISCAL_(?:YEAR|PERIOD)_CLOSED):(.+):([^:]+)$/.exec(error.message);
-      if (match) {
-        const code = match[1] as "FISCAL_YEAR_CLOSED" | "FISCAL_PERIOD_CLOSED";
+      const fiscalMatch = /^(FISCAL_(?:YEAR|PERIOD)_CLOSED):(.+):([^:]+)$/.exec(error.message);
+      if (fiscalMatch) {
+        const code = fiscalMatch[1] as "FISCAL_YEAR_CLOSED" | "FISCAL_PERIOD_CLOSED";
         const label = code === "FISCAL_YEAR_CLOSED" ? "Financial year" : "Fiscal period";
-        return c.json({ error: { code, message: `${label} ${match[2]} is ${match[3]}`, requestId } }, 409);
+        return c.json({ error: { code, message: `${label} ${fiscalMatch[2]} is ${fiscalMatch[3]}`, requestId } }, 409);
+      }
+      const invariant = /^([A-Z][A-Z0-9_]+):(.+)$/.exec(error.message);
+      if (invariant) {
+        const code = invariant[1]!;
+        const entityId = invariant[2]!;
+        const validationMessages: Record<string, string> = {
+          INVALID_ALLOCATION_DOCUMENT: "Allocation document is not open or does not match the payment.",
+          PAYMENT_OVER_ALLOCATION: "Allocations exceed the payment amount.",
+          DOCUMENT_OVER_ALLOCATION: "Allocation exceeds the document outstanding balance.",
+        };
+        const conflictMessages: Record<string, string> = {
+          PAYMENT_NOT_POSTED: "Allocations can only be added to a posted payment.",
+          PAYMENT_JOURNAL_REQUIRED: "A posted payment requires an accounting journal.",
+          PAYMENT_JOURNAL_NOT_POSTED: "The payment accounting journal must be posted first.",
+          PAYMENT_REVERSAL_JOURNAL_REQUIRED: "A reversed payment requires a posted reversal journal.",
+          PAYMENT_ORIGINAL_JOURNAL_NOT_REVERSED: "The original payment journal must be reversed first.",
+          PAYMENT_ALLOCATIONS_STILL_ACTIVE: "Payment allocations must be reversed before the payment can be reversed.",
+          DOCUMENT_JOURNAL_REQUIRED: "A posted document requires an accounting journal.",
+          DOCUMENT_JOURNAL_NOT_POSTED: "The document accounting journal must be posted first.",
+          DOCUMENT_JOURNAL_NOT_REVERSED: "The document accounting journal must be reversed before voiding the document.",
+        };
+        if (validationMessages[code]) return c.json({ error: { code, message: validationMessages[code], details: { entityId }, requestId } }, 422);
+        if (conflictMessages[code]) return c.json({ error: { code, message: conflictMessages[code], details: { entityId }, requestId } }, 409);
       }
     }
     if (isPgError(error) && error.code === "23505") {
