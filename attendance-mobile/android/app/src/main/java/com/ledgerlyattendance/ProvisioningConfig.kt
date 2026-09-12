@@ -7,8 +7,8 @@ import android.os.PersistableBundle
  * Small bridge between Android Enterprise/KME provisioning and the React Native app.
  *
  * Only the bootstrap token is treated as a secret. It is encrypted with the existing
- * Android Keystore-backed CryptoVault and is consumed once by the app after it has
- * exchanged the token with the Ledgerly backend.
+ * Android Keystore-backed CryptoVault and is cleared only after the app confirms that
+ * it successfully exchanged the token with the Ledgerly backend.
  */
 object ProvisioningConfig {
   private const val PREFS = "ledgerly_provisioning"
@@ -65,15 +65,21 @@ object ProvisioningConfig {
   fun provisionedAt(context: Context): Long =
     context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_PROVISIONED_AT, 0L)
 
-  /** Returns the one-time enrollment token and removes it from local storage. */
-  fun consumeEnrollmentToken(context: Context): String? {
+  fun enrollmentToken(context: Context): String? {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     val encrypted = prefs.getString(KEY_TOKEN, null) ?: return null
     return try {
-      CryptoVault.decrypt(encrypted).also { prefs.edit().remove(KEY_TOKEN).apply() }
+      CryptoVault.decrypt(encrypted)
     } catch (_: Exception) {
       prefs.edit().remove(KEY_TOKEN).apply()
       null
     }
+  }
+
+  fun clearEnrollmentToken(context: Context) {
+    context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+      .edit()
+      .remove(KEY_TOKEN)
+      .apply()
   }
 }
