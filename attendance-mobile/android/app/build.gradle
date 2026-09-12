@@ -1,0 +1,55 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "com.facebook.react"
+
+react {
+    autolinkLibrariesWithApp()
+}
+
+def enableProguardInReleaseBuilds = false
+def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "com.ledgerlyattendance"
+    androidResources { noCompress += ["tflite"] }
+    defaultConfig {
+        applicationId "com.ledgerlyattendance"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 2
+        versionName "1.2"
+        // Dedicated camera mode sends video to an on-premise NVR over private-LAN HTTP.
+        // Internet/cloud API traffic remains HTTPS; this permits RFC1918/local NVR endpoints.
+        manifestPlaceholders = [usesCleartextTraffic: "true"]
+    }
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+    buildTypes {
+        debug { signingConfig signingConfigs.debug }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+}
+
+dependencies {
+    implementation("com.facebook.react:react-android")
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("androidx.exifinterface:exifinterface:1.4.1")
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.ai.edge.litert:litert:1.4.2")
+    if (hermesEnabled.toBoolean()) { implementation("com.facebook.react:hermes-android") }
+    else { implementation jscFlavor }
+}

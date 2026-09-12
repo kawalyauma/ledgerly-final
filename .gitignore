@@ -1,0 +1,12 @@
+node_modules/
+.wrangler/
+dist/
+coverage/
+.dev.vars
+*.log
+.DS_Store
+
+attendance-mobile/mobile.zip
+attendance-mobile/android/app/src/main/assets/facenet.tflite
+
+ledgerly/
