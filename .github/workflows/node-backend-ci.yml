@@ -64,3 +64,5 @@ jobs:
           grep -q '"stage":"feature-migration"' /tmp/root.json
           grep -q '"key":"core-identity"' /tmp/root.json
           grep -q '"key":"finance-core"' /tmp/root.json
+          grep -q '"key":"fiscal-periods"' /tmp/root.json
+          grep -q '"key":"contacts"' /tmp/root.json
