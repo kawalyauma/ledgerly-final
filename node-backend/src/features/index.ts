@@ -1,7 +1,5 @@
+import { coreIdentityFeature } from "./core-identity/index.js";
 import type { BackendFeature } from "./types.js";
 
-/**
- * Foundation only. Feature migrations are added here one-by-one in later commits.
- * Cloudflare modules are intentionally NOT imported into the Node backend.
- */
-export const features: BackendFeature[] = [];
+/** Independent Node implementations only. Never import the Cloudflare backend here. */
+export const features: BackendFeature[] = [coreIdentityFeature];

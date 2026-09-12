@@ -26,8 +26,8 @@ const schema = z.object({
   S3_FORCE_PATH_STYLE: envBoolean(true),
   S3_AUTO_CREATE_BUCKET: envBoolean(true),
   JWT_SECRET: z.string().min(32),
-  JWT_ISSUER: z.string().min(1).default("ledgerly"),
-  JWT_AUDIENCE: z.string().min(1).default("ledgerly-api"),
+  JWT_ISSUER: z.string().min(1).default("your-finance-pro"),
+  JWT_AUDIENCE: z.string().min(1).default("your-finance-pro-api"),
   CORS_ORIGINS: z.string().default("http://localhost:5173").transform((value) => value.split(",").map((item) => item.trim()).filter(Boolean)),
   QUEUE_POLL_MS: z.coerce.number().int().min(100).max(60000).default(1000),
   QUEUE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
@@ -41,7 +41,6 @@ const schema = z.object({
 });
 
 export type AppConfig = z.infer<typeof schema>;
-
 export function parseEnv(env: NodeJS.ProcessEnv | Record<string, unknown> = process.env): AppConfig {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
