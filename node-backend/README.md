@@ -61,7 +61,19 @@ This directory is the independent self-hosted Ledgerly backend. It never imports
 - bank charges and same-currency bank transfers through the journal engine
 - fiscal-period-aware bank charge and transfer posting
 
-Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents`, `/api/v1/payments` and `/api/v1/banking`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
+### Financial Reports
+- Trial Balance, Profit & Loss, Balance Sheet and Cash Flow
+- General Ledger, transaction detail and account activity
+- Accounts Receivable and Accounts Payable aging with aging buckets
+- customer and supplier statements
+- sales, expense, project, tax, payroll-ledger, equity and retained-earnings reports
+- bank reconciliation, bank transactions, cash/bank and reconciliation summaries
+- document, payment, journal, contact-balance and fiscal-period summaries
+- comparative statements, financial ratios, draft-transaction and finance audit reports
+- queued JSON, CSV, XLSX and PDF exports using the self-hosted durable queue and object storage
+- report catalog marks reports that still depend on unmigrated Inventory, Budgets, Fixed Assets or multi-entity consolidation as unavailable instead of returning misleading data
+
+Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents`, `/api/v1/payments`, `/api/v1/banking` and `/api/v1/reports`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
 
 ## Local start
 
