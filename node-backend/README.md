@@ -1,49 +1,29 @@
 # Ledgerly Node Backend
 
-This directory is a **new, independent backend** for Ledgerly. It does not import the Cloudflare Worker backend. The repository root remains the Cloudflare fallback while features are rebuilt here against PostgreSQL.
-
-## Platform foundation
-
-Node.js 22 + Hono, PostgreSQL, Redis, durable PostgreSQL jobs, scheduler, local/MinIO storage, validated environment configuration, health checks, JSON logging, Docker Compose and systemd services are already present.
+This directory is the independent self-hosted Ledgerly backend. It never imports the Cloudflare Worker backend; the repository root remains the Cloudflare fallback during migration.
 
 ## Migrated features
 
-### Core Identity / Auth / Organizations / Tenants — v1.0.0
+### Core Identity / Organizations
+- registration, login, refresh and logout
+- JWT and API-key authentication
+- memberships, scopes and tenant switching
+- organization settings
+- MFA-compatible identity storage and login audit
 
-Implemented independently in `src/features/core-identity/` with PostgreSQL migration `migrations/0002_core_identity.sql`.
+### Finance Core
+- PostgreSQL Chart of Accounts and account groups
+- the same 11 default accounts currently provisioned by Ledgerly registration
+- automatic/lazy provisioning for newly created and existing organizations
+- durable scheduled provisioning job consuming `organization.created` events without coupling Identity to Finance
+- journal creation with balanced-line validation and PostgreSQL-safe entry sequencing
+- idempotent journal creation via `Idempotency-Key`
+- posting, listing, detail, draft deletion and safe manual/opening-balance reversal
+- opening balances through the journal engine
 
-Public contracts now implemented:
+Current finance paths are `/api/v1/accounts` and `/api/v1/journals`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
 
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `GET /api/v1/organizations/`
-- `GET /api/v1/organizations/current`
-- `PUT /api/v1/organizations/current`
-- `POST /api/v1/organizations/`
-- `POST /api/v1/organizations/switch`
-- `GET|POST /api/v1/admin/memberships`
-- `PUT|DELETE /api/v1/admin/memberships/:userId`
-- `GET|POST /api/v1/admin/api-keys`
-- `DELETE /api/v1/admin/api-keys/:id`
-
-Auth supports HS256 access JWTs, rotating 30-day refresh sessions, API keys, role/scope authorization, the development identity headers used by the old backend, username/phone aliases scoped by organization, and compatible TOTP/recovery-code verification. Passwords use the same `scrypt-v1` format as the current Ledgerly backend and can verify the legacy PBKDF2 format during transition.
-
-Tenant creation intentionally does **not** create Finance accounts inside Identity. Instead it commits an `organization.created` event to `backend_outbox_events`. The Finance feature will consume/backfill that contract when Finance is migrated, keeping the new backend modular.
-
-## Boundary
-
-```text
-repository root/          Cloudflare backend / fallback
-node-backend/             Independent self-hosted backend
-  src/features/           New feature implementations only
-  migrations/             PostgreSQL migrations only
-```
-
-Never import `../src` or `../modules/*/backend` into this project.
-
-## Run
+## Local start
 
 ```bash
 cd node-backend
@@ -53,10 +33,22 @@ npm run db:migrate
 npm run dev
 ```
 
-Worker and scheduler run separately with `npm run dev:queue` and `npm run dev:scheduler`. Health endpoints are `GET /system/live` and `GET /system/health`.
+Run background services separately:
 
-For Docker deployment set `POSTGRES_PASSWORD`, `MINIO_ROOT_PASSWORD`, and `JWT_SECRET`, then run `docker compose up -d --build`.
+```bash
+npm run dev:queue
+npm run dev:scheduler
+```
 
-## Feature migration rule
+## Production
 
-Each feature gets its own folder under `src/features/<feature>/`, PostgreSQL migration(s), jobs/schedules where needed, and contract tests. Cross-feature setup is coordinated through explicit events/outbox records rather than importing Cloudflare code or creating hidden coupling.
+```bash
+npm install
+npm run check
+npm run db:migrate
+npm run build
+```
+
+Docker Compose starts PostgreSQL, Redis, MinIO, applies migrations, then runs API, queue worker and scheduler. Host-native deployments can use the systemd units in `deploy/systemd/`.
+
+Every future feature belongs under `src/features/<feature>/` with PostgreSQL migrations, contract tests, jobs/schedules where required, and a registry entry in `src/features/index.ts`.
