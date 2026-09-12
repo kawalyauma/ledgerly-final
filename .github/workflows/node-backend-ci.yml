@@ -63,3 +63,4 @@ jobs:
           curl -fsS http://127.0.0.1:8080/ >/tmp/root.json
           grep -q '"stage":"feature-migration"' /tmp/root.json
           grep -q '"key":"core-identity"' /tmp/root.json
+          grep -q '"key":"finance-core"' /tmp/root.json
