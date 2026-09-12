@@ -31,13 +31,17 @@ export async function ensureFinanceProvisioned(runtime:Runtime, organizationId:s
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",[`finance:${organizationId}`]);
-    const organization = (await client.query<{baseCurrency:string}>(`SELECT base_currency AS "baseCurrency" FROM organizations WHERE id=$1`,[organizationId])).rows[0];
-    if (!organization) throw new AppError(404,"ORGANIZATION_NOT_FOUND","Organization not found");
+    const organization = await client.query("SELECT 1 FROM organizations WHERE id=$1",[organizationId]);
+    if (!organization.rowCount) throw new AppError(404,"ORGANIZATION_NOT_FOUND","Organization not found");
     for (const [code,name,type,subtype,normalBalance] of defaultAccounts) {
-      await client.query(`INSERT INTO accounts(id,organization_id,code,name,type,subtype,normal_balance,currency)
-        VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-        ON CONFLICT (organization_id,code) DO NOTHING`,[createId("acc"),organizationId,code,name,type,subtype,normalBalance,organization.baseCurrency]);
+      await client.query(`INSERT INTO accounts(id,organization_id,code,name,type,subtype,normal_balance)
+        VALUES($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (organization_id,code) DO NOTHING`,[createId("acc"),organizationId,code,name,type,subtype,normalBalance]);
     }
+    const expected=new Map(defaultAccounts.map(([code,_name,type,_subtype,normalBalance])=>[code,{type,normalBalance}]));
+    const provisioned=await client.query<{code:string;type:string;normalBalance:string}>(`SELECT code,type,normal_balance AS "normalBalance" FROM accounts WHERE organization_id=$1 AND code=ANY($2::text[])`,[organizationId,[...expected.keys()]]);
+    const conflict=provisioned.rows.find(row=>{const wanted=expected.get(row.code);return !wanted||wanted.type!==row.type||wanted.normalBalance!==row.normalBalance;});
+    if (provisioned.rows.length!==defaultAccounts.length||conflict) throw new AppError(409,"FINANCE_PROVISIONING_CONFLICT","Existing account codes conflict with the default Ledgerly chart of accounts",{accountCode:conflict?.code});
     await client.query(`INSERT INTO finance_tenant_provisioning(organization_id,schema_version,status,provisioned_at,updated_at)
       VALUES($1,1,'completed',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       ON CONFLICT (organization_id) DO UPDATE SET schema_version=EXCLUDED.schema_version,status='completed',last_error=NULL,
