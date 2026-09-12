@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
+import { requireAuth } from "./features/core-identity/security.js";
 import type { BackendFeature } from "./features/types.js";
 import type { HealthChecker } from "./health/service.js";
 import { AppError, isPgError } from "./http/errors.js";
@@ -28,6 +29,19 @@ export function createApp(options: {
   };
   app.use("/api/*", cors(corsConfig));
   app.use("/auth/*", cors(corsConfig));
+
+  // Every versioned API is authenticated by default. Explicitly public API routes must be allow-listed here.
+  // This prevents new feature modules from accidentally exposing routes when they rely on requireScope().
+  if (options.runtime) {
+    const auth = requireAuth(options.runtime);
+    app.use("/api/v1/*", async (c, next) => {
+      if (c.req.path === "/api/v1/mobile-sync/offline" || c.req.path.startsWith("/api/v1/mobile-sync/offline/")) {
+        await next();
+        return;
+      }
+      await auth(c, next);
+    });
+  }
 
   const activeFeatures = options.features ?? [];
   app.get("/", (c) => c.json({

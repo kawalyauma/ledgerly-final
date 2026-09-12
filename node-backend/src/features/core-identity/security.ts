@@ -93,7 +93,13 @@ export function requireAuth(runtime: Runtime): MiddlewareHandler<AppEnv> {
     try { ({ payload } = await jwtVerify(authorization.slice(7), new TextEncoder().encode(runtime.config.JWT_SECRET), { issuer: runtime.config.JWT_ISSUER, audience: runtime.config.JWT_AUDIENCE, algorithms: ["HS256"] })); }
     catch { throw new AppError(401, "INVALID_TOKEN", "Access token is invalid or expired"); }
     if (!payload.sub || typeof payload.org !== "string" || typeof payload.role !== "string") throw new AppError(401, "INVALID_TOKEN", "Token is missing required claims");
-    const principal: AuthPrincipal = { userId: payload.sub, organizationId: payload.org, role: payload.role as AuthRole, scopes: Array.isArray(payload.scopes) ? payload.scopes.filter((v): v is string => typeof v === "string") : [] };
+    const principal: AuthPrincipal = {
+      userId: payload.sub,
+      organizationId: payload.org,
+      role: payload.role as AuthRole,
+      scopes: Array.isArray(payload.scopes) ? payload.scopes.filter((v): v is string => typeof v === "string") : [],
+      mobileDeviceId: typeof payload.mobileDeviceId === "string" ? payload.mobileDeviceId : undefined,
+    };
     c.set("principal", principal); await next();
   };
 }
