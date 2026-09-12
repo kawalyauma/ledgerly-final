@@ -56,6 +56,14 @@ export function createApp(options: {
     if (error instanceof AppError) {
       return c.json({ error: { code: error.code, message: error.message, details: error.details, requestId } }, error.status as ErrorStatus);
     }
+    if (isPgError(error) && error.code === "P0001") {
+      const match = /^(FISCAL_(?:YEAR|PERIOD)_CLOSED):(.+):([^:]+)$/.exec(error.message);
+      if (match) {
+        const code = match[1] as "FISCAL_YEAR_CLOSED" | "FISCAL_PERIOD_CLOSED";
+        const label = code === "FISCAL_YEAR_CLOSED" ? "Financial year" : "Fiscal period";
+        return c.json({ error: { code, message: `${label} ${match[2]} is ${match[3]}`, requestId } }, 409);
+      }
+    }
     if (isPgError(error) && error.code === "23505") {
       return c.json({ error: { code: "DUPLICATE_RECORD", message: "A record with the same unique value already exists.", requestId } }, 409);
     }
