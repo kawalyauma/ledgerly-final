@@ -5,10 +5,11 @@ import { createAdmissionRoutes } from "./admissions.js";
 import { createSchoolIamRoutes } from "./iam.js";
 import { createStaffRoutes } from "./staff.js";
 import { createPromotionRoutes } from "./promotions.js";
+import { createDisciplineRoutes } from "./discipline.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
-  version: "2.5.0",
+  version: "2.6.0",
   mount(app,runtime){
     app.route("/api/v1/school",createSchoolRoutes(runtime));
     app.route("/api/v1/school/student-management",createStudentRoutes(runtime));
@@ -16,5 +17,6 @@ export const schoolFeature: BackendFeature = {
     app.route("/api/v1/school/iam",createSchoolIamRoutes(runtime));
     app.route("/api/v1/school/staff-management",createStaffRoutes(runtime));
     app.route("/api/v1/school/promotion",createPromotionRoutes(runtime));
+    app.route("/api/v1/school/discipline",createDisciplineRoutes(runtime));
   },
 };
