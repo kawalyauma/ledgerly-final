@@ -12,8 +12,9 @@ import { dimensionsProjectsFeature } from "./dimensions-projects/index.js";
 import { salesPurchasingFeature } from "./sales-purchasing/index.js";
 import { taxFeature } from "./tax/index.js";
 import { closingFeature } from "./closing/index.js";
+import { complianceFeature } from "./compliance/index.js";
 import { reportsFeature } from "./reports/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, reportsFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature];
