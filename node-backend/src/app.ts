@@ -8,6 +8,8 @@ import { AppError, isPgError } from "./http/errors.js";
 import type { AppEnv } from "./http/types.js";
 import type { Runtime } from "./runtime.js";
 
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500;
+
 export function createApp(options: {
   environment: string;
   corsOrigins: string[];
@@ -23,7 +25,7 @@ export function createApp(options: {
     allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-API-Key", "X-Organization-Id", "X-User-Id", "X-Request-Id"],
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     maxAge: 86400,
-  } as const;
+  };
   app.use("/api/*", cors(corsConfig));
   app.use("/auth/*", cors(corsConfig));
 
@@ -52,7 +54,7 @@ export function createApp(options: {
     const requestId = c.get("requestId");
     console.error(JSON.stringify({ level: "error", requestId, message: error.message, stack: error.stack }));
     if (error instanceof AppError) {
-      return c.json({ error: { code: error.code, message: error.message, details: error.details, requestId } }, error.status as 400);
+      return c.json({ error: { code: error.code, message: error.message, details: error.details, requestId } }, error.status as ErrorStatus);
     }
     if (isPgError(error) && error.code === "23505") {
       return c.json({ error: { code: "DUPLICATE_RECORD", message: "A record with the same unique value already exists.", requestId } }, 409);
