@@ -5,6 +5,7 @@ import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { generateBudgetVsActualReport, type BudgetReportFilters } from "../budgets/service.js";
 import { createId, requireScope } from "../core-identity/security.js";
+import { generateFixedAssetRegister } from "../fixed-assets/service.js";
 import { generateInventoryValuationReport } from "../inventory/service.js";
 import { reportContentTypes, type ReportFormat } from "./render.js";
 import { generateReport, reportCatalog, reportTypes, type ReportFilters } from "./service.js";
@@ -13,13 +14,13 @@ const filterSchema = z.object({
   from: z.iso.date().optional(), to: z.iso.date().optional(), asOf: z.iso.date().optional(),
   accountId: z.string().min(1).optional(), contactId: z.string().min(1).optional(), projectId: z.string().min(1).optional(),
   budgetId: z.string().min(1).optional(), scenario: z.string().min(1).optional(), costCenterId: z.string().min(1).optional(), revenueSourceId: z.string().min(1).optional(),
-  productId: z.string().min(1).optional(), locationId: z.string().min(1).optional(),
+  productId: z.string().min(1).optional(), locationId: z.string().min(1).optional(), categoryId: z.string().min(1).optional(),
 });
 const exportInput = z.object({ format: z.enum(["json","csv","xlsx","pdf"]).default("csv"), filters: filterSchema.default({}) });
-type ExtendedReportFilters = z.infer<typeof filterSchema>;
+export type ExtendedReportFilters = z.infer<typeof filterSchema>;
 
 function queryFilters(c: { req: { query: (name: string) => string | undefined } }): ExtendedReportFilters {
-  const names = ["from","to","asOf","accountId","contactId","projectId","budgetId","scenario","costCenterId","revenueSourceId","productId","locationId"] as const;
+  const names = ["from","to","asOf","accountId","contactId","projectId","budgetId","scenario","costCenterId","revenueSourceId","productId","locationId","categoryId"] as const;
   const raw = Object.fromEntries(names.map((name) => [name,c.req.query(name)]).filter(([,value]) => value !== undefined && value !== ""));
   const parsed = filterSchema.safeParse(raw);
   if (!parsed.success) throw new AppError(422,"VALIDATION_ERROR","Invalid report filters",parsed.error.flatten());
@@ -28,12 +29,13 @@ function queryFilters(c: { req: { query: (name: string) => string | undefined } 
 }
 function assertReport(type: string) { if (!reportTypes.includes(type as never)) throw new AppError(404,"UNKNOWN_REPORT","Unknown report type"); }
 export function effectiveReportCatalog() {
-  const migrated = new Set(["budget-vs-actual","inventory-valuation"]);
+  const migrated = new Set(["budget-vs-actual","inventory-valuation","fixed-asset-register"]);
   return reportCatalog.map((item) => migrated.has(item.id) ? { ...item, available: true, dependency: undefined } : item);
 }
 export async function runExtendedReport(runtime: Runtime, organizationId: string, type: string, filters: ExtendedReportFilters) {
   if (type === "budget-vs-actual") return generateBudgetVsActualReport(runtime,organizationId,filters as BudgetReportFilters);
   if (type === "inventory-valuation") return generateInventoryValuationReport(runtime,organizationId,filters);
+  if (type === "fixed-asset-register") return generateFixedAssetRegister(runtime,organizationId,filters);
   return generateReport(runtime,organizationId,type,filters as ReportFilters);
 }
 

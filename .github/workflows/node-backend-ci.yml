@@ -71,4 +71,5 @@ jobs:
           grep -q '"key":"banking"' /tmp/root.json
           grep -q '"key":"budgets"' /tmp/root.json
           grep -q '"key":"inventory"' /tmp/root.json
+          grep -q '"key":"fixed-assets"' /tmp/root.json
           grep -q '"key":"reports"' /tmp/root.json
