@@ -17,7 +17,8 @@ import { reportsFeature } from "./reports/index.js";
 import { reportManagementFeature } from "./report-management/index.js";
 import { documentOutputFeature } from "./document-output/index.js";
 import { financeMaintenanceFeature } from "./finance-maintenance/index.js";
+import { integrationsFeature } from "./integrations/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature];
