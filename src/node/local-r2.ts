@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { Dirent, Stats } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile, readdir } from "node:fs/promises";
 import path from "node:path";
 
@@ -20,7 +21,7 @@ async function toBuffer(value: unknown): Promise<Buffer> {
     while (true) {
       const { value: chunk, done } = await reader.read();
       if (done) break;
-      if (chunk) chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk as Uint8Array);
+      if (chunk) chunks.push(chunk as Uint8Array);
     }
     return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
   }
@@ -48,7 +49,8 @@ export class LocalR2Bucket {
   }
   async get(key: string): Promise<R2ObjectBody | null> {
     const objectPath = safePath(this.root, key);
-    let body: Buffer; let fileStat;
+    let body: Buffer;
+    let fileStat: Stats;
     try { [body, fileStat] = await Promise.all([readFile(objectPath), stat(objectPath)]); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
     const metadata = await this.readMetadata(key);
@@ -73,7 +75,8 @@ export class LocalR2Bucket {
   async list(options?: { prefix?: string; limit?: number; cursor?: string }): Promise<R2Objects> {
     const prefix = options?.prefix ?? ""; const limit = options?.limit ?? 1000; const keys: string[] = [];
     const walk = async (directory: string): Promise<void> => {
-      let entries; try { entries = await readdir(directory, { withFileTypes: true }); } catch { return; }
+      let entries: Dirent[];
+      try { entries = await readdir(directory, { withFileTypes: true }); } catch { return; }
       for (const entry of entries) { if (entry.name === ".metadata") continue; const full = path.join(directory, entry.name); if (entry.isDirectory()) await walk(full); else keys.push(path.relative(this.root, full).split(path.sep).join("/")); }
     };
     await walk(this.root);

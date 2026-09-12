@@ -4,15 +4,25 @@ import type { Env } from "../types";
 import worker from "../index";
 import { PostgresD1Database } from "./postgres-d1";
 
+type SelfHostedQueueOptions = { contentType?: "text" | "bytes" | "json" | "v8"; delaySeconds?: number };
+type SelfHostedQueueRequest<T> = SelfHostedQueueOptions & { body: T };
+
 export class PostgresQueue<T> {
-  constructor(private readonly db: PostgresD1Database, readonly queueName: string, private readonly maxAttempts = 8) {}
-  async send(body: T, options?: QueueSendOptions): Promise<void> {
+  private readonly db: PostgresD1Database;
+  readonly queueName: string;
+  private readonly maxAttempts: number;
+  constructor(db: PostgresD1Database, queueName: string, maxAttempts = 8) {
+    this.db = db;
+    this.queueName = queueName;
+    this.maxAttempts = maxAttempts;
+  }
+  async send(body: T, options?: SelfHostedQueueOptions): Promise<void> {
     await this.db.prepare(`INSERT INTO selfhost_jobs
       (id, queue_name, payload, content_type, status, attempts, max_attempts, available_at)
       VALUES (?, ?, ?::jsonb, ?, 'queued', 0, ?, CURRENT_TIMESTAMP + (? * INTERVAL '1 second'))`)
       .bind(randomUUID(), this.queueName, JSON.stringify(body), options?.contentType ?? "json", this.maxAttempts, options?.delaySeconds ?? 0).run();
   }
-  async sendBatch(messages: Iterable<MessageSendRequest<T>>): Promise<void> { for (const message of messages) await this.send(message.body, message); }
+  async sendBatch(messages: Iterable<SelfHostedQueueRequest<T>>): Promise<void> { for (const message of messages) await this.send(message.body, message); }
 }
 
 type LeasedJob = { id: string; queue_name: string; payload: unknown; attempts: number; max_attempts: number; created_at: Date };

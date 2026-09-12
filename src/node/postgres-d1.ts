@@ -66,7 +66,14 @@ function meta(result: QueryResult): Record<string, unknown> {
 }
 
 export class PostgresD1Statement {
-  constructor(private readonly database: PostgresD1Database, readonly sql: string, readonly params: unknown[] = []) {}
+  private readonly database: PostgresD1Database;
+  readonly sql: string;
+  readonly params: unknown[];
+  constructor(database: PostgresD1Database, sql: string, params: unknown[] = []) {
+    this.database = database;
+    this.sql = sql;
+    this.params = params;
+  }
   bind(...params: unknown[]): PostgresD1Statement { return new PostgresD1Statement(this.database, this.sql, params); }
   private async execute(executor: PgExecutor = this.database.pool): Promise<QueryResult> {
     try { return await executor.query(translateD1Sql(this.sql), this.params); } catch (error) { throw postgresError(error); }
@@ -89,7 +96,7 @@ export class PostgresD1Statement {
     const result = await this.execute();
     const columns = result.fields.map((field) => field.name);
     const rows = result.rows.map((row: Record<string, unknown>) => columns.map((column) => row[column]) as T[]);
-    return options?.columnNames ? [columns as T[], ...rows] : rows;
+    return options?.columnNames ? [columns as unknown as T[], ...rows] : rows;
   }
   async executeWith(executor: PgExecutor): Promise<QueryResult> { return this.execute(executor); }
 }
