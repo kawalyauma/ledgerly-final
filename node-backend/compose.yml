@@ -1,0 +1,100 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ledgerly
+      POSTGRES_USER: ledgerly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerly-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledgerly -d ledgerly"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ledgerly}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ledgerly-minio-change-me}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build: .
+    restart: "no"
+    command: ["node", "dist/db/migrate.js"]
+    environment: &backend-env
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@postgres:5432/ledgerly
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: minio
+      S3_ENDPOINT: http://minio:9000
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-ledgerly}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ledgerly-minio-change-me}
+      S3_BUCKET: ledgerly
+      S3_FORCE_PATH_STYLE: "true"
+      S3_AUTO_CREATE_BUCKET: "true"
+      JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: .
+    restart: unless-stopped
+    command: ["node", "dist/server.js"]
+    environment: *backend-env
+    ports:
+      - "${LEDGERLY_API_PORT:-8080}:8080"
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  queue:
+    build: .
+    restart: unless-stopped
+    command: ["node", "dist/queue/worker.js"]
+    environment: *backend-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  scheduler:
+    build: .
+    restart: unless-stopped
+    command: ["node", "dist/scheduler/scheduler.js"]
+    environment: *backend-env
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

@@ -1,0 +1,22 @@
+[Unit]
+Description=Ledgerly Node Durable Queue Worker
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ledgerly
+Group=ledgerly
+WorkingDirectory=/opt/ledgerly/node-backend
+EnvironmentFile=/etc/ledgerly/node-backend.env
+ExecStart=/usr/bin/node dist/queue/worker.js
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ledgerly
+
+[Install]
+WantedBy=multi-user.target
