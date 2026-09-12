@@ -24,6 +24,26 @@
         <meta-data android:name="android.app.device_admin" android:resource="@xml/device_admin_receiver" />
         <intent-filter><action android:name="android.app.action.DEVICE_ADMIN_ENABLED" /></intent-filter>
       </receiver>
+
+      <!-- Android 12+ admin-integrated provisioning entry points used by KME/Android Enterprise. -->
+      <activity
+        android:name=".LedgerlyProvisioningActivity"
+        android:exported="true"
+        android:excludeFromRecents="true">
+        <intent-filter>
+          <action android:name="android.app.action.GET_PROVISIONING_MODE" />
+          <category android:name="android.intent.category.DEFAULT" />
+        </intent-filter>
+        <intent-filter>
+          <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
+          <category android:name="android.intent.category.DEFAULT" />
+        </intent-filter>
+        <intent-filter>
+          <action android:name="android.app.action.PROVISIONING_SUCCESSFUL" />
+          <category android:name="android.intent.category.DEFAULT" />
+        </intent-filter>
+      </activity>
+
       <receiver android:name=".CameraBootReceiver" android:enabled="true" android:exported="true" android:directBootAware="true">
         <intent-filter>
           <action android:name="android.intent.action.BOOT_COMPLETED" />
