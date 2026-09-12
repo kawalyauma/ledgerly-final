@@ -1,4 +1,12 @@
-import { Pool, type PoolClient, type QueryResult } from "pg";
+import { Pool, types as pgTypes, type PoolClient, type QueryResult } from "pg";
+
+// D1 exposes SQLite integers/numeric aggregates as JavaScript numbers and dates as strings.
+// Keep those shapes at the compatibility boundary so existing routes do not change contracts.
+pgTypes.setTypeParser(20, (value) => Number(value)); // int8 / COUNT / SUM(integer)
+pgTypes.setTypeParser(1700, (value) => Number(value)); // numeric
+pgTypes.setTypeParser(1082, (value) => value); // date
+pgTypes.setTypeParser(1114, (value) => value); // timestamp
+pgTypes.setTypeParser(1184, (value) => value); // timestamptz
 
 export type PgExecutor = Pool | PoolClient;
 

@@ -13,6 +13,9 @@ describe("self-hosted runtime compatibility", () => {
   it("translates SQLite datetime modifiers through the compatibility function", () => {
     expect(translateD1Sql("UPDATE jobs SET next_run_at=datetime(CURRENT_TIMESTAMP, ?) WHERE id=?")).toBe("UPDATE jobs SET next_run_at=ledgerly_datetime(CURRENT_TIMESTAMP, $1) WHERE id=$2");
   });
+  it("preserves INSERT OR IGNORE semantics with PostgreSQL conflict handling", () => {
+    expect(translateD1Sql("INSERT OR IGNORE INTO users (id,email) VALUES (?,?)")).toBe("INSERT INTO users (id,email) VALUES ($1,$2) ON CONFLICT DO NOTHING");
+  });
   it("validates required self-hosted environment", () => {
     expect(() => loadNodeConfig({ DATABASE_URL: "postgres://localhost/test", JWT_SECRET: "short" } as NodeJS.ProcessEnv)).toThrow(/JWT_SECRET/);
     expect(loadNodeConfig({ DATABASE_URL: "postgres://localhost/test", JWT_SECRET: "x".repeat(32) } as NodeJS.ProcessEnv).PORT).toBe(8787);
