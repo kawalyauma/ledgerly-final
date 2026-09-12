@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
@@ -61,7 +61,7 @@ export function createContactsRoutes(runtime: Runtime) {
     const source = c.req.query("source"), group = c.req.query("group"), channel = c.req.query("channel"), search = (c.req.query("search") ?? "").trim();
     if (source && source !== "ledgerly-core") return c.json({ data: [], pagination: { limit, offset, total: 0 } });
     if (channel) return c.json({ data: [], pagination: { limit, offset, total: 0 } });
-    const params: unknown[] = [p.organizationId];
+    const params: Array<string | number> = [p.organizationId];
     const conditions = ["c.organization_id=$1", "c.archived_at IS NULL"];
     if (group) { params.push(group); conditions.push(`c.type=$${params.length}`); }
     if (search) { params.push(`%${search}%`); conditions.push(`(c.name ILIKE $${params.length} OR COALESCE(c.email,'') ILIKE $${params.length} OR COALESCE(c.code,'') ILIKE $${params.length} OR EXISTS (SELECT 1 FROM contact_people cp2 WHERE cp2.organization_id=c.organization_id AND cp2.contact_id=c.id AND COALESCE(cp2.phone,'') ILIKE $${params.length}))`); }
@@ -84,7 +84,7 @@ export function createContactsRoutes(runtime: Runtime) {
 
   router.get("/", requireScope("contacts:read"), async (c) => {
     const p = c.get("principal"), { limit, offset } = pagination(c), type = c.req.query("type"), search = (c.req.query("search") ?? "").trim();
-    const params: unknown[] = [p.organizationId];
+    const params: Array<string | number> = [p.organizationId];
     const conditions = ["organization_id=$1", "archived_at IS NULL"];
     if (type) { params.push(type); conditions.push(`type=$${params.length}`); }
     if (search) { params.push(`%${search}%`); conditions.push(`(name ILIKE $${params.length} OR COALESCE(code,'') ILIKE $${params.length} OR COALESCE(email,'') ILIKE $${params.length})`); }
@@ -177,7 +177,7 @@ export function createContactsRoutes(runtime: Runtime) {
     return c.json({data:rows.rows});
   });
 
-  const addAddress = async (c: Parameters<Parameters<typeof router.post>[2]>[0]) => {
+  const addAddress = async (c: Context<AppEnv>) => {
     const parsed=addressInput.safeParse(await c.req.json().catch(()=>null));
     if (!parsed.success) throw new AppError(422,"VALIDATION_ERROR","Invalid address",parsed.error.flatten());
     const p=c.get("principal");
@@ -205,7 +205,7 @@ export function createContactsRoutes(runtime: Runtime) {
 
   router.delete("/:id/addresses/:addressId",requireScope("contacts:write"),async(c)=>{const p=c.get("principal"),r=await runtime.db.query("DELETE FROM contact_addresses WHERE id=$1 AND contact_id=$2 AND organization_id=$3",[c.req.param("addressId"),c.req.param("id"),p.organizationId]);if(!r.rowCount)throw new AppError(404,"NOT_FOUND","Contact address not found");return c.body(null,204);});
 
-  const addPerson = async (c: Parameters<Parameters<typeof router.post>[2]>[0]) => {
+  const addPerson = async (c: Context<AppEnv>) => {
     const parsed=personInput.safeParse(await c.req.json().catch(()=>null));
     if (!parsed.success) throw new AppError(422,"VALIDATION_ERROR","Invalid contact person",parsed.error.flatten());
     const p=c.get("principal");
