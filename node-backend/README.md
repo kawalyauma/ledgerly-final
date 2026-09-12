@@ -51,7 +51,17 @@ This directory is the independent self-hosted Ledgerly backend. It never imports
 - payment reversal with automatic allocation rollback and document balance restoration
 - fiscal-period-aware posting and reversal
 
-Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents` and `/api/v1/payments`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
+### Banking / Reconciliation
+- bank accounts linked to Finance Core ledger accounts
+- structured bank statement imports with exact-import and external-transaction deduplication
+- unmatched, matched and reconciled bank transaction states
+- safe matching only to posted journal lines on the correct bank ledger account, signed amount and currency
+- reconciliation previews with ledger balance, imported-statement balance and matched/unmatched counts
+- completed reconciliation snapshots with immutable reconciled transactions
+- bank charges and same-currency bank transfers through the journal engine
+- fiscal-period-aware bank charge and transfer posting
+
+Current migrated finance paths include `/api/v1/accounts`, `/api/v1/journals`, `/api/v1/fiscal-years`, `/api/v1/periods`, `/api/v1/contacts`, `/api/v1/documents`, `/api/v1/payments` and `/api/v1/banking`. Features not yet migrated remain unavailable from the Node backend until their own migration is completed.
 
 ## Local start
 

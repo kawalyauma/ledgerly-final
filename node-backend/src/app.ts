@@ -71,6 +71,10 @@ export function createApp(options: {
           INVALID_ALLOCATION_DOCUMENT: "Allocation document is not open or does not match the payment.",
           PAYMENT_OVER_ALLOCATION: "Allocations exceed the payment amount.",
           DOCUMENT_OVER_ALLOCATION: "Allocation exceeds the document outstanding balance.",
+          BANK_MATCH_LINE_INVALID: "A posted journal line is required for bank matching.",
+          BANK_MATCH_ACCOUNT_MISMATCH: "The journal line does not belong to the selected bank ledger account.",
+          BANK_MATCH_CURRENCY_MISMATCH: "The journal line currency does not match the bank account currency.",
+          BANK_MATCH_AMOUNT_MISMATCH: "The journal line signed amount does not match the bank transaction.",
         };
         const conflictMessages: Record<string, string> = {
           PAYMENT_NOT_POSTED: "Allocations can only be added to a posted payment.",
@@ -82,6 +86,11 @@ export function createApp(options: {
           DOCUMENT_JOURNAL_REQUIRED: "A posted document requires an accounting journal.",
           DOCUMENT_JOURNAL_NOT_POSTED: "The document accounting journal must be posted first.",
           DOCUMENT_JOURNAL_NOT_REVERSED: "The document accounting journal must be reversed before voiding the document.",
+          BANK_MATCH_STATE_INVALID: "Bank transaction match state is inconsistent.",
+          BANK_MATCH_REQUIRED: "Matched and reconciled bank transactions require a journal line.",
+          BANK_RECONCILIATION_REQUIRED: "A reconciled bank transaction requires a reconciliation record.",
+          RECONCILIATION_DIFFERENCE: "A reconciliation can only complete at zero difference.",
+          RECONCILIATION_UNMATCHED_TRANSACTIONS: "All statement transactions must be matched before reconciliation can complete.",
         };
         if (validationMessages[code]) return c.json({ error: { code, message: validationMessages[code], details: { entityId }, requestId } }, 422);
         if (conflictMessages[code]) return c.json({ error: { code, message: conflictMessages[code], details: { entityId }, requestId } }, 409);
