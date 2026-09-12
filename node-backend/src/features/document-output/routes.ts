@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 import { z } from "zod";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
@@ -11,26 +11,79 @@ function text(value: unknown) { return value == null ? "" : String(value); }
 function amount(currency: string, minor: unknown) { return `${currency} ${(Number(minor ?? 0)/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`; }
 
 export function createDocumentOutputRoutes(runtime: Runtime) {
-  const router=new Hono<AppEnv>();
-  router.get("/:id/pdf",requireScope("documents:read"),async(c)=>{
-    const p=c.get("principal"),id=c.req.param("id");
-    const d=(await runtime.db.query<any>(`SELECT d.type,d.number,d.issue_date::text AS "issueDate",d.due_date::text AS "dueDate",d.currency,d.subtotal_minor::float8 AS "subtotalMinor",d.tax_minor::float8 AS "taxMinor",d.total_minor::float8 AS "totalMinor",d.status,c.name AS "contactName",o.name AS "organizationName",o.legal_name AS "legalName",o.address,o.tax_registration_number AS "taxNumber",o.branding FROM documents d JOIN contacts c ON c.id=d.contact_id AND c.organization_id=d.organization_id JOIN organizations o ON o.id=d.organization_id WHERE d.id=$1 AND d.organization_id=$2`,[id,p.organizationId])).rows[0];
-    if(!d)throw new AppError(404,"NOT_FOUND","Document not found");
-    const lines=(await runtime.db.query<any>(`SELECT description,quantity_micros::float8 AS "quantityMicros",unit_price_minor::float8 AS "unitPriceMinor",tax_minor::float8 AS "taxMinor",total_minor::float8 AS "totalMinor" FROM document_lines WHERE document_id=$1 AND organization_id=$2 ORDER BY created_at,id`,[id,p.organizationId])).rows;
-    const branding=d.branding??{},address=d.address??{},pdf=await PDFDocument.create(),font=await pdf.embedFont(StandardFonts.Helvetica),bold=await pdf.embedFont(StandardFonts.HelveticaBold),page=pdf.addPage([595,842]),accent=rgb(.04,.32,.25),margin=44,width=595;
-    let y=790; let logo:any;
-    try{const match=text(branding.logoDataUrl).match(/^data:image\/(png|jpeg);base64,(.+)$/);if(match)logo=match[1]==="png"?await pdf.embedPng(match[2]!):await pdf.embedJpg(match[2]!);}catch{}
-    if(logo)page.drawImage(logo,{x:margin,y:y-45,width:90,height:45});const ox=logo?150:margin;
-    page.drawText(text(d.legalName||d.organizationName),{x:ox,y,font:bold,size:16,color:accent});
+  const router = new Hono<AppEnv>();
+  router.get("/:id/pdf", requireScope("documents:read"), async (c) => {
+    const p = c.get("principal"), id = c.req.param("id");
+    const d = (await runtime.db.query<any>(`SELECT d.type,d.number,d.issue_date::text AS "issueDate",d.due_date::text AS "dueDate",d.currency,d.subtotal_minor::float8 AS "subtotalMinor",d.tax_minor::float8 AS "taxMinor",d.total_minor::float8 AS "totalMinor",d.status,c.name AS "contactName",o.name AS "organizationName",o.legal_name AS "legalName",o.address,o.tax_registration_number AS "taxNumber",o.branding FROM documents d JOIN contacts c ON c.id=d.contact_id AND c.organization_id=d.organization_id JOIN organizations o ON o.id=d.organization_id WHERE d.id=$1 AND d.organization_id=$2`, [id, p.organizationId])).rows[0];
+    if (!d) throw new AppError(404, "NOT_FOUND", "Document not found");
+    const lines = (await runtime.db.query<any>(`SELECT description,quantity_micros::float8 AS "quantityMicros",unit_price_minor::float8 AS "unitPriceMinor",tax_minor::float8 AS "taxMinor",total_minor::float8 AS "totalMinor" FROM document_lines WHERE document_id=$1 AND organization_id=$2 ORDER BY created_at,id`, [id, p.organizationId])).rows;
+    const branding = d.branding ?? {}, address = d.address ?? {}, pdf = await PDFDocument.create();
+    const font = await pdf.embedFont(StandardFonts.Helvetica), bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const accent = rgb(.04,.32,.25), margin = 44, width = 595, widths = [235,45,85,70,72], heads = ["Description","Qty","Unit price","Tax","Total"];
+    let page: PDFPage = pdf.addPage([595,842]), y = 790;
+    const drawTableHeader = () => {
+      page.drawRectangle({x:margin,y:y-18,width:width-margin*2,height:24,color:accent});
+      let x = margin;
+      heads.forEach((h,i) => { page.drawText(h,{x:x+5,y:y-9,font:bold,size:7,color:rgb(1,1,1)}); x += widths[i]!; });
+      y -= 25;
+    };
+    const newLinePage = () => {
+      page = pdf.addPage([595,842]);
+      y = 790;
+      page.drawText(`${text(d.type).replaceAll("_"," ").toUpperCase()} ${text(d.number)}`, {x:margin,y,font:bold,size:11,color:accent});
+      y -= 30;
+      drawTableHeader();
+    };
+    let logo: any;
+    try {
+      const match = text(branding.logoDataUrl).match(/^data:image\/(png|jpeg);base64,(.+)$/);
+      if (match) logo = match[1] === "png" ? await pdf.embedPng(match[2]!) : await pdf.embedJpg(match[2]!);
+    } catch {}
+    if (logo) page.drawImage(logo,{x:margin,y:y-45,width:90,height:45});
+    const ox = logo ? 150 : margin;
+    page.drawText(text(d.legalName || d.organizationName),{x:ox,y,font:bold,size:16,color:accent});
     [address.formatted,d.taxNumber&&`Tax ID: ${d.taxNumber}`,branding.email,branding.phone,branding.website].filter(Boolean).slice(0,3).forEach((v,i)=>page.drawText(text(v).slice(0,70),{x:ox,y:y-15-i*10,font,size:7,color:rgb(.4,.45,.5)}));
-    y-=70;page.drawLine({start:{x:margin,y},end:{x:width-margin,y},thickness:2,color:accent});y-=32;
-    page.drawText(text(d.type).replaceAll("_"," ").toUpperCase(),{x:margin,y,font:bold,size:22,color:accent});page.drawText(text(d.number),{x:width-margin-bold.widthOfTextAtSize(text(d.number),13),y:y+4,font:bold,size:13});
-    y-=38;page.drawText("BILL TO",{x:margin,y,font:bold,size:7,color:rgb(.45,.5,.55)});page.drawText(text(d.contactName),{x:margin,y:y-17,font:bold,size:12});page.drawText(`Issue: ${d.issueDate}   Due: ${d.dueDate||"-"}`,{x:340,y,font,size:8});page.drawText(`Status: ${text(d.status).toUpperCase()}`,{x:340,y:y-16,font:bold,size:8,color:accent});
-    y-=64;const widths=[235,45,85,70,72],heads=["Description","Qty","Unit price","Tax","Total"];page.drawRectangle({x:margin,y:y-18,width:width-margin*2,height:24,color:accent});let x=margin;heads.forEach((h,i)=>{page.drawText(h,{x:x+5,y:y-9,font:bold,size:7,color:rgb(1,1,1)});x+=widths[i]!});y-=25;
-    for(const [i,l] of lines.entries()){if(y<95){y=790;pdf.addPage([595,842]);}if(i%2)page.drawRectangle({x:margin,y:y-17,width:width-margin*2,height:21,color:rgb(.96,.97,.98)});const vals=[text(l.description).slice(0,42),String(Number(l.quantityMicros)/1e6),amount(d.currency,l.unitPriceMinor),amount(d.currency,l.taxMinor),amount(d.currency,l.totalMinor)];let xx=margin;vals.forEach((v,j)=>{page.drawText(v.slice(0,18+(j===0?24:0)),{x:xx+5,y:y-8,font:j===4?bold:font,size:7});xx+=widths[j]!});y-=21;}
-    y-=20;for(const[label,val]of[["Subtotal",d.subtotalMinor],["Tax",d.taxMinor]] as const){page.drawText(label,{x:370,y,font,size:9});const v=amount(d.currency,val);page.drawText(v,{x:width-margin-font.widthOfTextAtSize(v,9),y,font,size:9});y-=18;}
-    page.drawRectangle({x:360,y:y-10,width:width-margin-360,height:30,color:accent});page.drawText("TOTAL",{x:370,y,font:bold,size:10,color:rgb(1,1,1)});const total=amount(d.currency,d.totalMinor);page.drawText(total,{x:width-margin-bold.widthOfTextAtSize(total,10),y,font:bold,size:10,color:rgb(1,1,1)});if(branding.footer)page.drawText(text(branding.footer).slice(0,110),{x:margin,y:35,font,size:7,color:rgb(.4,.45,.5)});
-    const bytes=await pdf.save();c.header("Content-Type","application/pdf");c.header("Content-Disposition",`inline; filename="${text(d.number).replaceAll('"','')}.pdf"`);return c.body(bytes);
+    y -= 70;
+    page.drawLine({start:{x:margin,y},end:{x:width-margin,y},thickness:2,color:accent});
+    y -= 32;
+    page.drawText(text(d.type).replaceAll("_"," ").toUpperCase(),{x:margin,y,font:bold,size:22,color:accent});
+    page.drawText(text(d.number),{x:width-margin-bold.widthOfTextAtSize(text(d.number),13),y:y+4,font:bold,size:13});
+    y -= 38;
+    page.drawText("BILL TO",{x:margin,y,font:bold,size:7,color:rgb(.45,.5,.55)});
+    page.drawText(text(d.contactName),{x:margin,y:y-17,font:bold,size:12});
+    page.drawText(`Issue: ${d.issueDate}   Due: ${d.dueDate||"-"}`,{x:340,y,font,size:8});
+    page.drawText(`Status: ${text(d.status).toUpperCase()}`,{x:340,y:y-16,font:bold,size:8,color:accent});
+    y -= 64;
+    drawTableHeader();
+    for (const [i,l] of lines.entries()) {
+      if (y < 95) newLinePage();
+      if (i % 2) page.drawRectangle({x:margin,y:y-17,width:width-margin*2,height:21,color:rgb(.96,.97,.98)});
+      const vals = [text(l.description).slice(0,42),String(Number(l.quantityMicros)/1e6),amount(d.currency,l.unitPriceMinor),amount(d.currency,l.taxMinor),amount(d.currency,l.totalMinor)];
+      let xx = margin;
+      vals.forEach((v,j)=>{page.drawText(v.slice(0,18+(j===0?24:0)),{x:xx+5,y:y-8,font:j===4?bold:font,size:7});xx+=widths[j]!;});
+      y -= 21;
+    }
+    if (y < 105) {
+      page = pdf.addPage([595,842]);
+      y = 790;
+      page.drawText(`${text(d.type).replaceAll("_"," ").toUpperCase()} ${text(d.number)} — totals`, {x:margin,y,font:bold,size:11,color:accent});
+      y -= 38;
+    } else y -= 20;
+    for (const [label,val] of [["Subtotal",d.subtotalMinor],["Tax",d.taxMinor]] as const) {
+      page.drawText(label,{x:370,y,font,size:9});
+      const v = amount(d.currency,val);
+      page.drawText(v,{x:width-margin-font.widthOfTextAtSize(v,9),y,font,size:9});
+      y -= 18;
+    }
+    page.drawRectangle({x:360,y:y-10,width:width-margin-360,height:30,color:accent});
+    page.drawText("TOTAL",{x:370,y,font:bold,size:10,color:rgb(1,1,1)});
+    const total = amount(d.currency,d.totalMinor);
+    page.drawText(total,{x:width-margin-bold.widthOfTextAtSize(total,10),y,font:bold,size:10,color:rgb(1,1,1)});
+    if (branding.footer) page.drawText(text(branding.footer).slice(0,110),{x:margin,y:35,font,size:7,color:rgb(.4,.45,.5)});
+    const bytes = await pdf.save();
+    c.header("Content-Type","application/pdf");
+    c.header("Content-Disposition",`inline; filename="${text(d.number).replaceAll('"','')}.pdf"`);
+    return c.body(bytes);
   });
   return router;
 }
