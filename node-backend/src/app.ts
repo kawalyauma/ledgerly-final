@@ -4,6 +4,7 @@ import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
 import type { BackendFeature } from "./features/types.js";
 import type { HealthChecker } from "./health/service.js";
+import type { AppEnv } from "./http/types.js";
 import type { Runtime } from "./runtime.js";
 
 export function createApp(options: {
@@ -13,7 +14,7 @@ export function createApp(options: {
   features?: BackendFeature[];
   runtime?: Runtime;
 }) {
-  const app = new Hono();
+  const app = new Hono<AppEnv>();
   app.use("*", requestId());
   app.use("*", secureHeaders());
   app.use("/api/*", cors({

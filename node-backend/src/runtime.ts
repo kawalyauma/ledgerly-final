@@ -1,4 +1,4 @@
-import { createClient, type RedisClientType } from "redis";
+import { createClient } from "redis";
 import type { Pool } from "pg";
 import { parseEnv, type AppConfig } from "./config/env.js";
 import { createPostgresPool } from "./db/pool.js";
@@ -7,11 +7,13 @@ import { PostgresQueue } from "./queue/postgres-queue.js";
 import { createStorage } from "./storage/index.js";
 import type { ObjectStorage } from "./storage/types.js";
 
+export type RedisClient = ReturnType<typeof createClient>;
+
 export type Runtime = {
   config: AppConfig;
   logger: Logger;
   db: Pool;
-  cache: RedisClientType;
+  cache: RedisClient;
   storage: ObjectStorage;
   queue: PostgresQueue;
   close(): Promise<void>;

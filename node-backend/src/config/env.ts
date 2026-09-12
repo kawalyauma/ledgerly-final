@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-const boolString = z.enum(["true", "false"]).transform((value) => value === "true");
+function envBoolean(defaultValue: boolean) {
+  return z.union([z.boolean(), z.enum(["true", "false"])]).optional().transform((value) => {
+    if (value === undefined) return defaultValue;
+    return typeof value === "boolean" ? value : value === "true";
+  });
+}
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -9,7 +14,7 @@ const schema = z.object({
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   DATABASE_URL: z.string().min(1),
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
-  DATABASE_SSL: boolString.default("false"),
+  DATABASE_SSL: envBoolean(false),
   REDIS_URL: z.string().url().default("redis://127.0.0.1:6379"),
   STORAGE_DRIVER: z.enum(["local", "minio"]).default("local"),
   STORAGE_LOCAL_ROOT: z.string().min(1).default("./data/storage"),
@@ -18,8 +23,8 @@ const schema = z.object({
   S3_ACCESS_KEY: z.string().min(1).optional(),
   S3_SECRET_KEY: z.string().min(1).optional(),
   S3_BUCKET: z.string().min(1).default("ledgerly"),
-  S3_FORCE_PATH_STYLE: boolString.default("true"),
-  S3_AUTO_CREATE_BUCKET: boolString.default("true"),
+  S3_FORCE_PATH_STYLE: envBoolean(true),
+  S3_AUTO_CREATE_BUCKET: envBoolean(true),
   JWT_SECRET: z.string().min(32),
   JWT_ISSUER: z.string().min(1).default("ledgerly"),
   JWT_AUDIENCE: z.string().min(1).default("ledgerly-api"),
@@ -37,7 +42,7 @@ const schema = z.object({
 
 export type AppConfig = z.infer<typeof schema>;
 
-export function parseEnv(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function parseEnv(env: NodeJS.ProcessEnv | Record<string, unknown> = process.env): AppConfig {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
     const details = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
