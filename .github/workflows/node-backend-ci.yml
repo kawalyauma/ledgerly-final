@@ -73,4 +73,9 @@ jobs:
           grep -q '"key":"inventory"' /tmp/root.json
           grep -q '"key":"fixed-assets"' /tmp/root.json
           grep -q '"key":"dimensions-projects"' /tmp/root.json
+          grep -q '"key":"sales-purchasing"' /tmp/root.json
+          grep -q '"key":"tax"' /tmp/root.json
+          grep -q '"key":"closing"' /tmp/root.json
+          grep -q '"key":"compliance"' /tmp/root.json
           grep -q '"key":"reports"' /tmp/root.json
+          grep -q '"key":"report-management"' /tmp/root.json
