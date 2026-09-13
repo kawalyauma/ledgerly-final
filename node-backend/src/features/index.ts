@@ -22,7 +22,8 @@ import { modulesFeature } from "./modules/index.js";
 import { financeMobileFeature } from "./finance-mobile/index.js";
 import { mobileSyncFeature } from "./mobile-sync/index.js";
 import { schoolFeature } from "./school-management/index.js";
+import { booksFeature } from "./books/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature];
