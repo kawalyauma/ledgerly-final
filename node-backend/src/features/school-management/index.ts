@@ -14,6 +14,7 @@ import { createSchoolFeeParityRoutes } from "./fees-parity.js";
 import { createSchoolFeeReportRoutes } from "./fees-reports.js";
 import { createSchoolFeeOperationRoutes } from "./fees-operations.js";
 import { createSchoolFeeBillingIntegrityRoutes } from "./fees-billing.js";
+import { sweepSchoolFeeInstallments } from "./fees-jobs.js";
 import { createAttendanceRoutes } from "./attendance.js";
 import { createClinicRoutes } from "./clinic.js";
 import { createClinicRecordRoutes } from "./clinic-records.js";
@@ -21,7 +22,7 @@ import { createSchoolIntegrityRoutes } from "./integrity.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
-  version: "3.7.0",
+  version: "3.8.0",
   mount(app,runtime){
     app.route("/api/v1/school",createSchoolIntegrityRoutes(runtime));
     app.route("/api/v1/school",createSchoolRoutes(runtime));
@@ -43,4 +44,6 @@ export const schoolFeature: BackendFeature = {
     app.route("/api/v1/school/clinic",createClinicRecordRoutes(runtime));
     app.route("/api/v1/school/clinic",createClinicRoutes(runtime));
   },
+  registerJobs(registry){registry.register("school.fees.installment_sweep",sweepSchoolFeeInstallments);},
+  schedules:[{name:"school-fee-installment-sweep",cron:"15 0 * * *",kind:"school.fees.installment_sweep",queue:"school",maxAttempts:3}],
 };
