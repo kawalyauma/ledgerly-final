@@ -42,7 +42,7 @@ const statusTone = (status: unknown): "success" | "warning" | "danger" | "neutra
   if (["pending", "initiating", "processing"].includes(value)) return "warning";
   return "neutral";
 };
-const reference = (studentId: string) => `WEB-${Date.now()}-${studentId.slice(-8)}`.slice(0, 250);
+const reference = (studentId: string) => `WEB-${Date.now()}-${studentId.slice(-8)}-${Math.random().toString(36).slice(2, 8)}`.slice(0, 250);
 
 export function SchoolPayPage() {
   const { principal } = useAuth();
@@ -63,6 +63,7 @@ export function SchoolPayPage() {
   const [reason, setReason] = useState("School fees payment");
   const [eventType, setEventType] = useState<"SCHOOL_FEES" | "OTHER_FEES">("SCHOOL_FEES");
   const [method, setMethod] = useState<"request" | "register">("request");
+  const [attemptReference, setAttemptReference] = useState("");
   const [reconcileDate, setReconcileDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   const studentOptions = useMemo(() => students.map(student => ({
@@ -70,6 +71,8 @@ export function SchoolPayPage() {
     label: `${student.admissionNumber || student.studentNumber || "No admission no."} · ${nameOf(student)}`,
     keywords: `${student.admissionNumber || ""} ${student.studentNumber || ""} ${nameOf(student)}`,
   })), [students]);
+
+  const changePayment = (change: () => void) => { setAttemptReference(""); change(); };
 
   async function load() {
     setLoading(true); setError("");
@@ -95,16 +98,18 @@ export function SchoolPayPage() {
     if (!Number.isSafeInteger(wholeAmount) || wholeAmount <= 0) return setError("Enter a positive whole UGX amount.");
     if (!reason.trim()) return setError("Enter the payment reason.");
     if (method === "request" && phone.trim().length < 7) return setError("Enter the payer phone number for an instant debit request.");
+    const externalReference = attemptReference || reference(studentId);
+    if (!attemptReference) setAttemptReference(externalReference);
     setBusy(true); setError(""); setMessage("");
     try {
-      const base = { studentPaymentCode: studentId, externalReference: reference(studentId), amount: wholeAmount, reason: reason.trim(), eventType };
+      const base = { studentPaymentCode: studentId, externalReference, amount: wholeAmount, reason: reason.trim(), eventType };
       const created = method === "request"
         ? await post<Intent>("/schoolpay/adhoc/request", { ...base, phoneNumber: phone.trim() })
         : await post<Intent>("/schoolpay/adhoc/register", base);
       setMessage(method === "request"
         ? `SchoolPay debit request sent${created.paymentReference ? ` · ${created.paymentReference}` : ""}. Confirm the prompt on the payer phone.`
         : `SchoolPay payment registered${created.paymentReference ? ` · ${created.paymentReference}` : ""}.`);
-      setAmount("");
+      setAmount(""); setAttemptReference("");
       await load();
       setTab("payments");
     } catch (e) { setError(errorText(e)); }
@@ -163,12 +168,12 @@ export function SchoolPayPage() {
         <div className="school-page-head" style={{marginBottom:16}}><div><h2>Collect with SchoolPay</h2><p>Instant debit sends a prompt to the payer phone. Register payment creates a SchoolPay reference without a phone debit prompt.</p></div></div>
         {!write && <Notice tone="warning">Your account can view SchoolPay activity but needs the school:write permission to initiate a collection.</Notice>}
         <div className="form-grid">
-          <Field label="Student"><SearchableSelect value={studentId} onChange={setStudentId} options={studentOptions} placeholder="Select student…" searchPlaceholder="Search name or admission number" ariaLabel="Student"/></Field>
-          <Field label="Amount (UGX)" hint="SchoolPay accepts whole Uganda shilling amounts."><input inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value.replace(/[^0-9]/g, ""))} placeholder="e.g. 150000"/></Field>
-          <Field label="Collection method"><select value={method} onChange={e => setMethod(e.target.value as "request" | "register")}><option value="request">Instant debit request</option><option value="register">Register SchoolPay payment</option></select></Field>
-          <Field label="Fee type"><select value={eventType} onChange={e => setEventType(e.target.value as "SCHOOL_FEES" | "OTHER_FEES")}><option value="SCHOOL_FEES">School fees</option><option value="OTHER_FEES">Other / supplementary fee</option></select></Field>
-          {method === "request" && <Field label="Payer phone number" hint="Use the number that should receive the SchoolPay payment prompt."><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. 0772 123 456"/></Field>}
-          <Field label="Reason"><input value={reason} onChange={e => setReason(e.target.value)} maxLength={500}/></Field>
+          <Field label="Student"><SearchableSelect value={studentId} onChange={value => changePayment(() => setStudentId(value))} options={studentOptions} placeholder="Select student…" searchPlaceholder="Search name or admission number" ariaLabel="Student"/></Field>
+          <Field label="Amount (UGX)" hint="SchoolPay accepts whole Uganda shilling amounts."><input inputMode="numeric" value={amount} onChange={e => changePayment(() => setAmount(e.target.value.replace(/[^0-9]/g, "")))} placeholder="e.g. 150000"/></Field>
+          <Field label="Collection method"><select value={method} onChange={e => changePayment(() => setMethod(e.target.value as "request" | "register"))}><option value="request">Instant debit request</option><option value="register">Register SchoolPay payment</option></select></Field>
+          <Field label="Fee type"><select value={eventType} onChange={e => changePayment(() => setEventType(e.target.value as "SCHOOL_FEES" | "OTHER_FEES"))}><option value="SCHOOL_FEES">School fees</option><option value="OTHER_FEES">Other / supplementary fee</option></select></Field>
+          {method === "request" && <Field label="Payer phone number" hint="Use the number that should receive the SchoolPay payment prompt."><input type="tel" value={phone} onChange={e => changePayment(() => setPhone(e.target.value))} placeholder="e.g. 0772 123 456"/></Field>}
+          <Field label="Reason"><input value={reason} onChange={e => changePayment(() => setReason(e.target.value))} maxLength={500}/></Field>
         </div>
         <div className="heading-actions" style={{marginTop:16,justifyContent:"flex-start"}}><Button type="submit" disabled={!write || busy}>{method === "request" ? <><Send size={16}/> {busy ? "Sending…" : "Send debit request"}</> : <><CheckCircle2 size={16}/> {busy ? "Registering…" : "Register payment"}</>}</Button></div>
       </form>
