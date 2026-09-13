@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Bot, CheckCircle2, Clock3, MessageSquare, Play, Settings2, ShieldCheck, Users } from "lucide-react";
+import { Bot, CheckCircle2, Clock3, MessageSquare, Play, Send, Settings2, ShieldCheck, Users } from "lucide-react";
 import { errorText, get, patch, post } from "../../../web/api";
 
 type Agent = {
@@ -39,15 +39,16 @@ export function AgenticEmployeesPage() {
 
   async function refresh() {
     try {
-      const [nextAgents, nextTasks, nextApprovals, nextSettings] = await Promise.all([
+      const [nextAgents, nextTasks, pendingApprovals, approvedApprovals, nextSettings] = await Promise.all([
         get<Agent[]>("/agentic-employees/agents"),
         get<Task[]>("/agentic-employees/tasks"),
-        get<Approval[]>("/agentic-employees/approvals"),
+        get<Approval[]>("/agentic-employees/approvals?status=pending"),
+        get<Approval[]>("/agentic-employees/approvals?status=approved"),
         get<Settings>("/agentic-employees/settings"),
       ]);
       setAgents(nextAgents);
       setTasks(nextTasks);
-      setApprovals(nextApprovals);
+      setApprovals([...pendingApprovals, ...approvedApprovals]);
       setSettings(nextSettings);
       if (nextAgents.length && !nextAgents.some(item => item.key === selected)) setSelected(nextAgents[0].key);
     } catch (err) {
@@ -114,6 +115,20 @@ export function AgenticEmployeesPage() {
     try {
       await post(`/agentic-employees/approvals/${id}/${decision}`, {});
       await refresh();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function execute(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await post(`/agentic-employees/approvals/${id}/execute`, {});
+      await refresh();
+      await openActivity();
     } catch (err) {
       setError(errorText(err));
     } finally {
@@ -213,9 +228,12 @@ export function AgenticEmployeesPage() {
       {!tasks.length && <p>No tasks yet.</p>}
     </div></div>}
 
-    {tab === "approvals" && <div className="ae-panel"><h2>Human approval queue</h2><p>Sensitive actions stop here. Approval checks the reviewer's Ledgerly permissions and does not itself claim the action was sent or executed.</p><div className="ae-list">
-      {approvals.map(approval => <div key={approval.id}><ShieldCheck /><div><b>{approval.actionType}</b><small>{approval.agentKey} · requires {approval.requiredScope}</small><pre>{JSON.stringify(approval.payload, null, 2)}</pre><div className="ae-actions"><button disabled={busy} onClick={() => void decide(approval.id, "approve")}><CheckCircle2 size={15} />Approve</button><button className="secondary" disabled={busy} onClick={() => void decide(approval.id, "reject")}>Reject</button></div></div></div>)}
-      {!approvals.length && <p>No approvals waiting.</p>}
+    {tab === "approvals" && <div className="ae-panel"><h2>Human approval & execution queue</h2><p>Sensitive actions use two steps: a permitted human approves the proposal, then explicitly executes it through the owning Ledgerly module.</p><div className="ae-list">
+      {approvals.map(approval => <div key={approval.id}><ShieldCheck /><div><b>{approval.actionType}</b><small>{approval.agentKey} · {approval.status} · requires {approval.requiredScope}</small><pre>{JSON.stringify(approval.payload, null, 2)}</pre><div className="ae-actions">
+        {approval.status === "pending" && <><button disabled={busy} onClick={() => void decide(approval.id, "approve")}><CheckCircle2 size={15} />Approve</button><button className="secondary" disabled={busy} onClick={() => void decide(approval.id, "reject")}>Reject</button></>}
+        {approval.status === "approved" && <button disabled={busy} onClick={() => void execute(approval.id)}><Send size={15} />Execute approved action</button>}
+      </div></div></div>)}
+      {!approvals.length && <p>No approvals waiting for review or execution.</p>}
     </div></div>}
 
     {tab === "activity" && <div className="ae-panel"><h2>Audit & tool activity</h2><div className="ae-list">
