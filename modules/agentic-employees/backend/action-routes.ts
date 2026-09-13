@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { MiddlewareHandler } from "hono";
 import type { AppVariables, Env } from "../../../src/types";
 import { AppError } from "../../../src/lib/errors";
 import { requireScope } from "../../../src/lib/auth";
@@ -6,88 +7,18 @@ import { createId } from "../../../src/lib/ids";
 import { executeApprovedAction } from "./executor";
 
 export const agenticActionRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
+const actionOperator:MiddlewareHandler<{Bindings:Env;Variables:AppVariables}>=async(c,next)=>{const p=c.get("principal");if(p.role==="owner"||p.role==="admin"||p.scopes.some(scope=>scope.endsWith(":write"))){await next();return;}throw new AppError(403,"FORBIDDEN","A Ledgerly write permission is required to operate AI actions");};
 
-async function actionRow(db:D1Database,organizationId:string,id:string){
-  const row=await db.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,
-    required_scope AS requiredScope,payload_json AS payloadJson,idempotency_key AS idempotencyKey,status,approval_id AS approvalId,
-    result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt
-    FROM ae_actions WHERE id=? AND organization_id=?`).bind(id,organizationId).first<any>();
-  if(!row)throw new AppError(404,"NOT_FOUND","AI action not found");
-  return{...row,payload:JSON.parse(row.payloadJson||"{}")};
-}
+async function actionRow(db:D1Database,organizationId:string,id:string){const row=await db.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,required_scope AS requiredScope,payload_json AS payloadJson,idempotency_key AS idempotencyKey,status,approval_id AS approvalId,result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt FROM ae_actions WHERE id=? AND organization_id=?`).bind(id,organizationId).first<any>();if(!row)throw new AppError(404,"NOT_FOUND","AI action not found");return{...row,payload:JSON.parse(row.payloadJson||"{}")};}
 
-agenticActionRoutes.get("/actions",requireScope("school:read"),async c=>{
-  const p=c.get("principal"),status=c.req.query("status")||"";
-  const q=status
-    ? c.env.FINANCE_DB.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,required_scope AS requiredScope,
-      payload_json AS payloadJson,status,approval_id AS approvalId,result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt
-      FROM ae_actions WHERE organization_id=? AND status=? ORDER BY created_at DESC LIMIT 150`).bind(p.organizationId,status)
-    : c.env.FINANCE_DB.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,required_scope AS requiredScope,
-      payload_json AS payloadJson,status,approval_id AS approvalId,result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt
-      FROM ae_actions WHERE organization_id=? ORDER BY created_at DESC LIMIT 150`).bind(p.organizationId);
-  const r=await q.all<any>();return c.json({data:r.results.map(x=>({...x,payload:JSON.parse(x.payloadJson||"{}"),payloadJson:undefined}))});
-});
+agenticActionRoutes.get("/actions",requireScope("school:read"),async c=>{const p=c.get("principal"),status=c.req.query("status")||"";const q=status?c.env.FINANCE_DB.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,required_scope AS requiredScope,payload_json AS payloadJson,status,approval_id AS approvalId,result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt FROM ae_actions WHERE organization_id=? AND status=? ORDER BY created_at DESC LIMIT 150`).bind(p.organizationId,status):c.env.FINANCE_DB.prepare(`SELECT id,event_id AS eventId,reaction_id AS reactionId,agent_key AS agentKey,action_type AS actionType,title,summary,required_scope AS requiredScope,payload_json AS payloadJson,status,approval_id AS approvalId,result_entity_type AS resultEntityType,result_entity_id AS resultEntityId,failure_text AS failureText,created_at AS createdAt,updated_at AS updatedAt FROM ae_actions WHERE organization_id=? ORDER BY created_at DESC LIMIT 150`).bind(p.organizationId);const r=await q.all<any>();return c.json({data:r.results.map(x=>({...x,payload:JSON.parse(x.payloadJson||"{}"),payloadJson:undefined}))});});
 
-agenticActionRoutes.post("/actions/:id/prepare",requireScope("school:write"),async c=>{
-  const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(row.status!=="suggested")throw new AppError(409,"INVALID_STATE","Only a suggested action can be prepared");
-  await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='prepared',prepared_by=?,prepared_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-    WHERE id=? AND organization_id=? AND status='suggested'`).bind(p.userId,row.id,p.organizationId).run();
-  return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});
-});
+agenticActionRoutes.post("/actions/:id/prepare",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(row.status!=="suggested")throw new AppError(409,"INVALID_STATE","Only a suggested action can be prepared");await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='prepared',prepared_by=?,prepared_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='suggested'`).bind(p.userId,row.id,p.organizationId).run();return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});});
 
-agenticActionRoutes.post("/actions/:id/request-approval",requireScope("school:write"),async c=>{
-  const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(row.status!=="prepared")throw new AppError(409,"INVALID_STATE","Prepare the action before requesting approval");
-  const approvalId=createId("aaa");
-  await c.env.FINANCE_DB.batch([
-    c.env.FINANCE_DB.prepare(`INSERT INTO ae_approvals(id,organization_id,agent_key,requested_by,action_type,required_scope,payload_json,status)
-      VALUES (?,?,?,?,?,?,?,'pending')`).bind(approvalId,p.organizationId,row.agentKey,p.userId,row.actionType,row.requiredScope,JSON.stringify(row.payload)),
-    c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='awaiting_approval',approval_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='prepared'`)
-      .bind(approvalId,row.id,p.organizationId),
-  ]);
-  return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});
-});
+agenticActionRoutes.post("/actions/:id/request-approval",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(row.status!=="prepared")throw new AppError(409,"INVALID_STATE","Prepare the action before requesting approval");const approvalId=createId("aaa");await c.env.FINANCE_DB.batch([c.env.FINANCE_DB.prepare(`INSERT INTO ae_approvals(id,organization_id,agent_key,requested_by,action_type,required_scope,payload_json,status) VALUES (?,?,?,?,?,?,?,'pending')`).bind(approvalId,p.organizationId,row.agentKey,p.userId,row.actionType,row.requiredScope,JSON.stringify(row.payload)),c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='awaiting_approval',approval_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='prepared'`).bind(approvalId,row.id,p.organizationId)]);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});});
 
-agenticActionRoutes.post("/actions/:id/review",requireScope("school:write"),async c=>{
-  const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(row.status!=="awaiting_approval"||!row.approvalId)throw new AppError(409,"INVALID_STATE","This action is not awaiting approval");
-  const body=await c.req.json().catch(()=>({})) as {decision?:string;note?:string};
-  if(body.decision!=="approve"&&body.decision!=="reject")throw new AppError(422,"VALIDATION_ERROR","decision must be approve or reject");
-  if(body.decision==="approve"&&p.role!=="owner"&&p.role!=="admin"&&!p.scopes.includes(row.requiredScope))throw new AppError(403,"FORBIDDEN",`Approval requires ${row.requiredScope}`);
-  const approvalStatus=body.decision==="approve"?"approved":"rejected",actionStatus=body.decision==="approve"?"approved":"dismissed";
-  await c.env.FINANCE_DB.batch([
-    c.env.FINANCE_DB.prepare(`UPDATE ae_approvals SET status=?,reviewed_by=?,review_note=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='pending'`)
-      .bind(approvalStatus,p.userId,body.note||null,row.approvalId,p.organizationId),
-    c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status=?,approved_by=CASE WHEN ?='approved' THEN ? ELSE approved_by END,
-      approved_at=CASE WHEN ?='approved' THEN CURRENT_TIMESTAMP ELSE approved_at END,dismissed_by=CASE WHEN ?='dismissed' THEN ? ELSE dismissed_by END,
-      dismissed_at=CASE WHEN ?='dismissed' THEN CURRENT_TIMESTAMP ELSE dismissed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-      .bind(actionStatus,actionStatus,p.userId,actionStatus,actionStatus,p.userId,actionStatus,row.id,p.organizationId),
-  ]);
-  return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});
-});
+agenticActionRoutes.post("/actions/:id/review",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(row.status!=="awaiting_approval"||!row.approvalId)throw new AppError(409,"INVALID_STATE","This action is not awaiting approval");const body=await c.req.json().catch(()=>({})) as {decision?:string;note?:string};if(body.decision!=="approve"&&body.decision!=="reject")throw new AppError(422,"VALIDATION_ERROR","decision must be approve or reject");if(body.decision==="approve"&&p.role!=="owner"&&p.role!=="admin"&&!p.scopes.includes(row.requiredScope))throw new AppError(403,"FORBIDDEN",`Approval requires ${row.requiredScope}`);const approvalStatus=body.decision==="approve"?"approved":"rejected",actionStatus=body.decision==="approve"?"approved":"dismissed";await c.env.FINANCE_DB.batch([c.env.FINANCE_DB.prepare(`UPDATE ae_approvals SET status=?,reviewed_by=?,review_note=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='pending'`).bind(approvalStatus,p.userId,body.note||null,row.approvalId,p.organizationId),c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status=?,approved_by=CASE WHEN ?='approved' THEN ? ELSE approved_by END,approved_at=CASE WHEN ?='approved' THEN CURRENT_TIMESTAMP ELSE approved_at END,dismissed_by=CASE WHEN ?='dismissed' THEN ? ELSE dismissed_by END,dismissed_at=CASE WHEN ?='dismissed' THEN CURRENT_TIMESTAMP ELSE dismissed_at END,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(actionStatus,actionStatus,p.userId,actionStatus,actionStatus,p.userId,actionStatus,row.id,p.organizationId)]);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});});
 
-agenticActionRoutes.post("/actions/:id/execute",requireScope("school:write"),async c=>{
-  const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(row.status!=="approved"||!row.approvalId)throw new AppError(409,"INVALID_STATE","Only an approved action can execute");
-  try{
-    const result=await executeApprovedAction(c.env,p,row.approvalId);
-    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),
-      failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
-      .bind((result as any).entityType||null,(result as any).entityId||null,p.userId,row.id,p.organizationId).run();
-    return c.json({data:{action:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id),result}});
-  }catch(error){
-    const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);
-    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status<>'executed'`)
-      .bind(text,p.userId,row.id,p.organizationId).run();
-    throw error;
-  }
-});
+agenticActionRoutes.post("/actions/:id/execute",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(row.status!=="approved"||!row.approvalId)throw new AppError(409,"INVALID_STATE","Only an approved action can execute");if(p.role!=="owner"&&p.role!=="admin"&&!p.scopes.includes(row.requiredScope))throw new AppError(403,"FORBIDDEN",`Execution requires ${row.requiredScope}`);try{const result=await executeApprovedAction(c.env,p,row.approvalId);await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind((result as any).entityType||null,(result as any).entityId||null,p.userId,row.id,p.organizationId).run();return c.json({data:{action:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id),result}});}catch(error){const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status<>'executed'`).bind(text,p.userId,row.id,p.organizationId).run();throw error;}});
 
-agenticActionRoutes.post("/actions/:id/dismiss",requireScope("school:write"),async c=>{
-  const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(["executing","executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE","This action is already terminal or executing");
-  const statements=[c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='dismissed',dismissed_by=?,dismissed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(p.userId,row.id,p.organizationId)];
-  if(row.approvalId)statements.push(c.env.FINANCE_DB.prepare("UPDATE ae_approvals SET status='cancelled',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status IN ('pending','approved')").bind(p.userId,row.approvalId,p.organizationId));
-  await c.env.FINANCE_DB.batch(statements);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});
-});
+agenticActionRoutes.post("/actions/:id/dismiss",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(["executing","executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE","This action is already terminal or executing");const statements=[c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='dismissed',dismissed_by=?,dismissed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(p.userId,row.id,p.organizationId)];if(row.approvalId)statements.push(c.env.FINANCE_DB.prepare("UPDATE ae_approvals SET status='cancelled',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status IN ('pending','approved')").bind(p.userId,row.approvalId,p.organizationId));await c.env.FINANCE_DB.batch(statements);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});});
