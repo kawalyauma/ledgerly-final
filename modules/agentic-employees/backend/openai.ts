@@ -1,11 +1,11 @@
 import { AppError } from "../../../src/lib/errors";
 import { createId } from "../../../src/lib/ids";
-import type { AuthPrincipal } from "../../../src/types";
+import type { AuthPrincipal, Env } from "../../../src/types";
 import type { AgentDefinition, ModelTier } from "./policy";
 import { resolveModel } from "./policy";
-import { executeTool, openAiTools } from "./tools";
+import { executeTool, openAiTools } from "./tools-v125b";
 
-type AiEnv = Record<string, unknown> & {
+type AiEnv = Env & Record<string, unknown> & {
   OPENAI_API_KEY?: string;
   OPENAI_BASE_URL?: string;
 };
@@ -117,6 +117,7 @@ export async function runAgent(input: RunInput) {
       try {
         const result = await executeTool({
           db: input.db,
+          env: input.env,
           principal: input.principal,
           agent: input.agent,
           conversationId: input.conversationId,

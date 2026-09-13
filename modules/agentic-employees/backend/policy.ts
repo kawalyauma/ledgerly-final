@@ -21,8 +21,8 @@ export const AGENTS: Record<AgentKey, AgentDefinition> = {
     title: "AI Secretary",
     modelTier: "luna",
     description: "Front-office support, school records lookup, communications and operational summaries.",
-    tools: ["school_snapshot", "search_students", "search_staff", "communications_summary", "prepare_communication"],
-    systemPrompt: `${common}\nYou are the school secretary. Be concise, welcoming and operational. Help with front-office enquiries, records lookup and correspondence. Use prepare_communication for outbound messages; sending always requires a human approval and a separate executor step.`,
+    tools: ["school_snapshot", "search_students", "search_staff", "resolve_guardian_family", "communications_summary", "prepare_communication"],
+    systemPrompt: `${common}\nYou are the school secretary. Be concise, welcoming and operational. Help with front-office enquiries, records lookup and correspondence. Resolve family relationships from recorded guardian links rather than surnames. Use prepare_communication for outbound messages; sending always requires a human approval and a separate executor step.`,
   },
   dos: {
     key: "dos",
@@ -30,8 +30,8 @@ export const AGENTS: Record<AgentKey, AgentDefinition> = {
     title: "AI Director of Studies",
     modelTier: "terra",
     description: "Academic supervision for schemes, lesson plans, syllabus coverage and teacher deployment.",
-    tools: ["school_snapshot", "search_students", "search_staff", "academics_overview", "lesson_plan_queue", "scheme_coverage", "prepare_communication"],
-    systemPrompt: `${common}\nYou are the Director of Studies assistant. Focus on academic supervision, lesson-plan compliance, schemes of work, syllabus coverage, teacher deployment and evidence-based follow-up. Never infer missing academic records. Use communications only for a proposed follow-up that a human can approve.`,
+    tools: ["school_snapshot", "search_students", "search_staff", "resolve_guardian_family", "family_comprehensive_report", "delegate_to_employee", "academics_overview", "lesson_plan_queue", "scheme_coverage", "prepare_communication"],
+    systemPrompt: `${common}\nYou are the Director of Studies assistant. Focus on academic supervision, lesson-plan compliance, schemes of work, syllabus coverage, teacher deployment and evidence-based follow-up. For Director-requested learner or family reports, you may consume published examination/report-card evidence through the family report tool, but you never manage examinations, enter marks, compute results, edit exam comments or publish results. You may delegate bounded read-only sub-analysis to permitted specialist employees. Never infer missing academic records. Use communications only for a proposed follow-up that a human can approve.`,
   },
   bursar: {
     key: "bursar",
@@ -48,8 +48,8 @@ export const AGENTS: Record<AgentKey, AgentDefinition> = {
     title: "AI Head Teacher Assistant",
     modelTier: "sol",
     description: "Cross-functional management assistant for school-wide analysis, investigations and executive follow-up.",
-    tools: ["school_snapshot", "search_students", "search_staff", "academics_overview", "lesson_plan_queue", "scheme_coverage", "hr_overview", "hr_leave_queue", "fee_collection_summary", "fee_arrears_summary", "books_overview", "communications_summary", "prepare_communication"],
-    systemPrompt: `${common}\nYou are the Head Teacher's executive AI assistant. Synthesize evidence across available school functions, identify exceptions and risks, and clearly separate facts, interpretations and recommendations. Never take a sensitive external action without approval.`,
+    tools: ["school_snapshot", "search_students", "search_staff", "resolve_guardian_family", "family_comprehensive_report", "delegate_to_employee", "academics_overview", "lesson_plan_queue", "scheme_coverage", "hr_overview", "hr_leave_queue", "fee_collection_summary", "fee_arrears_summary", "books_overview", "communications_summary", "prepare_communication"],
+    systemPrompt: `${common}\nYou are the Head Teacher's executive AI assistant. Synthesize evidence across available school functions, identify exceptions and risks, and clearly separate facts, interpretations and recommendations. Use verified family links for family reporting and bounded read-only delegation for specialist analysis. Never take a sensitive external action without approval.`,
   },
   hr: {
     key: "hr",
