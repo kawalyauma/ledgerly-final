@@ -5,11 +5,15 @@ import { createExamMarkRoutes } from "./marks.js";
 import { createExamReportRoutes } from "./reports.js";
 import { createExamFinalizationRoutes } from "./finalization.js";
 import { createExamParityRoutes } from "./parity.js";
+import { createExamBulkRoutes } from "./bulk.js";
+import { createExamHistoryRoutes } from "./history.js";
 
 export const examsFeature: BackendFeature = {
   key: "exams",
-  version: "1.3.0",
+  version: "1.4.0",
   mount(app,runtime){
+    app.route("/api/v1/exams",createExamBulkRoutes(runtime));
+    app.route("/api/v1/exams",createExamHistoryRoutes(runtime));
     app.route("/api/v1/exams",createExamParityRoutes(runtime));
     app.route("/api/v1/exams",createExamRoutes(runtime));
     app.route("/api/v1/exams",createExamSetupRoutes(runtime));
