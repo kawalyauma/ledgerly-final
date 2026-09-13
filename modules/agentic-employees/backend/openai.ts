@@ -3,7 +3,7 @@ import { createId } from "../../../src/lib/ids";
 import type { AuthPrincipal } from "../../../src/types";
 import type { AgentDefinition, ModelTier } from "./policy";
 import { resolveModel } from "./policy";
-import { executeTool, openAiTools } from "./tools-v125";
+import { executeTool, openAiTools } from "./tools-v125b";
 
 type AiEnv = Record<string, unknown> & {
   OPENAI_API_KEY?: string;
