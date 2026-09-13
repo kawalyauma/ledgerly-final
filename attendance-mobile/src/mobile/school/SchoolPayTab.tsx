@@ -33,6 +33,7 @@ export function SchoolPayTab({session,onSession}:{session:MobileSession;onSessio
   const[method,setMethod]=useState<"request"|"register">("request");
   const[attemptReference,setAttemptReference]=useState("");
   const studentOptions=useMemo(()=>students.map(x=>({label:studentName(x),value:x.id,detail:x.admissionNumber||x.studentNumber||"No admission number"})),[students]);
+  const selectedStudent=students.find(x=>x.id===studentId);
   const changePayment=(change:()=>void)=>{setAttemptReference("");change()};
 
   async function load(){
@@ -92,36 +93,49 @@ export function SchoolPayTab({session,onSession}:{session:MobileSession;onSessio
 
   return <View style={s.root}>
     <View style={s.modeBar}>
-      <TouchableOpacity style={[s.mode,mode==="collect"&&s.modeOn]} onPress={()=>setMode("collect")}><Text style={[s.modeText,mode==="collect"&&s.modeTextOn]}>Collect</Text></TouchableOpacity>
-      <TouchableOpacity style={[s.mode,mode==="history"&&s.modeOn]} onPress={()=>setMode("history")}><Text style={[s.modeText,mode==="history"&&s.modeTextOn]}>Payments</Text></TouchableOpacity>
+      <TouchableOpacity accessibilityRole="tab" accessibilityState={{selected:mode==="collect"}} style={[s.mode,mode==="collect"&&s.modeOn]} onPress={()=>setMode("collect")}><Text style={[s.modeText,mode==="collect"&&s.modeTextOn]}>Collect payment</Text></TouchableOpacity>
+      <TouchableOpacity accessibilityRole="tab" accessibilityState={{selected:mode==="history"}} style={[s.mode,mode==="history"&&s.modeOn]} onPress={()=>setMode("history")}><Text style={[s.modeText,mode==="history"&&s.modeTextOn]}>Payment history</Text></TouchableOpacity>
     </View>
     <ScrollView refreshControl={<RefreshControl refreshing={loading} onRefresh={load}/>} contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
-      <View style={s.connection}><View><Text style={s.connectionTitle}>SchoolPay</Text><Text style={s.connectionText}>{online?"Connected to live SchoolPay services":"Offline · collection disabled"}</Text></View><Pill text={online?(String(health?.status||"online")):"offline"} tone={online?"good":"bad"}/></View>
-      {!online?<View style={s.offline}><Text style={s.offlineTitle}>Online connection required</Text><Text style={s.offlineText}>For payment safety, SchoolPay debit requests and status checks are not placed in Ledgerly's offline queue. This prevents a request from being sent later without the cashier seeing it happen.</Text><SecondaryButton title="Try connection" onPress={()=>void load()}/></View>:null}
+      <View style={s.connection}><View style={{flex:1,paddingRight:10}}><Text style={s.connectionTitle}>SchoolPay connection</Text><Text style={s.connectionText}>{online?"Ready for live payment requests and status checks":"Offline · payment actions are disabled"}</Text></View><Pill text={online?(String(health?.status||"online")):"offline"} tone={online?"good":"bad"}/></View>
+      {!online?<View style={s.offline}><Text style={s.offlineTitle}>Internet connection required</Text><Text style={s.offlineText}>SchoolPay payments are never placed in the offline queue. This prevents an old payment request from being sent later without the cashier seeing it happen.</Text><SecondaryButton title="Check connection" onPress={()=>void load()}/></View>:null}
       {error&&online?<ErrorNotice message={error} onRetry={load}/>:null}
       {mode==="collect"?<>
-        <SectionTitle title="Collect school fees" subtitle="Send a SchoolPay debit prompt or register an ad-hoc payment"/>
+        <SectionTitle title="Collect school fees" subtitle="Choose a learner, confirm the amount, then send the request."/>
         <Card>
-          <SelectField label="Learner" value={studentId} onChange={x=>changePayment(()=>setStudentId(x))} options={studentOptions} placeholder="Choose learner"/>
-          <Field label="Amount (UGX)" value={amount} onChangeText={x=>changePayment(()=>setAmount(x.replace(/[^0-9]/g,"")))} keyboardType="number-pad" placeholder="150000"/>
-          <SelectField label="Collection method" value={method} onChange={x=>changePayment(()=>setMethod(x as "request"|"register"))} options={[{label:"Instant debit request",value:"request",detail:"Prompt the payer phone"},{label:"Register payment",value:"register",detail:"Create a SchoolPay payment reference"}]}/>
+          <Text style={s.groupTitle}>1. Learner</Text>
+          <SelectField label="Learner account" value={studentId} onChange={x=>changePayment(()=>setStudentId(x))} options={studentOptions} placeholder="Choose learner"/>
+          {selectedStudent?<View style={s.selected}><Text style={s.selectedName}>{studentName(selectedStudent)}</Text><Text style={s.selectedMeta}>{selectedStudent.admissionNumber||selectedStudent.studentNumber||"Active learner"}</Text></View>:null}
+          <View style={s.divider}/>
+          <Text style={s.groupTitle}>2. Payment details</Text>
+          <Field label="Amount in Uganda shillings" value={amount} onChangeText={x=>changePayment(()=>setAmount(x.replace(/[^0-9]/g,"")))} keyboardType="number-pad" placeholder="150000"/>
+          <SelectField label="Collection method" value={method} onChange={x=>changePayment(()=>setMethod(x as "request"|"register"))} options={[{label:"Instant debit request",value:"request",detail:"Send a payment prompt to the payer phone"},{label:"Register payment",value:"register",detail:"Create a SchoolPay payment reference without a phone prompt"}]}/>
           <SelectField label="Fee type" value={eventType} onChange={x=>changePayment(()=>setEventType(x as "SCHOOL_FEES"|"OTHER_FEES"))} options={[{label:"School fees",value:"SCHOOL_FEES"},{label:"Other / supplementary fee",value:"OTHER_FEES"}]}/>
           {method==="request"?<Field label="Payer phone number" value={phone} onChangeText={x=>changePayment(()=>setPhone(x))} keyboardType="phone-pad" placeholder="0772 123 456"/>:null}
-          <Field label="Reason" value={reason} onChangeText={x=>changePayment(()=>setReason(x))} maxLength={500}/>
-          <PrimaryButton title={busy?"Sending…":method==="request"?"Send debit request":"Register SchoolPay payment"} disabled={busy||!online} onPress={()=>void collect()}/>
+          <Field label="Payment reason" value={reason} onChangeText={x=>changePayment(()=>setReason(x))} maxLength={500}/>
+          <View style={s.safety}><Text style={s.safetyTitle}>Before sending</Text><Text style={s.safetyText}>{method==="request"?"Confirm the learner, amount and phone number. The payer should approve the prompt only once.":"Confirm the learner and amount. Ledgerly will create a SchoolPay reference for this payment."}</Text></View>
+          <PrimaryButton title={busy?"Sending…":method==="request"?"Send SchoolPay debit request":"Register SchoolPay payment"} disabled={busy||!online} onPress={()=>void collect()}/>
         </Card>
       </>:<>
-        <SectionTitle title="Recent SchoolPay payments" subtitle={`${intents.length} loaded`} action="Recover" onAction={()=>void recover()}/>
-        {!intents.length&&!loading?<Empty title="No SchoolPay payments" copy="Payments initiated from Ledgerly will appear here."/>:intents.map(item=><Card key={item.id} style={s.payment}>
-          <View style={s.row}><View style={{flex:1}}><Text style={s.name}>{[item.firstName,item.lastName].filter(Boolean).join(" ")||item.studentPaymentCode}</Text><Text style={s.meta}>{item.paymentReference||item.externalReference}</Text></View><Pill text={item.status.replace(/_/g," ")} tone={tone(item.status)}/></View>
+        <SectionTitle title="Recent SchoolPay payments" subtitle={`${intents.length} payment${intents.length===1?"":"s"} loaded`} action="Recover" onAction={()=>void recover()}/>
+        {!intents.length&&!loading?<Empty title="No SchoolPay payments yet" copy="Payments initiated from Ledgerly will appear here with their latest provider status."/>:intents.map(item=><Card key={item.id} style={s.payment}>
+          <View style={s.row}><View style={{flex:1,paddingRight:10}}><Text style={s.name}>{[item.firstName,item.lastName].filter(Boolean).join(" ")||item.studentPaymentCode}</Text><Text style={s.reference} numberOfLines={2}>{item.paymentReference||item.externalReference}</Text></View><Pill text={item.status.replace(/_/g," ")} tone={tone(item.status)}/></View>
           <Text style={s.amount}>{ugx(item.amountMinor)}</Text>
-          <Text style={s.meta}>{item.method==="request"?"Instant debit":"Registered payment"}{item.receiptNumber?` · Receipt ${item.receiptNumber}`:""}</Text>
-          {item.error?<Text style={s.errorText}>{item.error}</Text>:null}
-          {item.paymentReference&&item.status!=="paid"?<View style={s.action}><SecondaryButton title={busy?"Checking…":"Check status"} compact onPress={()=>void refreshStatus(item)}/></View>:null}
+          <View style={s.detailRow}><Text style={s.detailLabel}>Method</Text><Text style={s.detailValue}>{item.method==="request"?"Instant debit":"Registered payment"}</Text></View>
+          {item.receiptNumber?<View style={s.detailRow}><Text style={s.detailLabel}>Receipt</Text><Text style={s.detailValue}>{item.receiptNumber}</Text></View>:null}
+          {item.providerStatus?<View style={s.detailRow}><Text style={s.detailLabel}>Provider</Text><Text style={s.detailValue}>{item.providerStatus}</Text></View>:null}
+          {item.error?<View style={s.paymentError}><Text style={s.errorText}>{item.error}</Text></View>:null}
+          {item.paymentReference&&item.status!=="paid"?<View style={s.action}><SecondaryButton title={busy?"Checking…":"Check latest status"} compact onPress={()=>void refreshStatus(item)}/></View>:null}
         </Card>)}
       </>}
     </ScrollView>
   </View>;
 }
 
-const s=StyleSheet.create({root:{flex:1},modeBar:{height:47,backgroundColor:"white",borderBottomWidth:1,borderBottomColor:"#dfe7e2",flexDirection:"row",padding:6,gap:6},mode:{flex:1,borderRadius:10,alignItems:"center",justifyContent:"center"},modeOn:{backgroundColor:"#e7f6ee"},modeText:{fontSize:10,fontWeight:"900",color:"#839189"},modeTextOn:{color:"#148e5b"},scroll:{padding:14,paddingBottom:30,gap:12},connection:{backgroundColor:"#071c16",borderRadius:18,padding:16,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},connectionTitle:{color:"white",fontSize:17,fontWeight:"900"},connectionText:{color:"#8db3a3",fontSize:9,marginTop:3},offline:{backgroundColor:"#fff3e5",borderWidth:1,borderColor:"#f0d3a7",borderRadius:16,padding:14,gap:8},offlineTitle:{fontSize:12,fontWeight:"900",color:"#7e5011"},offlineText:{fontSize:10,lineHeight:15,color:"#88612b"},payment:{marginBottom:0},row:{flexDirection:"row",alignItems:"flex-start",gap:10},name:{fontSize:13,fontWeight:"900",color:"#173126"},meta:{fontSize:9,lineHeight:14,color:"#7b8c83",marginTop:2},amount:{fontSize:19,fontWeight:"900",color:"#173126",marginTop:12,marginBottom:3},errorText:{fontSize:9,lineHeight:14,color:"#a44340",marginTop:8},action:{marginTop:12,alignItems:"flex-start"}});
+const s=StyleSheet.create({
+ root:{flex:1},modeBar:{minHeight:58,backgroundColor:"white",borderBottomWidth:1,borderBottomColor:"#d9e3de",flexDirection:"row",padding:7,gap:7},mode:{flex:1,minHeight:44,borderRadius:12,alignItems:"center",justifyContent:"center",paddingHorizontal:8},modeOn:{backgroundColor:"#e5f5ec"},modeText:{fontSize:13,lineHeight:17,fontWeight:"800",color:"#687a71"},modeTextOn:{color:"#126f49",fontWeight:"900"},
+ scroll:{padding:16,paddingBottom:34,gap:14},connection:{backgroundColor:"#071c16",borderRadius:20,padding:18,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},connectionTitle:{color:"white",fontSize:17,lineHeight:22,fontWeight:"900"},connectionText:{color:"#9fbbb0",fontSize:12,lineHeight:17,marginTop:4},
+ offline:{backgroundColor:"#fff3e5",borderWidth:1,borderColor:"#ebcc9c",borderRadius:18,padding:16,gap:10},offlineTitle:{fontSize:15,lineHeight:20,fontWeight:"900",color:"#754808"},offlineText:{fontSize:13,lineHeight:19,color:"#795727"},
+ groupTitle:{fontSize:15,lineHeight:20,fontWeight:"900",color:"#234236",marginBottom:13},divider:{height:1,backgroundColor:"#e9efec",marginVertical:4,marginBottom:16},selected:{backgroundColor:"#edf8f2",borderRadius:14,padding:13,marginTop:-4,marginBottom:16,borderWidth:1,borderColor:"#d8eee3"},selectedName:{fontSize:15,lineHeight:20,fontWeight:"900",color:"#173126"},selectedMeta:{fontSize:12,lineHeight:17,color:"#64796e",marginTop:3},safety:{backgroundColor:"#f3f7f5",borderRadius:14,padding:14,marginBottom:16,borderWidth:1,borderColor:"#e0e8e4"},safetyTitle:{fontSize:13,lineHeight:17,fontWeight:"900",color:"#2f4d40"},safetyText:{fontSize:12,lineHeight:18,color:"#65796f",marginTop:4},
+ payment:{marginBottom:2},row:{flexDirection:"row",alignItems:"flex-start",gap:10},name:{fontSize:16,lineHeight:21,fontWeight:"900",color:"#173126"},reference:{fontSize:12,lineHeight:17,color:"#6f8078",marginTop:4},amount:{fontSize:24,lineHeight:30,fontWeight:"900",color:"#173126",marginTop:16,marginBottom:10},detailRow:{flexDirection:"row",alignItems:"flex-start",paddingVertical:6,borderTopWidth:1,borderTopColor:"#edf1ef"},detailLabel:{width:74,fontSize:12,lineHeight:17,fontWeight:"800",color:"#6f8178"},detailValue:{flex:1,fontSize:13,lineHeight:18,fontWeight:"700",color:"#334b40"},paymentError:{backgroundColor:"#fff0ef",borderRadius:12,padding:11,marginTop:9},errorText:{fontSize:12,lineHeight:18,color:"#9a4844"},action:{marginTop:14,alignItems:"flex-start"}
+});
