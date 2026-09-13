@@ -2,6 +2,9 @@ import { AppError } from "../../../src/lib/errors";
 import { createId } from "../../../src/lib/ids";
 import type { Env } from "../../../src/types";
 import { AGENTS, type AgentKey, type ModelTier } from "./policy";
+import { proactiveContext } from "./proactive-data";
+import { runProactiveModel } from "./proactive-model";
+import { workflowDefinition } from "./proactive";
 
 async function assertActor(db: D1Database, organizationId: string, userId: string) {
   const row = await db.prepare(`SELECT u.status,m.role FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? AND m.user_id=?`)
@@ -39,5 +42,25 @@ async function failRun(db: D1Database, organizationId: string, runId: string, er
     .bind(message.slice(0, 2000), runId, organizationId).run();
 }
 
-export async function runSingleProactive(_env: Env) { return null; }
+export async function runSingleProactive(env: Env, organizationId: string, actorUserId: string, workflowKey: string, triggerType = "manual", scheduleId?: string | null, parentRunId?: string | null, suppliedContext?: unknown) {
+  const workflow = workflowDefinition(workflowKey);
+  if (!workflow) throw new AppError(404, "PROACTIVE_WORKFLOW_NOT_FOUND", "Unknown proactive AI workflow");
+  await assertActor(env.FINANCE_DB, organizationId, actorUserId);
+  const agent = await agentSettings(env.FINANCE_DB, organizationId, workflow.agentKey);
+  const run = await createRun(env.FINANCE_DB, organizationId, actorUserId, workflowKey, workflow.agentKey, triggerType, scheduleId, parentRunId);
+  if (!agent.enabled) {
+    await env.FINANCE_DB.prepare("UPDATE ae_proactive_runs SET status='skipped',summary='Agent disabled',completed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(run.id, organizationId).run();
+    return { id: run.id, workflowKey, agentKey: workflow.agentKey, status: "skipped", summary: "Agent disabled" };
+  }
+  try {
+    const context = suppliedContext ?? await proactiveContext(env.FINANCE_DB, organizationId, workflowKey);
+    const result = await runProactiveModel(env as Env & Record<string, unknown>, agent.modelTier, `${agent.systemPrompt}\nThis is a proactive read-only run. Do not claim to have changed or sent anything.`, `${workflow.prompt}\n\nVerified Ledgerly context:\n${JSON.stringify(context)}`);
+    await completeRun(env.FINANCE_DB, organizationId, run.id, result.text, result.model, { providerResponseId: result.providerResponseId, usage: result.usage });
+    return { id: run.id, workflowKey, agentKey: workflow.agentKey, status: "completed", summary: result.text, model: result.model };
+  } catch (error) {
+    await failRun(env.FINANCE_DB, organizationId, run.id, error);
+    throw error;
+  }
+}
+
 export { assertActor, agentSettings, createRun, completeRun, failRun };
