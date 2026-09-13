@@ -1,7 +1,9 @@
 import { createId } from "../../../src/lib/ids";
 import type { Env } from "../../../src/types";
 import { AGENTS, type AgentKey, type ModelTier } from "./policy";
-import { evaluateEvent, loadEventSettings, type EventEnvelope, type EvaluatedEvent } from "./event-context";
+import { loadEventSettings, type EventEnvelope, type EvaluatedEvent } from "./event-context";
+import { evaluateEmployeeEvent } from "./event-context-v13";
+import { retryDelayMinutes } from "./event-policy";
 import { runProactiveModel } from "./proactive-model";
 
 type EventRow = EventEnvelope & { attempts: number };
@@ -55,7 +57,7 @@ async function markFailure(db: D1Database, event: EventRow, error: unknown) {
       .bind(attempts,message,event.id,event.organizationId).run();
     return;
   }
-  const retryAt = new Date(Date.now() + attempts * 5 * 60_000).toISOString();
+  const retryAt = new Date(Date.now() + retryDelayMinutes(attempts) * 60_000).toISOString();
   await db.prepare("UPDATE ae_event_inbox SET status='pending',attempts=?,error_text=?,next_attempt_at=? WHERE id=? AND organization_id=?")
     .bind(attempts,message,retryAt,event.id,event.organizationId).run();
 }
@@ -73,7 +75,7 @@ export async function processEventInbox(env: Env) {
     if (!Number(claim.meta.changes || 0)) continue;
     try {
       const settings = await loadEventSettings(env.FINANCE_DB,event.organizationId);
-      const evaluated = await evaluateEvent(env.FINANCE_DB,event,settings);
+      const evaluated = await evaluateEmployeeEvent(env.FINANCE_DB,event,settings);
       if (evaluated.ignored || !evaluated.agentKey) {
         await env.FINANCE_DB.prepare("UPDATE ae_event_inbox SET status='ignored',error_text=?,processed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
           .bind(evaluated.ignoreReason || null,event.id,event.organizationId).run();
