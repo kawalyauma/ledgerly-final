@@ -1,4 +1,3 @@
-import type { Env } from "../../../src/types";
 import { createId } from "../../../src/lib/ids";
 
 export type ProactiveCadence = "daily" | "weekly";
@@ -21,13 +20,47 @@ export const PROACTIVE_WORKFLOWS: ProactiveWorkflow[] = [
   { key: "headteacher_daily_brief", agentKey: "headteacher", cadence: "daily", runHour: 7, runMinute: 45, weekday: null, prompt: "Produce the Head Teacher daily management brief. Synthesize specialist reports, rank issues by urgency, and end with today's action list." },
 ];
 
-export async function ensureDefaultProactiveSchedules(db: D1Database, organizationId: string, actorId?: string) {
+function zonedParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(date);
+  const map = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return { year: Number(map.year), month: Number(map.month), day: Number(map.day), hour: Number(map.hour), minute: Number(map.minute), second: Number(map.second) };
+}
+
+function localToUtc(timeZone: string, year: number, month: number, day: number, hour: number, minute: number) {
+  let guess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  for (let pass = 0; pass < 2; pass++) {
+    const actual = zonedParts(new Date(guess), timeZone);
+    guess += Date.UTC(year, month - 1, day, hour, minute, 0) - Date.UTC(actual.year, actual.month - 1, actual.day, actual.hour, actual.minute, actual.second);
+  }
+  return new Date(guess);
+}
+
+export function nextOccurrence(timeZone: string, hour: number, minute: number, cadence: ProactiveCadence, weekday: number | null, from = new Date()) {
+  const local = zonedParts(from, timeZone);
+  for (let offset = 0; offset < 9; offset++) {
+    const base = new Date(Date.UTC(local.year, local.month - 1, local.day + offset));
+    if (cadence === "weekly" && weekday != null && base.getUTCDay() !== weekday) continue;
+    const candidate = localToUtc(timeZone, base.getUTCFullYear(), base.getUTCMonth() + 1, base.getUTCDate(), hour, minute);
+    if (candidate.getTime() > from.getTime() + 30_000) return candidate.toISOString();
+  }
+  return new Date(from.getTime() + 86_400_000).toISOString();
+}
+
+export async function organizationTimezone(db: D1Database, organizationId: string) {
+  const row = await db.prepare("SELECT timezone FROM organizations WHERE id=?").bind(organizationId).first<{ timezone?: string }>();
+  return row?.timezone || "Africa/Kampala";
+}
+
+export async function ensureDefaultProactiveSchedules(db: D1Database, organizationId: string, actorUserId: string) {
+  const timeZone = await organizationTimezone(db, organizationId);
   for (const item of PROACTIVE_WORKFLOWS) {
-    await db.prepare(`INSERT INTO ae_proactive_schedules (id,organization_id,workflow_key,agent_key,enabled,cadence,run_hour,run_minute,weekday,updated_by) VALUES (?,?,?,?,1,?,?,?,?,?) ON CONFLICT(organization_id,workflow_key) DO NOTHING`)
-      .bind(createId("aps"), organizationId, item.key, item.agentKey, item.cadence, item.runHour, item.runMinute, item.weekday, actorId || null).run();
+    const nextRunAt = nextOccurrence(timeZone, item.runHour, item.runMinute, item.cadence, item.weekday);
+    await db.prepare(`INSERT INTO ae_proactive_schedules (id,organization_id,workflow_key,agent_key,actor_user_id,enabled,cadence,run_hour,run_minute,weekday,next_run_at,updated_by)
+      VALUES (?,?,?,?,?,1,?,?,?,?,?,?) ON CONFLICT(organization_id,workflow_key) DO NOTHING`)
+      .bind(createId("aps"), organizationId, item.key, item.agentKey, actorUserId, item.cadence, item.runHour, item.runMinute, item.weekday, nextRunAt, actorUserId).run();
   }
 }
 
-export function workflowDefinition(key: string) { return PROACTIVE_WORKFLOWS.find(item => item.key === key) || null; }
-
-export async function runDueProactiveSchedules(_env: Env) { return; }
+export function workflowDefinition(key: string) {
+  return PROACTIVE_WORKFLOWS.find(item => item.key === key) || null;
+}
