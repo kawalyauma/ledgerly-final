@@ -32,6 +32,7 @@ describe("agentic employee policy", () => {
     expect(AGENTS.headteacher.modelTier).toBe("sol");
     for (const agent of Object.values(AGENTS)) {
       expect(agent.tools).toContain("prepare_work_task");
+      expect(agent.tools).toContain("list_saved_documents");
       expect(agent.tools).toContain("prepare_document");
       expect(agent.tools).toContain("prepare_print_document");
     }
