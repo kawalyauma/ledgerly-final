@@ -63,6 +63,10 @@ async function markFailure(db: D1Database, event: EventRow, error: unknown) {
 }
 
 export async function processEventInbox(env: Env) {
+  await env.FINANCE_DB.prepare(`UPDATE ae_event_inbox SET status='pending',processing_started_at=NULL,
+    error_text=COALESCE(error_text,'Recovered stale processing claim')
+    WHERE status='processing' AND processing_started_at<datetime('now','-10 minutes')`).run();
+
   const rows = await env.FINANCE_DB.prepare(`SELECT id,organization_id AS organizationId,event_type AS eventType,source_module AS sourceModule,
     source_record_id AS sourceRecordId,subject_type AS subjectType,subject_id AS subjectId,payload_json AS payloadJson,
     occurred_at AS occurredAt,attempts FROM ae_event_inbox
