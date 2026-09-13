@@ -6,6 +6,7 @@ import { agenticFamilyReportRoutes } from "./family-report-routes";
 import { agenticEventRoutes } from "./event-routes";
 import { runDueProactiveSchedules } from "./proactive-scheduler";
 import { processEventInbox } from "./event-processor";
+import { detectDerivedEmployeeEvents } from "./event-detector";
 
 export const moduleDefinition: BackendModuleDefinition = {
   key: "agentic-employees",
@@ -20,6 +21,7 @@ export const moduleDefinition: BackendModuleDefinition = {
     { basePath: "/api/v1/agentic-employees", router: agenticEventRoutes },
   ],
   scheduled: async env => {
+    await detectDerivedEmployeeEvents(env);
     await processEventInbox(env);
     await runDueProactiveSchedules(env);
   },
