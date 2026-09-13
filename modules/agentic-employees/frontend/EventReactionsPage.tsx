@@ -76,9 +76,13 @@ export function EventReactionsPage() {
     {error&&<div className="ae-error">{error}</div>}
 
     {settings&&<div className="ae-panel">
-      <div className="ae-card-top"><div><h2><Settings2 size={18}/> Reaction policy</h2><p>Configure thresholds without giving employees write authority.</p></div><button className="secondary" onClick={()=>void refresh()}><RefreshCw size={16}/>Refresh</button></div>
+      <div className="ae-card-top"><div><h2><Settings2 size={18}/> Reaction policy</h2><p>Configure thresholds and individual event streams without giving employees write authority.</p></div><button className="secondary" onClick={()=>void refresh()}><RefreshCw size={16}/>Refresh</button></div>
       <div className="ae-grid">
-        <label><span>Event reactions</span><button disabled={busy==="settings"} onClick={()=>void save({enabled:!settings.enabled})}>{settings.enabled?"Enabled":"Disabled"}</button></label>
+        <label><span>All event reactions</span><button disabled={busy==="settings"} onClick={()=>void save({enabled:!settings.enabled})}>{settings.enabled?"Enabled":"Disabled"}</button></label>
+        <label><span>Finance / posted payments</span><button disabled={busy==="settings"} onClick={()=>void save({paymentReactionEnabled:!settings.paymentReactionEnabled})}>{settings.paymentReactionEnabled?"Enabled":"Disabled"}</button></label>
+        <label><span>Attendance / absences</span><button disabled={busy==="settings"} onClick={()=>void save({attendanceReactionEnabled:!settings.attendanceReactionEnabled})}>{settings.attendanceReactionEnabled?"Enabled":"Disabled"}</button></label>
+        <label><span>HR / approved leave</span><button disabled={busy==="settings"} onClick={()=>void save({hrReactionEnabled:!settings.hrReactionEnabled})}>{settings.hrReactionEnabled?"Enabled":"Disabled"}</button></label>
+        <label><span>Books / stock</span><button disabled={busy==="settings"} onClick={()=>void save({booksReactionEnabled:!settings.booksReactionEnabled})}>{settings.booksReactionEnabled?"Enabled":"Disabled"}</button></label>
         <label><span>Attendance window (days)</span><input type="number" min={1} max={90} value={settings.attendanceWindowDays} onChange={e=>setSettings({...settings,attendanceWindowDays:Number(e.target.value)})}/></label>
         <label><span>Absence attention count</span><input type="number" min={1} value={settings.attendanceAttentionCount} onChange={e=>setSettings({...settings,attendanceAttentionCount:Number(e.target.value)})}/></label>
         <label><span>Absence urgent count</span><input type="number" min={1} value={settings.attendanceUrgentCount} onChange={e=>setSettings({...settings,attendanceUrgentCount:Number(e.target.value)})}/></label>
