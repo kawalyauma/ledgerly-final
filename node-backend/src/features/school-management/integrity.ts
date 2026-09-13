@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import type { PoolClient } from "pg";
 import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
@@ -8,7 +9,7 @@ import { createId, requireScope } from "../core-identity/security.js";
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const enroll=z.object({classId:z.string(),streamId:z.string().nullable().optional(),admissionDate:date,studentCategory:z.string().max(100).nullable().optional(),house:z.string().max(100).nullable().optional()});
 function code(prefix:string){return `${prefix}-${createId("n").slice(-8).toUpperCase()}`;}
-async function owned(db:{query:(sql:string,args?:unknown[])=>Promise<{rowCount:number|null}>},org:string,table:string,id?:string|null){if(!id)return;const r=await db.query(`SELECT 1 FROM ${table} WHERE id=$1 AND organization_id=$2`,[id,org]);if(!r.rowCount)throw new AppError(422,"INVALID_REFERENCE",`Referenced ${table} record does not belong to this school`);}
+async function owned(db:PoolClient,org:string,table:string,id?:string|null){if(!id)return;const r=await db.query(`SELECT 1 FROM ${table} WHERE id=$1 AND organization_id=$2`,[id,org]);if(!r.rowCount)throw new AppError(422,"INVALID_REFERENCE",`Referenced ${table} record does not belong to this school`);}
 
 export function createSchoolIntegrityRoutes(runtime:Runtime){
   const r=new Hono<AppEnv>();
@@ -18,12 +19,11 @@ export function createSchoolIntegrityRoutes(runtime:Runtime){
     const parsed=enroll.safeParse(await c.req.json().catch(()=>null));
     if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid enrollment",parsed.error.flatten());
     const p=c.get("principal"),id=c.req.param("id"),v=parsed.data,client=await runtime.db.connect();
-    let result:{applicationId:string;studentId:string;admissionNumber?:string;studentNumber?:string;replayed?:boolean};
     try{
       await client.query("BEGIN");
       const app=(await client.query<any>(`SELECT * FROM school_admission_applications WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[id,p.organizationId])).rows[0];
       if(!app)throw new AppError(404,"NOT_FOUND","Admission application not found");
-      if(app.status==='enrolled'&&app.enrolled_student_id){result={applicationId:id,studentId:app.enrolled_student_id,replayed:true};await client.query("COMMIT");return c.json({data:result});}
+      if(app.status==='enrolled'&&app.enrolled_student_id){await client.query("COMMIT");return c.json({data:{applicationId:id,studentId:app.enrolled_student_id,replayed:true}});}
       if(app.status!=='approved')throw new AppError(409,"ADMISSION_NOT_APPROVED","Admission must be approved before enrollment");
       await owned(client,p.organizationId,"school_classes",v.classId);
       await owned(client,p.organizationId,"school_streams",v.streamId);
@@ -38,9 +38,8 @@ export function createSchoolIntegrityRoutes(runtime:Runtime){
       await client.query(`UPDATE school_admission_applications SET status='enrolled',enrolled_student_id=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`,[studentId,id,p.organizationId]);
       await client.query(`INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id,after_data) VALUES($1,$2,$3,'school.admission.enrolled','school_admission',$4,$5::jsonb)`,[createId('aud'),p.organizationId,p.userId,id,JSON.stringify({studentId,classId:v.classId,streamId:v.streamId??null})]);
       await client.query("COMMIT");
-      result={applicationId:id,studentId,admissionNumber,studentNumber};
+      return c.json({data:{applicationId:id,studentId,admissionNumber,studentNumber}},201);
     }catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}
-    return c.json({data:result},201);
   });
 
   r.post("/promotion/runs/:id/apply",requireScope("school:write"),async c=>{
@@ -69,8 +68,8 @@ export function createSchoolIntegrityRoutes(runtime:Runtime){
       await client.query(`UPDATE school_promotion_runs SET status='applied',applied_by=$1,applied_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`,[p.userId,id,p.organizationId]);
       await client.query(`INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id,after_data) VALUES($1,$2,$3,'school.promotion.applied','school_promotion_run',$4,$5::jsonb)`,[createId('aud'),p.organizationId,p.userId,id,JSON.stringify({items:items.length})]);
       await client.query("COMMIT");
+      return c.json({data:{id,status:'applied'}});
     }catch(e){await client.query("ROLLBACK");throw e;}finally{client.release();}
-    return c.json({data:{id,status:'applied'}});
   });
 
   return r;
