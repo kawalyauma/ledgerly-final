@@ -5,93 +5,33 @@ import type {LiveSchoolSummary} from "./liveSchoolSummary";
 const {width}=Dimensions.get("window");
 
 type Props={summary:LiveSchoolSummary|null;panelIntervalMs:number;onDismiss:()=>void};
-
 type Panel="students"|"staff"|"activity"|"groups";
 const PANELS:Panel[]=["students","staff","activity","groups"];
 
-function Metric({label,value,detail}:{label:string;value:string|number;detail?:string}){
-  return <View style={s.metric}><Text style={s.metricValue}>{value}</Text><Text style={s.metricLabel}>{label}</Text>{detail?<Text style={s.metricDetail}>{detail}</Text>:null}</View>;
-}
+function Metric({label,value,detail}:{label:string;value:string|number;detail?:string}){return <View style={s.metric}><Text style={s.metricValue}>{value}</Text><Text style={s.metricLabel}>{label}</Text>{detail?<Text style={s.metricDetail}>{detail}</Text>:null}</View>}
 function Progress({value}:{value:number}){return <View style={s.progressTrack}><View style={[s.progressFill,{width:`${Math.max(0,Math.min(100,value))}%`}]} /></View>}
 function formatTime(value?:string){if(!value)return"No activity yet";try{return new Date(value).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}catch{return"—"}}
 
 export function IdleSchoolDisplay({summary,panelIntervalMs,onDismiss}:Props){
   const[panelIndex,setPanelIndex]=useState(0),[now,setNow]=useState(new Date());
-  const transition=useRef(new Animated.Value(1)).current;
-  const ambient=useRef(new Animated.Value(0)).current;
-  const pulse=useRef(new Animated.Value(0)).current;
+  const transition=useRef(new Animated.Value(1)).current,ambient=useRef(new Animated.Value(0)).current,pulse=useRef(new Animated.Value(0)).current;
   useEffect(()=>{const clock=setInterval(()=>setNow(new Date()),1000);return()=>clearInterval(clock)},[]);
-  useEffect(()=>{
-    const loop=Animated.loop(Animated.sequence([
-      Animated.timing(ambient,{toValue:1,duration:7000,useNativeDriver:true}),
-      Animated.timing(ambient,{toValue:0,duration:7000,useNativeDriver:true}),
-    ]));
-    const pulseLoop=Animated.loop(Animated.sequence([
-      Animated.timing(pulse,{toValue:1,duration:1400,useNativeDriver:true}),
-      Animated.timing(pulse,{toValue:0,duration:1400,useNativeDriver:true}),
-    ]));
-    loop.start();pulseLoop.start();return()=>{loop.stop();pulseLoop.stop()};
-  },[ambient,pulse]);
-  useEffect(()=>{const timer=setInterval(()=>{
-    Animated.timing(transition,{toValue:0,duration:260,useNativeDriver:true}).start(()=>{
-      setPanelIndex(x=>(x+1)%PANELS.length);
-      transition.setValue(0);
-      Animated.spring(transition,{toValue:1,useNativeDriver:true,friction:8,tension:55}).start();
-    });
-  },panelIntervalMs);return()=>clearInterval(timer)},[panelIntervalMs,transition]);
-  const panel=PANELS[panelIndex];
-  const translateY=transition.interpolate({inputRange:[0,1],outputRange:[28,0]});
-  const orbX=ambient.interpolate({inputRange:[0,1],outputRange:[-28,38]});
-  const orbY=ambient.interpolate({inputRange:[0,1],outputRange:[24,-34]});
-  const pulseScale=pulse.interpolate({inputRange:[0,1],outputRange:[1,1.08]});
-  const date=useMemo(()=>now.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}),[now]);
-  const time=useMemo(()=>now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),[now]);
-  const studentPct=summary?.studentAttendancePct||0,staffPct=summary?.staffAttendancePct||0;
+  useEffect(()=>{const loop=Animated.loop(Animated.sequence([Animated.timing(ambient,{toValue:1,duration:7000,useNativeDriver:true}),Animated.timing(ambient,{toValue:0,duration:7000,useNativeDriver:true})]));const pulseLoop=Animated.loop(Animated.sequence([Animated.timing(pulse,{toValue:1,duration:1400,useNativeDriver:true}),Animated.timing(pulse,{toValue:0,duration:1400,useNativeDriver:true})]));loop.start();pulseLoop.start();return()=>{loop.stop();pulseLoop.stop()}},[ambient,pulse]);
+  useEffect(()=>{const timer=setInterval(()=>{Animated.timing(transition,{toValue:0,duration:260,useNativeDriver:true}).start(()=>{setPanelIndex(x=>(x+1)%PANELS.length);transition.setValue(0);Animated.spring(transition,{toValue:1,useNativeDriver:true,friction:8,tension:55}).start()})},panelIntervalMs);return()=>clearInterval(timer)},[panelIntervalMs,transition]);
+  const panel=PANELS[panelIndex],translateY=transition.interpolate({inputRange:[0,1],outputRange:[28,0]}),orbX=ambient.interpolate({inputRange:[0,1],outputRange:[-28,38]}),orbY=ambient.interpolate({inputRange:[0,1],outputRange:[24,-34]}),pulseScale=pulse.interpolate({inputRange:[0,1],outputRange:[1,1.08]});
+  const date=useMemo(()=>now.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric"}),[now]),time=useMemo(()=>now.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),[now]),studentPct=summary?.studentAttendancePct||0,staffPct=summary?.staffAttendancePct||0;
   return <Pressable style={s.root} onPress={onDismiss}>
-    <Animated.View pointerEvents="none" style={[s.orb,s.orbOne,{transform:[{translateX:orbX},{translateY:orbY}]}]}/>
-    <Animated.View pointerEvents="none" style={[s.orb,s.orbTwo,{transform:[{translateX:Animated.multiply(orbX,-.55)},{translateY:Animated.multiply(orbY,-.45)}]}]}/>
-    <View style={s.header}>
-      <View><Text style={s.brand}>ledgerly</Text><Text style={s.school}>{summary?.deviceName||"School live display"}</Text>{summary?.locationName?<Text style={s.location}>{summary.locationName}</Text>:null}</View>
-      <View style={s.clockBlock}><Text style={s.time}>{time}</Text><Text style={s.date}>{date}</Text></View>
-    </View>
+    <Animated.View pointerEvents="none" style={[s.orb,s.orbOne,{transform:[{translateX:orbX},{translateY:orbY}]}]}/><Animated.View pointerEvents="none" style={[s.orb,s.orbTwo,{transform:[{translateX:Animated.multiply(orbX,-.55)},{translateY:Animated.multiply(orbY,-.45)}]}]}/>
+    <View style={s.header}><View><Text style={s.brand}>ledgerly</Text><Text style={s.school}>{summary?.deviceName||"School live display"}</Text>{summary?.locationName?<Text style={s.location}>{summary.locationName}</Text>:null}</View><View style={s.clockBlock}><Text style={s.time}>{time}</Text><Text style={s.date}>{date}</Text></View></View>
     <Animated.View style={[s.liveBadge,{transform:[{scale:pulseScale}]}]}><View style={[s.liveDot,!summary?.online&&s.liveDotOffline]}/><Text style={s.liveText}>{summary?.online?"LIVE":"OFFLINE CACHE"}</Text></Animated.View>
     <Animated.View style={[s.panel,{opacity:transition,transform:[{translateY}]}]}>
-      {panel==="students"?<>
-        <Text style={s.eyebrow}>STUDENT ATTENDANCE · THIS KIOSK TODAY</Text>
-        <Text style={s.heroNumber}>{studentPct}%</Text><Text style={s.heroLabel}>students currently marked present</Text>
-        <Progress value={studentPct}/>
-        <View style={s.metrics}><Metric label="Present" value={summary?.studentPresent??0}/><Metric label="Not marked in" value={summary?.studentAbsent??0}/><Metric label="Roster" value={summary?.studentTotal??0}/></View>
-      </>:null}
-      {panel==="staff"?<>
-        <Text style={s.eyebrow}>TEACHERS & STAFF · THIS KIOSK TODAY</Text>
-        <Text style={s.heroNumber}>{staffPct}%</Text><Text style={s.heroLabel}>staff currently marked present</Text>
-        <Progress value={staffPct}/>
-        <View style={s.metrics}><Metric label="Present" value={summary?.staffPresent??0}/><Metric label="Not marked in" value={summary?.staffAbsent??0}/><Metric label="Staff roster" value={summary?.staffTotal??0}/></View>
-      </>:null}
-      {panel==="activity"?<>
-        <Text style={s.eyebrow}>TODAY'S ATTENDANCE FLOW</Text><Text style={s.activityTitle}>School movement at a glance</Text>
-        <View style={s.metrics}><Metric label="Check-ins" value={summary?.checkIns??0}/><Metric label="Check-outs" value={summary?.checkOuts??0}/><Metric label="Total captures" value={summary?.activityCount??0}/></View>
-        <View style={s.statusRow}><View><Text style={s.statusLabel}>Last activity</Text><Text style={s.statusValue}>{formatTime(summary?.lastActivityAt)}</Text></View><View><Text style={s.statusLabel}>Sync queue</Text><Text style={s.statusValue}>{summary?.pendingSync??0} pending</Text></View><View><Text style={s.statusLabel}>Rejected</Text><Text style={s.statusValue}>{summary?.failedSync??0}</Text></View></View>
-      </>:null}
-      {panel==="groups"?<>
-        <Text style={s.eyebrow}>CLASS / DEPARTMENT PULSE</Text><Text style={s.activityTitle}>Presence from this kiosk</Text>
-        <View style={s.groupList}>{summary?.groups?.length?summary.groups.slice(0,5).map(group=><View key={group.name} style={s.groupRow}><View style={s.groupTop}><Text numberOfLines={1} style={s.groupName}>{group.name}</Text><Text style={s.groupValue}>{group.present}/{group.total} · {group.pct}%</Text></View><Progress value={group.pct}/></View>):<View style={s.empty}><Text style={s.emptyText}>Attendance groups will appear as the roster and check-ins sync.</Text></View>}</View>
-      </>:null}
+      {panel==="students"?<><Text style={s.eyebrow}>STUDENT ATTENDANCE · THIS KIOSK TODAY</Text><Text style={s.heroNumber}>{studentPct}%</Text><Text style={s.heroLabel}>students currently marked present</Text><Progress value={studentPct}/><View style={s.metrics}><Metric label="Present" value={summary?.studentPresent??0}/><Metric label="Not marked in" value={summary?.studentAbsent??0}/><Metric label="Roster" value={summary?.studentTotal??0}/></View></>:null}
+      {panel==="staff"?<><Text style={s.eyebrow}>TEACHERS & STAFF · THIS KIOSK TODAY</Text><Text style={s.heroNumber}>{staffPct}%</Text><Text style={s.heroLabel}>staff currently marked present</Text><Progress value={staffPct}/><View style={s.metrics}><Metric label="Present" value={summary?.staffPresent??0}/><Metric label="Not marked in" value={summary?.staffAbsent??0}/><Metric label="Staff roster" value={summary?.staffTotal??0}/></View></>:null}
+      {panel==="activity"?<><Text style={s.eyebrow}>TODAY'S ATTENDANCE FLOW</Text><Text style={s.activityTitle}>School movement at a glance</Text><View style={s.metrics}><Metric label="Check-ins" value={summary?.checkIns??0}/><Metric label="Check-outs" value={summary?.checkOuts??0}/><Metric label="Total captures" value={summary?.activityCount??0}/></View><View style={s.statusRow}><View><Text style={s.statusLabel}>Last activity</Text><Text style={s.statusValue}>{formatTime(summary?.lastActivityAt)}</Text></View><View><Text style={s.statusLabel}>Sync queue</Text><Text style={s.statusValue}>{summary?.pendingSync??0} pending</Text></View><View><Text style={s.statusLabel}>Rejected</Text><Text style={s.statusValue}>{summary?.failedSync??0}</Text></View></View></>:null}
+      {panel==="groups"?<><Text style={s.eyebrow}>CLASS / DEPARTMENT PULSE</Text><Text style={s.activityTitle}>Presence from this kiosk</Text><View style={s.groupList}>{summary?.groups?.length?summary.groups.slice(0,5).map(group=><View key={group.name} style={s.groupRow}><View style={s.groupTop}><Text numberOfLines={1} style={s.groupName}>{group.name}</Text><Text style={s.groupValue}>{group.present}/{group.total} · {group.pct}%</Text></View><Progress value={group.pct}/></View>):<View style={s.empty}><Text style={s.emptyText}>Attendance groups will appear as the roster and check-ins sync.</Text></View>}</View></>:null}
     </Animated.View>
-    <View style={s.footer}>
-      <View style={s.dots}>{PANELS.map((_,i)=><View key={i} style={[s.dot,i===panelIndex&&s.dotActive]}/>)}</View>
-      <Text style={s.tapHint}>Touch anywhere to return to attendance</Text>
-      <Text style={s.refresh}>{summary?`Updated ${new Date(summary.generatedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"Loading live school status…"}</Text>
-    </View>
-  </Pressable>;
+    <View style={s.footer}><View style={s.dots}>{PANELS.map((_,i)=><View key={i} style={[s.dot,i===panelIndex&&s.dotActive]}/>)}</View><Text style={s.tapHint}>Touch anywhere to unlock Ledgerly</Text><Text style={s.refresh}>{summary?`Updated ${new Date(summary.generatedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"Loading live school status…"}</Text></View>
+  </Pressable>
 }
 
-const s=StyleSheet.create({
-  root:{position:"absolute",inset:0,backgroundColor:"#061c17",paddingHorizontal:Math.max(26,width*.055),paddingVertical:26,overflow:"hidden",zIndex:1000},
-  orb:{position:"absolute",width:360,height:360,borderRadius:180,opacity:.14},orbOne:{backgroundColor:"#38d991",right:-110,top:-100},orbTwo:{backgroundColor:"#3b82f6",left:-150,bottom:-120},
-  header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start"},brand:{color:"#5ee3a4",fontWeight:"900",fontSize:24,letterSpacing:-.7},school:{color:"#fff",fontSize:16,fontWeight:"800",marginTop:7},location:{color:"#8bb1a1",fontSize:12,marginTop:3},clockBlock:{alignItems:"flex-end"},time:{color:"#fff",fontSize:34,fontWeight:"300",letterSpacing:-1.5},date:{color:"#86a99b",fontSize:12,fontWeight:"700",marginTop:2},
-  liveBadge:{alignSelf:"flex-start",marginTop:24,flexDirection:"row",alignItems:"center",backgroundColor:"rgba(31,192,113,.12)",borderWidth:1,borderColor:"rgba(71,222,150,.28)",paddingHorizontal:12,paddingVertical:7,borderRadius:999},liveDot:{width:7,height:7,borderRadius:4,backgroundColor:"#45e69c",marginRight:7},liveDotOffline:{backgroundColor:"#f59e0b"},liveText:{color:"#a9eecb",fontSize:10,fontWeight:"900",letterSpacing:1.2},
-  panel:{flex:1,justifyContent:"center",paddingVertical:18},eyebrow:{color:"#65dca1",fontSize:11,fontWeight:"900",letterSpacing:1.5},heroNumber:{color:"#fff",fontSize:Math.min(96,width*.18),fontWeight:"900",letterSpacing:-5,marginTop:8},heroLabel:{color:"#a8c5b8",fontSize:18,fontWeight:"600",marginTop:-6,marginBottom:20},progressTrack:{height:8,borderRadius:8,backgroundColor:"rgba(255,255,255,.09)",overflow:"hidden"},progressFill:{height:"100%",borderRadius:8,backgroundColor:"#41d98e"},metrics:{flexDirection:"row",gap:12,marginTop:20},metric:{flex:1,backgroundColor:"rgba(255,255,255,.055)",borderWidth:1,borderColor:"rgba(255,255,255,.08)",borderRadius:20,padding:18},metricValue:{color:"#fff",fontSize:30,fontWeight:"900",letterSpacing:-1.2},metricLabel:{color:"#8fb3a4",fontSize:11,fontWeight:"800",marginTop:4,textTransform:"uppercase",letterSpacing:.7},metricDetail:{color:"#6e9183",fontSize:10,marginTop:4},
-  activityTitle:{color:"#fff",fontSize:32,fontWeight:"900",letterSpacing:-1.2,marginTop:8},statusRow:{flexDirection:"row",marginTop:20,gap:26},statusLabel:{color:"#789b8d",fontSize:10,fontWeight:"800",textTransform:"uppercase"},statusValue:{color:"#d9eee5",fontSize:14,fontWeight:"800",marginTop:4},groupList:{marginTop:20,gap:12},groupRow:{backgroundColor:"rgba(255,255,255,.045)",borderRadius:16,padding:14},groupTop:{flexDirection:"row",justifyContent:"space-between",marginBottom:9,gap:12},groupName:{color:"#e9f7f1",fontWeight:"800",flex:1},groupValue:{color:"#7fbea0",fontWeight:"800",fontSize:12},empty:{padding:24,borderRadius:18,backgroundColor:"rgba(255,255,255,.04)"},emptyText:{color:"#8daf9f",lineHeight:20},
-  footer:{alignItems:"center"},dots:{flexDirection:"row",gap:6,marginBottom:12},dot:{width:6,height:6,borderRadius:3,backgroundColor:"#315348"},dotActive:{width:24,backgroundColor:"#5fe0a1"},tapHint:{color:"#c7e0d5",fontSize:12,fontWeight:"800"},refresh:{color:"#62887a",fontSize:10,marginTop:5}
-});
+const s=StyleSheet.create({root:{position:"absolute",inset:0,backgroundColor:"#061c17",paddingHorizontal:Math.max(26,width*.055),paddingVertical:26,overflow:"hidden",zIndex:1000},orb:{position:"absolute",width:360,height:360,borderRadius:180,opacity:.14},orbOne:{backgroundColor:"#38d991",right:-110,top:-100},orbTwo:{backgroundColor:"#3b82f6",left:-150,bottom:-120},header:{flexDirection:"row",justifyContent:"space-between",alignItems:"flex-start"},brand:{color:"#5ee3a4",fontWeight:"900",fontSize:24,letterSpacing:-.7},school:{color:"#fff",fontSize:16,fontWeight:"800",marginTop:7},location:{color:"#8bb1a1",fontSize:12,marginTop:3},clockBlock:{alignItems:"flex-end"},time:{color:"#fff",fontSize:34,fontWeight:"300",letterSpacing:-1.5},date:{color:"#86a99b",fontSize:12,fontWeight:"700",marginTop:2},liveBadge:{alignSelf:"flex-start",marginTop:24,flexDirection:"row",alignItems:"center",backgroundColor:"rgba(31,192,113,.12)",borderWidth:1,borderColor:"rgba(71,222,150,.28)",paddingHorizontal:12,paddingVertical:7,borderRadius:999},liveDot:{width:7,height:7,borderRadius:4,backgroundColor:"#45e69c",marginRight:7},liveDotOffline:{backgroundColor:"#f59e0b"},liveText:{color:"#a9eecb",fontSize:10,fontWeight:"900",letterSpacing:1.2},panel:{flex:1,justifyContent:"center",paddingVertical:18},eyebrow:{color:"#65dca1",fontSize:11,fontWeight:"900",letterSpacing:1.5},heroNumber:{color:"#fff",fontSize:Math.min(96,width*.18),fontWeight:"900",letterSpacing:-5,marginTop:8},heroLabel:{color:"#a8c5b8",fontSize:18,fontWeight:"600",marginTop:-6,marginBottom:20},progressTrack:{height:8,borderRadius:8,backgroundColor:"rgba(255,255,255,.09)",overflow:"hidden"},progressFill:{height:"100%",borderRadius:8,backgroundColor:"#41d98e"},metrics:{flexDirection:"row",gap:12,marginTop:20},metric:{flex:1,backgroundColor:"rgba(255,255,255,.055)",borderWidth:1,borderColor:"rgba(255,255,255,.08)",borderRadius:20,padding:18},metricValue:{color:"#fff",fontSize:30,fontWeight:"900",letterSpacing:-1.2},metricLabel:{color:"#8fb3a4",fontSize:11,fontWeight:"800",marginTop:4,textTransform:"uppercase",letterSpacing:.7},metricDetail:{color:"#6e9183",fontSize:10,marginTop:4},activityTitle:{color:"#fff",fontSize:32,fontWeight:"900",letterSpacing:-1.2,marginTop:8},statusRow:{flexDirection:"row",marginTop:20,gap:26},statusLabel:{color:"#789b8d",fontSize:10,fontWeight:"800",textTransform:"uppercase"},statusValue:{color:"#d9eee5",fontSize:14,fontWeight:"800",marginTop:4},groupList:{marginTop:20,gap:12},groupRow:{backgroundColor:"rgba(255,255,255,.045)",borderRadius:16,padding:14},groupTop:{flexDirection:"row",justifyContent:"space-between",marginBottom:9,gap:12},groupName:{color:"#e9f7f1",fontWeight:"800",flex:1},groupValue:{color:"#7fbea0",fontWeight:"800",fontSize:12},empty:{padding:24,borderRadius:18,backgroundColor:"rgba(255,255,255,.04)"},emptyText:{color:"#8daf9f",lineHeight:20},footer:{alignItems:"center"},dots:{flexDirection:"row",gap:6,marginBottom:12},dot:{width:6,height:6,borderRadius:3,backgroundColor:"#315348"},dotActive:{width:24,backgroundColor:"#5fe0a1"},tapHint:{color:"#c7e0d5",fontSize:12,fontWeight:"800"},refresh:{color:"#62887a",fontSize:10,marginTop:5}});
