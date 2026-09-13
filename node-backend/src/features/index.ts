@@ -36,7 +36,8 @@ import { tasksWorkFeature } from "./tasks-work/index.js";
 import { printerlyFeature } from "./printerly/index.js";
 import { printerlyHealthFeature } from "./printerly-health/index.js";
 import { nvrFeature } from "./nvr/index.js";
+import { nvrGroupsFeature } from "./nvr-groups/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature, nvrGroupsFeature];
