@@ -3,7 +3,7 @@ import { createMobileSyncPublicRoutes, createMobileSyncRoutes } from "./routes.j
 
 export const mobileSyncFeature: BackendFeature = {
   key: "mobile-sync",
-  version: "1.0.0",
+  version: "1.1.0",
   mount(app,runtime){
     app.route("/api/v1/mobile-sync/offline",createMobileSyncPublicRoutes(runtime));
     app.route("/api/v1/mobile-sync",createMobileSyncRoutes(runtime));
