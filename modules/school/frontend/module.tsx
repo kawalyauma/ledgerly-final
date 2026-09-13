@@ -1,4 +1,4 @@
-import { CreditCard, School } from "lucide-react";
+import { School } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { SchoolManagementPage } from "./SchoolManagementPages";
 import { SchoolPayPage } from "./SchoolPayPage";
@@ -19,7 +19,7 @@ const moduleDefinition: FrontendModuleDefinition = {
       order: 20,
       items: [
         { label: "School Management", path: "school", scope: "school:read" },
-        { label: "SchoolPay", path: "schoolpay", scope: "school:read", icon: CreditCard },
+        { label: "SchoolPay", path: "schoolpay", scope: "school:read" },
       ],
     },
   ],
