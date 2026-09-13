@@ -5,6 +5,7 @@ import { loadEventSettings, type EventEnvelope, type EvaluatedEvent } from "./ev
 import { evaluateEmployeeEvent } from "./event-context-v13";
 import { retryDelayMinutes } from "./event-policy";
 import { runProactiveModel } from "./proactive-model";
+import { ensureActionForEvent } from "./action-service";
 
 type EventRow = EventEnvelope & { attempts: number };
 
@@ -87,6 +88,7 @@ export async function processEventInbox(env: Env) {
       }
       await storeReaction(env,event,evaluated,evaluated.agentKey);
       if (evaluated.secondaryAgentKey) await storeReaction(env,event,evaluated,evaluated.secondaryAgentKey);
+      await ensureActionForEvent(env.FINANCE_DB,event,evaluated);
       await env.FINANCE_DB.prepare("UPDATE ae_event_inbox SET status='processed',error_text=NULL,processed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?")
         .bind(event.id,event.organizationId).run();
     } catch (error) {
