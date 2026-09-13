@@ -2,14 +2,16 @@ import { School } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { SchoolManagementPage } from "./SchoolManagementPages";
 import { SchoolPayPage } from "./SchoolPayPage";
+import { MobilePinAccessPage } from "./MobilePinAccessPage";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "school-management",
   name: "School Management",
-  version: "1.6.0",
+  version: "1.11.0",
   order: 20,
   routes: {
     school: { scope: "school:read", view: SchoolManagementPage },
+    schoolpins: { scope: "school:read", view: MobilePinAccessPage },
     schoolpay: { scope: "school:read", view: SchoolPayPage },
   },
   navigation: [
@@ -19,6 +21,7 @@ const moduleDefinition: FrontendModuleDefinition = {
       order: 20,
       items: [
         { label: "School Management", path: "school", scope: "school:read" },
+        { label: "Mobile PIN Access", path: "schoolpins", scope: "school:read" },
         { label: "SchoolPay", path: "schoolpay", scope: "school:read" },
       ],
     },
