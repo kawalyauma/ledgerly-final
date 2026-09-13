@@ -1,0 +1,1 @@
+Agentic Employees v1.2.5 adds verified guardian-family resolution, cumulative published academic results, official attendance summaries, posted fee summaries, persisted family report snapshots, and bounded read-only employee delegation. Apply migration 0101 before use. DOS remains unable to manage exams; it reads only published result evidence for requested reports.
