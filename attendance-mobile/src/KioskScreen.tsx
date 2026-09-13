@@ -1,19 +1,20 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
 import {AppState,SafeAreaView,StyleSheet,Text,TextInput,TouchableOpacity,View} from "react-native";
 import {fetchBootstrap} from "./api";
-import {DeviceManager,KioskManager,OfflineStore} from "./native";
+import {KioskManager,OfflineStore} from "./native";
 import {cacheBootstrap,cachedBootstrap,enqueue,eventId} from "./storage";
 import {flush} from "./sync";
 import type {AttendanceEvent,Bootstrap,Direction,Registration,RosterPerson} from "./types";
 
 type Result={person:RosterPerson;direction:Direction};
+const KIOSK_ESCAPE_PIN="1212";
 
-export function KioskScreen({registration,onReset,onOpenSettings}:{registration:Registration;onReset:()=>void;onOpenSettings?:()=>void}){
+export function KioskScreen({registration}:{registration:Registration;onReset:()=>void;onOpenSettings?:()=>void}){
   const[bootstrap,setBootstrap]=useState<Bootstrap|null>(null);
   const[pendingCount,setPendingCount]=useState(0),[failedCount,setFailedCount]=useState(0),[online,setOnline]=useState(false);
   const[direction,setDirection]=useState<Direction>("IN"),[result,setResult]=useState<Result|null>(null),[error,setError]=useState("");
   const[query,setQuery]=useState(""),[selectedPerson,setSelectedPerson]=useState<RosterPerson|null>(null);
-  const[logoTaps,setLogoTaps]=useState(0),[exitOpen,setExitOpen]=useState(false),[exitPin,setExitPin]=useState("");
+  const[logoTaps,setLogoTaps]=useState(0),[exitOpen,setExitOpen]=useState(false),[exitPin,setExitPin]=useState(""),[exitError,setExitError]=useState("");
   const busy=useRef(false);
 
   const syncNow=useCallback(async()=>{
@@ -101,16 +102,31 @@ export function KioskScreen({registration,onReset,onOpenSettings}:{registration:
 
   function tapLogo(){
     const next=logoTaps+1;
-    if(next>=5){setExitOpen(true);setLogoTaps(0)}
-    else{setLogoTaps(next);setTimeout(()=>setLogoTaps(0),2500)}
+    if(next>=5){
+      setExitOpen(true);
+      setExitPin("");
+      setExitError("");
+      setLogoTaps(0);
+    }else{
+      setLogoTaps(next);
+      setTimeout(()=>setLogoTaps(0),2500);
+    }
   }
 
-  async function exit(){
-    if(!await DeviceManager.verifyExitPin(exitPin)){setError("Incorrect administrator PIN");return}
-    await KioskManager.exit();
-    setExitOpen(false);
-    setExitPin("");
-    onOpenSettings?.();
+  async function exitKioskTemporarily(){
+    if(exitPin!==KIOSK_ESCAPE_PIN){
+      setExitError("Incorrect PIN");
+      return;
+    }
+    try{
+      await KioskManager.exit();
+      setExitOpen(false);
+      setExitPin("");
+      setExitError("");
+      setError("");
+    }catch(e){
+      setExitError(e instanceof Error?e.message:"Unable to leave kiosk mode");
+    }
   }
 
   return <SafeAreaView style={s.root}>
@@ -217,14 +233,28 @@ export function KioskScreen({registration,onReset,onOpenSettings}:{registration:
 
     {exitOpen?<View style={s.modalShade}>
       <View style={s.exitCard}>
-        <Text style={s.exitTitle}>Administrator settings</Text>
-        <Text style={s.exitHelp}>Enter the kiosk exit PIN to change device settings.</Text>
-        <TextInput style={s.exitInput} secureTextEntry keyboardType="number-pad" value={exitPin} onChangeText={setExitPin} placeholder="Exit PIN" placeholderTextColor="#87958e"/>
-        <View style={s.exitActions}>
-          <TouchableOpacity onPress={()=>{setExitOpen(false);setExitPin("")}}><Text style={s.cancel}>Cancel</Text></TouchableOpacity>
-          <TouchableOpacity onPress={()=>void exit()}><Text style={s.exitConfirm}>Device settings</Text></TouchableOpacity>
-          <TouchableOpacity onPress={async()=>{await DeviceManager.clearRegistration();onReset()}}><Text style={s.reset}>Reset kiosk</Text></TouchableOpacity>
-        </View>
+        <View style={s.unlockIcon}><Text style={s.unlockIconText}>⌁</Text></View>
+        <Text style={s.exitTitle}>Leave kiosk mode</Text>
+        <Text style={s.exitHelp}>Enter the 4-digit kiosk PIN to temporarily unlock Android. Ledgerly will automatically lock back into kiosk mode when you return to the app.</Text>
+        <TextInput
+          autoFocus
+          style={[s.exitInput,!!exitError&&s.exitInputError]}
+          secureTextEntry
+          keyboardType="number-pad"
+          maxLength={4}
+          value={exitPin}
+          onChangeText={value=>{setExitPin(value.replace(/\D/g,"").slice(0,4));setExitError("")}}
+          placeholder="••••"
+          placeholderTextColor="#87958e"
+          onSubmitEditing={()=>void exitKioskTemporarily()}
+        />
+        {exitError?<Text style={s.exitError}>{exitError}</Text>:null}
+        <TouchableOpacity style={s.unlockButton} onPress={()=>void exitKioskTemporarily()} activeOpacity={.86}>
+          <Text style={s.unlockButtonText}>Unlock device temporarily</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.cancelButton} onPress={()=>{setExitOpen(false);setExitPin("");setExitError("")}}>
+          <Text style={s.cancel}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     </View>:null}
   </SafeAreaView>;
@@ -243,5 +273,5 @@ const s=StyleSheet.create({
   footer:{paddingHorizontal:20,paddingVertical:10,alignItems:"center"},footerText:{color:"#799e8e",fontSize:10,fontWeight:"700"},footerWarning:{color:"#f3bd61",fontSize:10,fontWeight:"800",marginTop:2},
   errorBanner:{position:"absolute",left:18,right:18,bottom:22,backgroundColor:"#4f1e23",borderRadius:16,padding:14,borderWidth:1,borderColor:"#843941",elevation:10},errorTitle:{color:"#ffdfe1",fontWeight:"900"},errorText:{color:"#eab9bd",fontSize:11,marginTop:2,lineHeight:16},
   successOverlay:{position:"absolute",left:0,right:0,top:0,bottom:0,backgroundColor:"rgba(3,16,12,.88)",alignItems:"center",justifyContent:"center",padding:24},successCard:{width:"100%",maxWidth:420,backgroundColor:"#f8fffb",borderRadius:30,padding:28,alignItems:"center",elevation:18},successCheck:{width:76,height:76,borderRadius:24,backgroundColor:"#19a96c",alignItems:"center",justifyContent:"center"},successCheckText:{color:"white",fontSize:44,fontWeight:"900"},successHello:{color:"#49816a",fontSize:13,fontWeight:"900",letterSpacing:1.2,textTransform:"uppercase",marginTop:19},successName:{color:"#10271e",fontSize:29,fontWeight:"900",letterSpacing:-1,textAlign:"center",marginTop:4},successGroup:{color:"#73857c",marginTop:4},successPill:{backgroundColor:"#ddf7ea",borderRadius:999,paddingHorizontal:15,paddingVertical:8,marginTop:17},successPillText:{color:"#157b50",fontSize:10,fontWeight:"900",letterSpacing:.8},successTime:{color:"#8b9b94",fontSize:12,fontWeight:"700",marginTop:10},
-  modalShade:{position:"absolute",left:0,right:0,top:0,bottom:0,backgroundColor:"rgba(2,12,9,.78)",alignItems:"center",justifyContent:"center",padding:22},exitCard:{width:"100%",maxWidth:430,backgroundColor:"white",borderRadius:22,padding:20,elevation:15},exitTitle:{fontSize:21,fontWeight:"900",color:"#17281f"},exitHelp:{fontSize:12,color:"#718079",marginTop:4,marginBottom:14},exitInput:{borderWidth:1,borderColor:"#d5e1db",borderRadius:13,padding:13,color:"#17281f",fontSize:17},exitActions:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:18},cancel:{color:"#718079",fontWeight:"800"},exitConfirm:{color:"#148356",fontWeight:"900"},reset:{color:"#b4232c",fontWeight:"900"}
+  modalShade:{position:"absolute",left:0,right:0,top:0,bottom:0,backgroundColor:"rgba(2,12,9,.82)",alignItems:"center",justifyContent:"center",padding:22},exitCard:{width:"100%",maxWidth:430,backgroundColor:"white",borderRadius:24,padding:22,elevation:15,alignItems:"center"},unlockIcon:{width:56,height:56,borderRadius:18,backgroundColor:"#e4f8ee",alignItems:"center",justifyContent:"center",marginBottom:12},unlockIconText:{color:"#128454",fontSize:30,fontWeight:"900"},exitTitle:{fontSize:22,fontWeight:"900",color:"#17281f"},exitHelp:{fontSize:12,color:"#718079",marginTop:6,marginBottom:16,lineHeight:18,textAlign:"center"},exitInput:{width:"100%",borderWidth:1,borderColor:"#d5e1db",borderRadius:14,padding:14,color:"#17281f",fontSize:24,fontWeight:"900",letterSpacing:8,textAlign:"center"},exitInputError:{borderColor:"#c43d49",backgroundColor:"#fff7f8"},exitError:{color:"#b4232c",fontSize:11,fontWeight:"800",marginTop:8},unlockButton:{width:"100%",height:52,borderRadius:15,backgroundColor:"#128454",alignItems:"center",justifyContent:"center",marginTop:15},unlockButtonText:{color:"white",fontSize:15,fontWeight:"900"},cancelButton:{paddingHorizontal:20,paddingTop:14},cancel:{color:"#718079",fontWeight:"800"}
 });
