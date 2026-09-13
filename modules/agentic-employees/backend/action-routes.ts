@@ -72,13 +72,13 @@ agenticActionRoutes.post("/actions/:id/execute",requireScope("school:write"),asy
   if(row.status!=="approved"||!row.approvalId)throw new AppError(409,"INVALID_STATE","Only an approved action can execute");
   try{
     const result=await executeApprovedAction(c.env,p,row.approvalId);
-    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,
-      failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='approved'`)
+    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),
+      failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
       .bind((result as any).entityType||null,(result as any).entityId||null,p.userId,row.id,p.organizationId).run();
     return c.json({data:{action:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id),result}});
   }catch(error){
     const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);
-    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`)
+    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status<>'executed'`)
       .bind(text,p.userId,row.id,p.organizationId).run();
     throw error;
   }
@@ -86,7 +86,7 @@ agenticActionRoutes.post("/actions/:id/execute",requireScope("school:write"),asy
 
 agenticActionRoutes.post("/actions/:id/dismiss",requireScope("school:write"),async c=>{
   const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
-  if(["executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE","This action is already terminal");
+  if(["executing","executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE","This action is already terminal or executing");
   const statements=[c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='dismissed',dismissed_by=?,dismissed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(p.userId,row.id,p.organizationId)];
   if(row.approvalId)statements.push(c.env.FINANCE_DB.prepare("UPDATE ae_approvals SET status='cancelled',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status IN ('pending','approved')").bind(p.userId,row.approvalId,p.organizationId));
   await c.env.FINANCE_DB.batch(statements);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});
