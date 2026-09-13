@@ -24,7 +24,7 @@ import { createReceiptPrintingRoutes } from './receipt-printing-routes.js';
 import { processAutoReceiptPrintJob, sweepReceiptPrintDispatches } from './auto-receipts.js';
 
 export const printerlyFeature: BackendFeature={
-  key:'printerly',version:'1.14.0',
+  key:'printerly',version:'1.15.0',
   mount(app,runtime){
     app.route('/api/v1/printerly',createPrinterlyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeAuthRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeJobRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyCostingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyQuotaRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyPolicyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyReleaseUserRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRoutingBatchRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyStationRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRetentionRoutes(runtime));app.route('/api/v1/printerly',createScannerlyRoutes(runtime));app.route('/api/v1/printerly',createScannerlyNodeRoutes(runtime));app.route('/api/v1/printerly',createScannerlyRoutingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyConsumableRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyProcurementRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyServiceDeskRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyAuditMobileRoutes(runtime));app.route('/api/v1/printerly',createReceiptPrintingRoutes(runtime));
   },
