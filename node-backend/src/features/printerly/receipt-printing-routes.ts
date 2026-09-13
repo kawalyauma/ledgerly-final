@@ -10,6 +10,11 @@ import {
   retryReceiptPrintDispatch,
   updateReceiptPrintSettings,
 } from './auto-receipts.js';
+import {
+  createReceiptReprint,
+  listReceiptReprints,
+  retryReceiptReprint,
+} from './receipt-reprints.js';
 
 const settingsSchema=z.object({
   enabled:z.boolean().default(true),
@@ -41,9 +46,25 @@ export function createReceiptPrintingRoutes(runtime:Runtime){
     return c.json({data:await listReceiptPrintDispatches(runtime,p.organizationId,limit)});
   });
 
+  r.get('/receipt-printing/reprints',async c=>{
+    const p=c.get('principal');
+    const limit=Number(c.req.query('limit')??100);
+    return c.json({data:await listReceiptReprints(runtime,p.organizationId,limit)});
+  });
+
   r.post('/receipt-printing/dispatches/:paymentId/retry',requireScope('documents:write'),async c=>{
     const p=c.get('principal');
     return c.json({data:await retryReceiptPrintDispatch(runtime,p.organizationId,c.req.param('paymentId'))});
+  });
+
+  r.post('/receipt-printing/dispatches/:paymentId/reprint',requireScope('documents:write'),async c=>{
+    const p=c.get('principal');
+    return c.json({data:await createReceiptReprint(runtime,p.organizationId,c.req.param('paymentId'),p.userId)},201);
+  });
+
+  r.post('/receipt-printing/reprints/:reprintId/retry',requireScope('documents:write'),async c=>{
+    const p=c.get('principal');
+    return c.json({data:await retryReceiptReprint(runtime,p.organizationId,c.req.param('reprintId'))});
   });
 
   return r;
