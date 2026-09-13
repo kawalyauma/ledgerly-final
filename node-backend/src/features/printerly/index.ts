@@ -5,9 +5,10 @@ import { createPrinterlyNodeJobRoutes } from './node-jobs.js';
 import { createPrinterlyCostingRoutes } from './costing-routes.js';
 import { createPrinterlyQuotaRoutes } from './quotas.js';
 import { createPrinterlyPolicyRoutes } from './policies.js';
+import { createPrinterlyReleaseUserRoutes } from './release-user.js';
 
 export const printerlyFeature: BackendFeature={
   key:'printerly',
-  version:'1.4.0',
-  mount(app,runtime){app.route('/api/v1/printerly',createPrinterlyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeAuthRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeJobRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyCostingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyQuotaRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyPolicyRoutes(runtime));},
+  version:'1.5.0',
+  mount(app,runtime){app.route('/api/v1/printerly',createPrinterlyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeAuthRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeJobRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyCostingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyQuotaRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyPolicyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyReleaseUserRoutes(runtime));},
 };
