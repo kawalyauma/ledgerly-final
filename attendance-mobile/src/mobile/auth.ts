@@ -15,7 +15,7 @@ export type MobileSession={
   staffNumber?:string|null;
 };
 
-export type MobileAuthContext={apiUrl:string;organizationId:string;deviceToken:string;deviceId:string};
+export type MobileAuthContext={apiUrl:string;organizationId:string;deviceToken:string;deviceId:string;userId?:string};
 type LoginInput={identifier:string;password:string;organizationId?:string;mfaCode?:string};
 type ErrorPayload={error?:{code?:string;message?:string;details?:unknown}};
 const SESSION_KEY="mobile.auth.session";
@@ -33,21 +33,22 @@ async function jsonRequest<T>(url:string,init:RequestInit):Promise<T>{
   if(!response.ok)throw new MobileApiError(response.status,payload.error?.code||"REQUEST_FAILED",payload.error?.message||`Request failed (${response.status})`,payload.error?.details);
   return payload.data as T;
 }
-function decodeJwtOrganization(token:string){
+function decodeJwtClaims(token:string){
   try{
-    const raw=token.split(".")[1];if(!raw)return undefined;
+    const raw=token.split(".")[1];if(!raw)return{} as {org?:string;sub?:string};
     const normalized=raw.replace(/-/g,"+").replace(/_/g,"/").padEnd(Math.ceil(raw.length/4)*4,"=");
-    const payload=JSON.parse(atob(normalized)) as {org?:string};
-    return payload.org;
-  }catch{return undefined}
+    return JSON.parse(atob(normalized)) as {org?:string;sub?:string};
+  }catch{return{} as {org?:string;sub?:string}}
 }
 export async function loginMobile(apiUrl:string,input:LoginInput):Promise<MobileSession>{
-  const data=await jsonRequest<Omit<MobileSession,"apiUrl"|"identifier"|"organizationId">>(`${base(apiUrl)}/auth/login`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(input)});
-  return{...data,apiUrl:base(apiUrl),identifier:input.identifier.trim(),organizationId:input.organizationId?.trim()||decodeJwtOrganization(data.accessToken)};
+  const data=await jsonRequest<Omit<MobileSession,"apiUrl"|"identifier"|"organizationId"|"userId">>(`${base(apiUrl)}/auth/login`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify(input)});
+  const claims=decodeJwtClaims(data.accessToken);
+  return{...data,apiUrl:base(apiUrl),identifier:input.identifier.trim(),organizationId:input.organizationId?.trim()||claims.org,userId:claims.sub};
 }
 export async function refreshMobile(session:MobileSession):Promise<MobileSession>{
-  const data=await jsonRequest<Omit<MobileSession,"apiUrl"|"identifier"|"organizationId">>(`${base(session.apiUrl)}/auth/refresh`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({refreshToken:session.refreshToken})});
-  return{...session,...data,apiUrl:session.apiUrl,identifier:session.identifier,organizationId:session.organizationId||decodeJwtOrganization(data.accessToken)};
+  const data=await jsonRequest<Omit<MobileSession,"apiUrl"|"identifier"|"organizationId"|"userId">>(`${base(session.apiUrl)}/auth/refresh`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({refreshToken:session.refreshToken})});
+  const claims=decodeJwtClaims(data.accessToken);
+  return{...session,...data,apiUrl:session.apiUrl,identifier:session.identifier,organizationId:session.organizationId||claims.org,userId:session.userId||claims.sub};
 }
 export async function logoutMobile(session:MobileSession){
   try{await fetch(`${base(session.apiUrl)}/auth/logout`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json"},body:JSON.stringify({refreshToken:session.refreshToken})})}catch{}
@@ -59,12 +60,12 @@ export async function readMobileAuthContext(){const raw=await OfflineStore.getSe
 export async function clearMobileAuthContext(){await OfflineStore.removeSecure(AUTH_CONTEXT_KEY)}
 
 export async function trustMobileDevice(session:MobileSession):Promise<MobileAuthContext>{
-  const organizationId=session.organizationId||decodeJwtOrganization(session.accessToken);
-  if(!organizationId)throw new MobileApiError(422,"ORGANIZATION_REQUIRED","Unable to determine the school for this session.");
+  const claims=decodeJwtClaims(session.accessToken),organizationId=session.organizationId||claims.org,userId=session.userId||claims.sub;
+  if(!organizationId||!userId)throw new MobileApiError(422,"ORGANIZATION_REQUIRED","Unable to determine the school employee for this session.");
   const existing=await readMobileAuthContext();
-  if(existing&&existing.apiUrl===base(session.apiUrl)&&existing.organizationId===organizationId&&existing.deviceToken)return existing;
-  const data=await jsonRequest<{id:string;deviceToken:string;organizationId:string}>(`${base(session.apiUrl)}/api/v1/school/mobile-pin/trusted-devices`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${session.accessToken}`},body:JSON.stringify({label:"Ledgerly Mobile",platform:"android"})});
-  const context={apiUrl:base(session.apiUrl),organizationId:data.organizationId,deviceToken:data.deviceToken,deviceId:data.id};
+  if(existing&&existing.apiUrl===base(session.apiUrl)&&existing.organizationId===organizationId&&existing.userId===userId&&existing.deviceToken)return existing;
+  const data=await jsonRequest<{id:string;deviceToken:string;organizationId:string;userId:string}>(`${base(session.apiUrl)}/api/v1/school/mobile-pin/trusted-devices`,{method:"POST",headers:{Accept:"application/json","Content-Type":"application/json",Authorization:`Bearer ${session.accessToken}`},body:JSON.stringify({label:"Ledgerly Mobile",platform:"android"})});
+  const context={apiUrl:base(session.apiUrl),organizationId:data.organizationId,deviceToken:data.deviceToken,deviceId:data.id,userId:data.userId};
   await OfflineStore.putSecure(AUTH_CONTEXT_KEY,JSON.stringify(context));
   return context;
 }
