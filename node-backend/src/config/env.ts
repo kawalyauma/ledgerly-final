@@ -33,10 +33,19 @@ const schema = z.object({
   QUEUE_BATCH_SIZE: z.coerce.number().int().min(1).max(100).default(20),
   QUEUE_STALE_SECONDS: z.coerce.number().int().min(30).max(86400).default(300),
   SCHEDULER_TIMEZONE: z.string().min(1).default("Africa/Kampala"),
+  EGOSMS_URL: z.string().url().default("https://www.egosms.co/api/v1/plain/"),
+  EGOSMS_USERNAME: z.string().min(1).optional(),
+  EGOSMS_PASSWORD: z.string().min(1).optional(),
+  EGOSMS_SENDER_ID: z.string().min(1).max(20).optional(),
+  WHATSAPP_SUPPORT_HUB_URL: z.string().url().optional(),
+  WHATSAPP_SUPPORT_APP_KEY: z.string().min(1).optional(),
+  RESEND_API_KEY: z.string().min(1).optional(),
+  RESEND_FROM_EMAIL: z.string().email().optional(),
 }).superRefine((value, ctx) => {
-  if (value.STORAGE_DRIVER !== "minio") return;
-  for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
-    if (!value[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=minio` });
+  if (value.STORAGE_DRIVER === "minio") {
+    for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
+      if (!value[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=minio` });
+    }
   }
 });
 
