@@ -9,6 +9,7 @@ describe("agentic employee policy", () => {
 
   it("keeps sensitive actions behind approval", () => {
     expect(actionNeedsApproval("communication.campaign.send")).toBe(true);
+    expect(actionNeedsApproval("work.task.create")).toBe(true);
     expect(actionNeedsApproval("finance.write")).toBe(true);
     expect(actionNeedsApproval("academic.write")).toBe(true);
     expect(actionNeedsApproval("school_snapshot")).toBe(false);
@@ -27,5 +28,6 @@ describe("agentic employee policy", () => {
     expect(AGENTS.hr.tools).toContain("hr_leave_queue");
     expect(AGENTS.librarian.tools).toContain("learner_book_history");
     expect(AGENTS.headteacher.modelTier).toBe("sol");
+    for (const agent of Object.values(AGENTS)) expect(agent.tools).toContain("prepare_work_task");
   });
 });
