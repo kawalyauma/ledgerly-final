@@ -10,7 +10,7 @@ import {StaffTab} from "./StaffTab";
 import {StudentsTab} from "./StudentsTab";
 
 type Tab="overview"|"students"|"staff"|"operations"|"schoolpay"|"admin";
-const tabs:{id:Tab;label:string;icon:string}[]=[{id:"overview",label:"Overview",icon:"⌂"},{id:"students",label:"Learners",icon:"◎"},{id:"staff",label:"Staff",icon:"♙"},{id:"operations",label:"Operations",icon:"▦"},{id:"schoolpay",label:"SchoolPay",icon:"₵"},{id:"admin",label:"Admin",icon:"⚙"}];
+const tabs:{id:Tab;label:string;icon:string}[]=[{id:"overview",label:"Overview",icon:"⌂"},{id:"students",label:"Learners",icon:"◎"},{id:"staff",label:"Staff",icon:"♙"},{id:"operations",label:"Operations",icon:"▦"},{id:"schoolpay",label:"SchoolPay",icon:"¤"},{id:"admin",label:"Admin",icon:"⚙"}];
 export function SchoolWorkspaceScreen({session,onSession,onBack}:{session:MobileSession;onSession:SessionUpdater;onBack:()=>void}){
  const[tab,setTab]=useState<Tab>("overview"),common={session,onSession};
  return <SafeAreaView style={s.root}><StatusBar barStyle="light-content" backgroundColor="#071c16"/>
