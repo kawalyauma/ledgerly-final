@@ -56,7 +56,8 @@ export async function ensureDefaultProactiveSchedules(db: D1Database, organizati
   for (const item of PROACTIVE_WORKFLOWS) {
     const nextRunAt = nextOccurrence(timeZone, item.runHour, item.runMinute, item.cadence, item.weekday);
     await db.prepare(`INSERT INTO ae_proactive_schedules (id,organization_id,workflow_key,agent_key,actor_user_id,enabled,cadence,run_hour,run_minute,weekday,next_run_at,updated_by)
-      VALUES (?,?,?,?,?,1,?,?,?,?,?,?) ON CONFLICT(organization_id,workflow_key) DO NOTHING`)
+      VALUES (?,?,?,?,?,1,?,?,?,?,?,?)
+      ON CONFLICT(organization_id,workflow_key) DO UPDATE SET actor_user_id=excluded.actor_user_id,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`)
       .bind(createId("aps"), organizationId, item.key, item.agentKey, actorUserId, item.cadence, item.runHour, item.runMinute, item.weekday, nextRunAt, actorUserId).run();
   }
 }
