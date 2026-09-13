@@ -3,6 +3,12 @@ import { evaluateEvent as evaluateBaseEvent } from "./event-context";
 import { attendanceSeverity, booksStockSeverity } from "./event-policy";
 
 export async function evaluateEmployeeEvent(db:D1Database,event:EventEnvelope,settings:EventSettings):Promise<EvaluatedEvent>{
+  if(event.eventType==="finance.payment_allocated"){
+    const payment=await db.prepare(`SELECT p.status FROM payment_allocations a JOIN payments p ON p.id=a.payment_id AND p.organization_id=a.organization_id
+      WHERE a.id=? AND a.organization_id=?`).bind(event.sourceRecordId,event.organizationId).first<{status:string}>();
+    if(!payment)return{ignored:true,ignoreReason:"Payment allocation no longer exists"};
+    if(payment.status!=="posted")return{ignored:true,ignoreReason:`Payment is ${payment.status}, not posted`};
+  }
   if(event.eventType!=="academics.lesson_plan_overdue"){
     const result=await evaluateBaseEvent(db,event,settings);
     if(event.eventType==="attendance.student_absent"&&result.facts){
