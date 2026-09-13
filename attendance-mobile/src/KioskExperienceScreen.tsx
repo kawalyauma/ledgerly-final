@@ -14,51 +14,59 @@ export function KioskExperienceScreen({registration,onReset,onOpenSettings}:Prop
   const[idle,setIdle]=useState(false);
   const[summary,setSummary]=useState<LiveSchoolSummary|null>(null);
   const idleTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  const refreshTimer=useRef<ReturnType<typeof setInterval>|null>(null);
   const mounted=useRef(true);
+  const settingsRef=useRef<KioskDisplaySettings>(DEFAULT_KIOSK_DISPLAY_SETTINGS);
 
-  const armIdle=useCallback((next=settings)=>{
+  const armIdle=useCallback((next?:KioskDisplaySettings)=>{
+    const active=next||settingsRef.current;
     if(idleTimer.current)clearTimeout(idleTimer.current);
-    if(!next.liveDisplayEnabled)return;
-    idleTimer.current=setTimeout(()=>{if(mounted.current)setIdle(true)},next.idleTimeoutMs);
-  },[settings]);
-  const activity=useCallback(()=>{
-    if(idle)setIdle(false);
-    armIdle();
-  },[armIdle,idle]);
+    if(!active.liveDisplayEnabled)return;
+    idleTimer.current=setTimeout(()=>{if(mounted.current)setIdle(true)},active.idleTimeoutMs);
+  },[]);
+  const activity=useCallback(()=>{setIdle(false);armIdle()},[armIdle]);
   const refreshSummary=useCallback(async()=>{
     const next=await loadLiveSchoolSummary(registration).catch(()=>null);
     if(next&&mounted.current)setSummary(next);
   },[registration]);
-  const restoreKiosk=useCallback(async(next=settings)=>{
-    if(!next.kioskEnabled)return;
+  const restoreKiosk=useCallback(async(next?:KioskDisplaySettings)=>{
+    const active=next||settingsRef.current;
+    if(!active.kioskEnabled)return;
     await KioskManager.enter().catch(()=>false);
-  },[settings]);
+  },[]);
+  const applySettings=useCallback((next:KioskDisplaySettings)=>{
+    settingsRef.current=next;
+    setSettings(next);
+    armIdle(next);
+    if(refreshTimer.current)clearInterval(refreshTimer.current);
+    refreshTimer.current=setInterval(()=>void refreshSummary(),next.refreshIntervalMs);
+  },[armIdle,refreshSummary]);
 
   useEffect(()=>{
     mounted.current=true;
-    let refreshTimer:ReturnType<typeof setInterval>|null=null;
     (async()=>{
       const saved=await readKioskDisplaySettings();
       if(!mounted.current)return;
-      setSettings(saved);
+      applySettings(saved);
       await restoreKiosk(saved);
       await refreshSummary();
-      armIdle(saved);
-      refreshTimer=setInterval(()=>void refreshSummary(),saved.refreshIntervalMs);
     })();
     const appState=AppState.addEventListener("change",state=>{
-      if(state==="active"){
-        void readKioskDisplaySettings().then(next=>{if(!mounted.current)return;setSettings(next);void restoreKiosk(next);armIdle(next)});
-        void refreshSummary();
-      }
+      if(state!=="active")return;
+      void readKioskDisplaySettings().then(next=>{
+        if(!mounted.current)return;
+        applySettings(next);
+        void restoreKiosk(next);
+      });
+      void refreshSummary();
     });
     return()=>{
       mounted.current=false;
       appState.remove();
       if(idleTimer.current)clearTimeout(idleTimer.current);
-      if(refreshTimer)clearInterval(refreshTimer);
+      if(refreshTimer.current)clearInterval(refreshTimer.current);
     };
-  },[armIdle,refreshSummary,restoreKiosk]);
+  },[applySettings,refreshSummary,restoreKiosk]);
 
   useEffect(()=>{if(idle)void refreshSummary()},[idle,refreshSummary]);
 
