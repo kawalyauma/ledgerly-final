@@ -8,7 +8,7 @@ export async function sweepNvrRetention(_job:ClaimedJob,runtime:Runtime){
     const policy:any=p.rows[0]??{enabled:true,recording_days:14};
     if(!policy.enabled)continue;
     await runtime.db.query(`UPDATE nvr_recordings SET retention_until=COALESCE(retention_until,started_at+($2::text||' days')::interval) WHERE organization_id=$1 AND status='ready' AND retention_until IS NULL`,[org.id,String(Number(policy.recording_days||14))]);
-    const due=await runtime.db.query(`SELECT id,upload_state,object_key FROM nvr_recordings WHERE organization_id=$1 AND status='ready' AND retention_until<=CURRENT_TIMESTAMP AND purged_at IS NULL ORDER BY retention_until LIMIT 200`,[org.id]);
+    const due=await runtime.db.query(`SELECT r.id,r.upload_state,r.object_key FROM nvr_recordings r WHERE r.organization_id=$1 AND r.status='ready' AND r.retention_until<=CURRENT_TIMESTAMP AND r.purged_at IS NULL AND NOT EXISTS(SELECT 1 FROM nvr_recording_holds h WHERE h.organization_id=r.organization_id AND h.recording_id=r.id AND h.released_at IS NULL) ORDER BY r.retention_until LIMIT 200`,[org.id]);
     for(const rec of due.rows as any[]){
       if(rec.upload_state==='chunked'){
         const chunks=await runtime.db.query(`SELECT object_key FROM nvr_recording_chunks WHERE organization_id=$1 AND recording_id=$2 ORDER BY chunk_index`,[org.id,rec.id]);
