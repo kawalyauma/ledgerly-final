@@ -26,13 +26,15 @@ import { createClinicRecordRoutes } from "./clinic-records.js";
 import { createSchoolIntegrityRoutes } from "./integrity.js";
 import { createSchoolSetupTermIntegrityRoutes } from "./setup-terms-integrity.js";
 import { createSchoolSetupClassIntegrityRoutes } from "./setup-class-integrity.js";
+import { createSchoolSetupSubjectIntegrityRoutes } from "./setup-subject-integrity.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
-  version: "3.14.0",
+  version: "3.15.0",
   mount(app,runtime){
     app.route("/api/v1/school/setup",createSchoolSetupTermIntegrityRoutes(runtime));
     app.route("/api/v1/school/setup",createSchoolSetupClassIntegrityRoutes(runtime));
+    app.route("/api/v1/school/setup",createSchoolSetupSubjectIntegrityRoutes(runtime));
     app.route("/api/v1/school",createSchoolIntegrityRoutes(runtime));
     app.route("/api/v1/school",createSchoolRoutes(runtime));
     app.route("/api/v1/school/student-management",createStudentIntegrityRoutes(runtime));
