@@ -1,0 +1,32 @@
+name: Attendance mobile kiosk
+
+on:
+  pull_request:
+    paths:
+      - 'attendance-mobile/**'
+      - '.github/workflows/attendance-mobile-kiosk-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: attendance-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+          cache: npm
+          cache-dependency-path: attendance-mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --runInBand --passWithNoTests
+      - name: Compile Android Kotlin
+        run: ./gradlew :app:compileDebugKotlin --no-daemon
+        working-directory: attendance-mobile/android
