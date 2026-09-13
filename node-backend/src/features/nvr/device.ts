@@ -7,9 +7,9 @@ import { randomToken, sha256 } from '../core-identity/security.js';
 
 const pairSchema=z.object({cameraId:z.string().min(1),pairingCode:z.string().regex(/^\d{6}$/),deviceId:z.string().min(3).max(200),appVersion:z.string().max(80).optional(),capabilities:z.record(z.string(),z.unknown()).default({})});
 const beatSchema=z.object({status:z.enum(['online','recording','error']).default('online'),capabilities:z.record(z.string(),z.unknown()).optional(),error:z.string().max(1000).nullable().optional(),appVersion:z.string().max(80).optional()});
-const bearer=(c:any)=>(c.req.header('Authorization')||'').replace(/^Bearer\s+/i,'').trim();
+export const nvrBearer=(c:any)=>(c.req.header('Authorization')||'').replace(/^Bearer\s+/i,'').trim();
 
-async function authenticate(runtime:Runtime,secret:string){
+export async function authenticateNvrCamera(runtime:Runtime,secret:string){
   if(!secret)throw new AppError(401,'CAMERA_UNAUTHORIZED','Missing camera credential');
   const q=await runtime.db.query(`SELECT id,organization_id FROM nvr_cameras WHERE device_secret_digest=$1 AND enabled=true AND source_type='phone'`,[sha256(secret)]);
   if(!q.rowCount)throw new AppError(401,'CAMERA_UNAUTHORIZED','Invalid camera credential');
@@ -36,7 +36,7 @@ export function createNvrDeviceRoutes(runtime:Runtime){
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release();}
   });
   r.post('/device/heartbeat',async c=>{
-    const cam=await authenticate(runtime,bearer(c));
+    const cam=await authenticateNvrCamera(runtime,nvrBearer(c));
     const s=beatSchema.safeParse(await c.req.json().catch(()=>null));
     if(!s.success)throw new AppError(422,'VALIDATION_ERROR','Invalid camera heartbeat',s.error.flatten());
     const q=await runtime.db.query(`UPDATE nvr_cameras SET status=$1,capabilities=COALESCE($2::jsonb,capabilities),last_error=$3,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$4 AND organization_id=$5 AND enabled=true RETURNING id`,[s.data.status,s.data.capabilities?JSON.stringify(s.data.capabilities):null,s.data.error??null,cam.id,cam.organization_id]);
