@@ -1,15 +1,15 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "1.2.5",
-  "description": "Tenant-safe agentic school employees powered by OpenAI models with Ledgerly tool controls, approvals, proactive reviews, cross-employee delegation and comprehensive family reporting.",
+  "version": "1.3.0",
+  "description": "Tenant-safe agentic school employees powered by OpenAI models with Ledgerly tool controls, approvals, proactive reviews, event-driven reactions, cross-employee delegation and comprehensive family reporting.",
   "category": "automation",
   "core": false,
   "active": true,
   "manifest": {
     "standalone": true,
     "requiresModules": ["school-management"],
-    "requiresDataFrom": ["school-management", "academics", "communications", "human-resources", "books", "attendance", "exams"],
+    "requiresDataFrom": ["school-management", "academics", "communications", "human-resources", "books", "attendance", "exams", "payroll-payments"],
     "sharedCore": ["organizations", "users", "school_students", "school_guardians", "school_student_guardians", "school_staff_profiles"],
     "provider": "openai-responses",
     "models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
@@ -38,7 +38,16 @@
       "cumulative-family-reports",
       "published-results-readonly-analysis",
       "cumulative-attendance-analysis",
-      "family-finance-analysis"
+      "family-finance-analysis",
+      "durable-event-inbox",
+      "payment-posted-reactions",
+      "absence-escalation",
+      "approved-leave-reactions",
+      "low-stock-reactions",
+      "overdue-lesson-plan-reactions",
+      "event-reaction-retries",
+      "event-reaction-audit",
+      "headteacher-exception-briefing"
     ]
   }
 }
