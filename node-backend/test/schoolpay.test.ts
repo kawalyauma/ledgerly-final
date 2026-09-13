@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { schoolPayAdhocHash } from "../src/features/schoolpay/adhoc.js";
 import { schoolPaySyncHash, validateSchoolPayDateRange } from "../src/features/schoolpay/reconciliation.js";
 import { schoolPayAdhocRecoveryDelayMinutes } from "../src/features/schoolpay/recovery.js";
+import { ipMatchesRule, normalizeIp } from "../src/features/schoolpay/security.js";
 import {
   decryptSchoolPaySecret,
   encryptSchoolPaySecret,
@@ -38,6 +39,14 @@ describe("SchoolPay gateway crypto", () => {
 
   it("backs off repeated SchoolPay ad-hoc recovery checks", () => {
     expect([1, 2, 3, 4, 5, 20].map(schoolPayAdhocRecoveryDelayMinutes)).toEqual([5, 10, 15, 30, 60, 60]);
+  });
+
+  it("matches exact addresses and IPv4 CIDR webhook rules", () => {
+    expect(ipMatchesRule("196.0.0.15", "196.0.0.15")).toBe(true);
+    expect(ipMatchesRule("196.0.0.15", "196.0.0.0/24")).toBe(true);
+    expect(ipMatchesRule("196.0.1.15", "196.0.0.0/24")).toBe(false);
+    expect(ipMatchesRule("2001:db8::5", "2001:db8::5")).toBe(true);
+    expect(normalizeIp("::ffff:127.0.0.1")).toBe("127.0.0.1");
   });
 
   it("encrypts each school API password with authenticated encryption", () => {

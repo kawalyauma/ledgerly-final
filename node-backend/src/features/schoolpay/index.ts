@@ -4,7 +4,7 @@ import { createSchoolPayAdminRoutes, createSchoolPayWebhookRoutes } from "./rout
 
 export const schoolPayFeature: BackendFeature = {
   key: "schoolpay",
-  version: "1.3.0",
+  version: "1.4.0",
   mount(app, runtime) {
     app.route("/api/v1/schoolpay", createSchoolPayAdminRoutes(runtime));
     app.route("/webhooks/schoolpay", createSchoolPayWebhookRoutes(runtime));

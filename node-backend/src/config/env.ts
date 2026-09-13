@@ -7,6 +7,13 @@ function envBoolean(defaultValue: boolean) {
   });
 }
 
+function envList(defaultValue: string[] = []) {
+  return z.string().optional().transform((value) => {
+    if (value === undefined) return defaultValue;
+    return value.split(",").map((item) => item.trim()).filter(Boolean);
+  });
+}
+
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
@@ -44,11 +51,21 @@ const schema = z.object({
   SCHOOLPAY_API_BASE_URL: z.string().url().default("https://schoolpay.co.ug"),
   SCHOOLPAY_PUBLIC_BASE_URL: z.string().url().optional(),
   SCHOOLPAY_SECRET_ENCRYPTION_KEY: z.string().min(32).optional(),
+  SCHOOLPAY_ENFORCE_WEBHOOK_IP_ALLOWLIST: envBoolean(false),
+  SCHOOLPAY_WEBHOOK_IP_ALLOWLIST: envList(),
+  SCHOOLPAY_TRUSTED_PROXY_IPS: envList(["127.0.0.1", "::1"]),
 }).superRefine((value, ctx) => {
   if (value.STORAGE_DRIVER === "minio") {
     for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
       if (!value[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=minio` });
     }
+  }
+  if (value.SCHOOLPAY_ENFORCE_WEBHOOK_IP_ALLOWLIST && value.SCHOOLPAY_WEBHOOK_IP_ALLOWLIST.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["SCHOOLPAY_WEBHOOK_IP_ALLOWLIST"],
+      message: "SCHOOLPAY_WEBHOOK_IP_ALLOWLIST must contain at least one IP/CIDR when enforcement is enabled",
+    });
   }
 });
 
