@@ -11,11 +11,21 @@ const SPEC={
   },required:["title","description"],additionalProperties:false},
 };
 
+const PREVIOUS:Partial<Record<AgentDefinition["key"],readonly string[]>>={
+  secretary:["school_snapshot","search_students","search_staff","resolve_guardian_family","communications_summary","prepare_communication"],
+  dos:["school_snapshot","search_students","search_staff","resolve_guardian_family","family_comprehensive_report","delegate_to_employee","academics_overview","lesson_plan_queue","scheme_coverage","prepare_communication"],
+  bursar:["search_students","fee_balance_lookup","fee_arrears_summary","fee_collection_summary","prepare_communication"],
+  headteacher:["school_snapshot","search_students","search_staff","resolve_guardian_family","family_comprehensive_report","delegate_to_employee","academics_overview","lesson_plan_queue","scheme_coverage","hr_overview","hr_leave_queue","fee_collection_summary","fee_arrears_summary","books_overview","communications_summary","prepare_communication"],
+  hr:["school_snapshot","search_staff","hr_overview","hr_leave_queue","prepare_communication"],
+  librarian:["school_snapshot","search_students","books_overview","learner_book_history","prepare_communication"],
+};
+
+function sameSet(a:readonly string[],b:readonly string[]){return a.length===b.length&&a.every(v=>b.includes(v));}
 function legacyAllows(agent:AgentDefinition,requested?:string[]|null){
   if(!requested)return true;
   if(requested.includes("prepare_work_task"))return true;
-  const currentWithoutNew=agent.tools.filter(t=>t!=="prepare_work_task");
-  return requested.length===currentWithoutNew.length&&currentWithoutNew.every(t=>requested.includes(t));
+  const previous=PREVIOUS[agent.key];
+  return Boolean(previous&&sameSet(previous,requested));
 }
 
 export function openAiTools(agent:AgentDefinition,requested?:string[]|null){
