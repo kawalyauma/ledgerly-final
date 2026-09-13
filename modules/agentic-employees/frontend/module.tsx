@@ -1,6 +1,7 @@
 import { Bot } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AgenticEmployeesPage } from "./AgenticEmployeesPage";
+import { VisionWorkspacePage } from "./VisionWorkspacePage";
 import { ProactiveEmployeesPage } from "./ProactiveEmployeesPage";
 import { EventReactionsPage } from "./EventReactionsPage";
 import { ActionCenterPage } from "./ActionCenterPage";
@@ -10,10 +11,11 @@ import "./agentic-employees.css";
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "1.5.0",
+  version: "1.6.0",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
+    "agentic-employees-vision": { scope: "school:read", view: VisionWorkspacePage },
     "agentic-employees-proactive": { scope: "school:read", view: ProactiveEmployeesPage },
     "agentic-employees-events": { scope: "school:read", view: EventReactionsPage },
     "agentic-employees-actions": { scope: "school:read", view: ActionCenterPage },
@@ -26,6 +28,7 @@ const moduleDefinition: FrontendModuleDefinition = {
       order: 75,
       items: [
         { label: "AI Workforce", path: "agentic-employees", scope: "school:read" },
+        { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
         { label: "Proactive Workforce", path: "agentic-employees-proactive", scope: "school:read" },
         { label: "Event Reactions", path: "agentic-employees-events", scope: "school:read" },
         { label: "Action Center", path: "agentic-employees-actions", scope: "school:read" },
