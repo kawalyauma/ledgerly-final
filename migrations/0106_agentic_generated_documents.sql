@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS ae_generated_documents (
   source_mime_type TEXT NOT NULL,
   source_size_bytes INTEGER NOT NULL DEFAULT 0,
   pdf_size_bytes INTEGER NOT NULL DEFAULT 0,
+  pdf_page_count INTEGER NOT NULL DEFAULT 1,
   checksum_sha256 TEXT,
   spec_json TEXT NOT NULL DEFAULT '{}',
   status TEXT NOT NULL DEFAULT 'saved' CHECK(status IN ('saved','archived','deleted')),
