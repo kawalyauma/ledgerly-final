@@ -19,6 +19,7 @@ import { createSchoolFeeReceiptIntegrityRoutes } from "./fees-receipt-integrity.
 import { createSchoolFeeExportRoutes } from "./fees-export.js";
 import { sweepSchoolFeeInstallments } from "./fees-jobs.js";
 import { createAttendanceIntegrityRoutes } from "./attendance-integrity.js";
+import { createAttendanceReportRoutes } from "./attendance-reports.js";
 import { createAttendanceRoutes } from "./attendance.js";
 import { createClinicRoutes } from "./clinic.js";
 import { createClinicRecordRoutes } from "./clinic-records.js";
@@ -26,7 +27,7 @@ import { createSchoolIntegrityRoutes } from "./integrity.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
-  version: "3.12.0",
+  version: "3.13.0",
   mount(app,runtime){
     app.route("/api/v1/school",createSchoolIntegrityRoutes(runtime));
     app.route("/api/v1/school",createSchoolRoutes(runtime));
@@ -48,6 +49,7 @@ export const schoolFeature: BackendFeature = {
     app.route("/api/v1/school/fees",createSchoolFeeExportRoutes(runtime));
     app.route("/api/v1/school/fees",createSchoolFeeRoutes(runtime));
     app.route("/api/v1/school/attendance",createAttendanceIntegrityRoutes(runtime));
+    app.route("/api/v1/school/attendance",createAttendanceReportRoutes(runtime));
     app.route("/api/v1/school/attendance",createAttendanceRoutes(runtime));
     app.route("/api/v1/school/clinic",createClinicRecordRoutes(runtime));
     app.route("/api/v1/school/clinic",createClinicRoutes(runtime));
