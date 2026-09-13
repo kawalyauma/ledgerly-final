@@ -19,8 +19,8 @@ export async function executeDocumentGenerateAction(env:Env,principal:AuthPrinci
   const artifact=await env.AGENT_DOCUMENT_SERVICE.generate({documentId,organizationId:principal.organizationId,agentKey,title,format,spec});
   try{
     await env.FINANCE_DB.prepare(`INSERT INTO ae_generated_documents
-      (id,organization_id,agent_key,conversation_id,action_id,title,format,source_object_key,pdf_object_key,source_mime_type,source_size_bytes,pdf_size_bytes,checksum_sha256,spec_json,status,created_by)
-      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'saved',?)`).bind(documentId,principal.organizationId,agentKey,payload.conversationId||null,actionId||null,title,format,artifact.sourceObjectKey,artifact.pdfObjectKey,artifact.sourceMimeType,artifact.sourceSizeBytes,artifact.pdfSizeBytes,artifact.checksumSha256,JSON.stringify(spec),principal.userId).run();
+      (id,organization_id,agent_key,conversation_id,action_id,title,format,source_object_key,pdf_object_key,source_mime_type,source_size_bytes,pdf_size_bytes,pdf_page_count,checksum_sha256,spec_json,status,created_by)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'saved',?)`).bind(documentId,principal.organizationId,agentKey,payload.conversationId||null,actionId||null,title,format,artifact.sourceObjectKey,artifact.pdfObjectKey,artifact.sourceMimeType,artifact.sourceSizeBytes,artifact.pdfSizeBytes,artifact.pdfPageCount,artifact.checksumSha256,JSON.stringify(spec),principal.userId).run();
   }catch(error){await Promise.all([env.WORK_FILES_BUCKET.delete(artifact.sourceObjectKey).catch(()=>{}),env.WORK_FILES_BUCKET.delete(artifact.pdfObjectKey).catch(()=>{})]);throw error;}
   return{entityType:"agent_document",entityId:documentId,documentId,title,format,...artifact};
 }
@@ -28,11 +28,11 @@ export async function executeDocumentGenerateAction(env:Env,principal:AuthPrinci
 export async function executeDocumentPrintAction(env:Env,principal:AuthPrincipal,payload:PrintDocumentPayload){
   if(!hasScope(principal,"documents:write"))throw new AppError(403,"FORBIDDEN","Printing an AI document requires documents:write");
   const documentId=String(payload.documentId||"").trim();
-  const doc=await env.FINANCE_DB.prepare(`SELECT id,title,pdf_object_key AS pdfObjectKey,status FROM ae_generated_documents WHERE id=? AND organization_id=?`).bind(documentId,principal.organizationId).first<any>();
+  const doc=await env.FINANCE_DB.prepare(`SELECT id,title,pdf_object_key AS pdfObjectKey,pdf_page_count AS pdfPageCount,status FROM ae_generated_documents WHERE id=? AND organization_id=?`).bind(documentId,principal.organizationId).first<any>();
   if(!doc||doc.status!=="saved")throw new AppError(404,"AGENT_DOCUMENT_NOT_FOUND","Saved AI document not found");
   const staged=await stageGeneratedPdf(env,principal,doc);
   try{
-    const result=await submitGovernedPrintJob(env,principal,{documentId:staged.documentId,title:doc.title,printerId:payload.printerId||null,copies:payload.copies||1,estimatedPages:payload.estimatedPages||1,pageSize:payload.pageSize||"A4",colorMode:payload.colorMode||"monochrome",duplex:Boolean(payload.duplex),secureRelease:Boolean(payload.secureRelease),priority:payload.priority||"normal"});
+    const result=await submitGovernedPrintJob(env,principal,{documentId:staged.documentId,title:doc.title,printerId:payload.printerId||null,copies:payload.copies||1,estimatedPages:payload.estimatedPages||Number(doc.pdfPageCount||1),pageSize:payload.pageSize||"A4",colorMode:payload.colorMode||"monochrome",duplex:Boolean(payload.duplex),secureRelease:Boolean(payload.secureRelease),priority:payload.priority||"normal"});
     return{entityType:"printerly_job",entityId:result.id,printerlyJobId:result.id,sourceDocumentId:documentId,printerlyDocumentId:staged.documentId,...result};
   }catch(error){await Printerly.deleteStagedDocument(env.FINANCE_DB,env.WORK_FILES_BUCKET,principal.organizationId,staged.documentId).catch(()=>{});throw error;}
 }
