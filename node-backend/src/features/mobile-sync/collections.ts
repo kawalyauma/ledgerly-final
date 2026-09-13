@@ -17,12 +17,15 @@ export const financeCollections:Definition[]=[
  {moduleKey:"ledgerly-core",collectionKey:"journal-lines",schemaVersion:1,mode:"read-only",sourceOfTruth:"server",conflictPolicy:"server-wins",pullScope:"journals:read",dependsOn:[{moduleKey:"ledgerly-core",collectionKey:"journals"}]},
  {moduleKey:"ledgerly-core",collectionKey:"document-intents",schemaVersion:1,mode:"append-only",sourceOfTruth:"merge",conflictPolicy:"append-only",pullScope:"documents:read",pushScope:"documents:write",dependsOn:[{moduleKey:"ledgerly-core",collectionKey:"accounts"}]},
  {moduleKey:"ledgerly-core",collectionKey:"journal-intents",schemaVersion:1,mode:"append-only",sourceOfTruth:"merge",conflictPolicy:"append-only",pullScope:"journals:read",pushScope:"journals:write",dependsOn:[{moduleKey:"ledgerly-core",collectionKey:"accounts"},{moduleKey:"ledgerly-core",collectionKey:"fiscal-periods"}]},
+ {moduleKey:"human-resources",collectionKey:"leave-request-intents",schemaVersion:1,mode:"append-only",sourceOfTruth:"merge",conflictPolicy:"append-only",pullScope:"hr:read",pushScope:"hr:write",dependsOn:[{moduleKey:"human-resources",collectionKey:"employees"},{moduleKey:"human-resources",collectionKey:"leave-types"}]},
+ {moduleKey:"human-resources",collectionKey:"onboarding-completion-intents",schemaVersion:1,mode:"append-only",sourceOfTruth:"merge",conflictPolicy:"append-only",pullScope:"hr:read",pushScope:"hr:write",dependsOn:[{moduleKey:"human-resources",collectionKey:"onboarding-tasks"}]},
  ...domainCollections,
 ];
 export function collectionDefinition(moduleKey:string,collectionKey:string){return financeCollections.find(x=>x.moduleKey===moduleKey&&x.collectionKey===collectionKey);}
 export function hasPrincipalScope(principal:{role:string;scopes:string[]},scope?:string){return !scope||principal.role==="owner"||principal.role==="admin"||principal.scopes.includes(scope);}
 
 async function queryRows(runtime:Runtime,organizationId:string,userId:string,moduleKey:string,key:string,ids?:string[]){
+ if(moduleKey==="human-resources"&&(key==="leave-request-intents"||key==="onboarding-completion-intents"))return[];
  if(moduleKey!=="ledgerly-core"){const rows=await queryDomainCollection(runtime,organizationId,moduleKey,key,ids);if(rows!==null)return rows;throw new AppError(422,"COLLECTION_NOT_REGISTERED",`Unknown mobile-sync collection ${moduleKey}:${key}`);}
  const filter=ids?.length?` AND id=ANY($2::text[])`:"",params=ids?.length?[organizationId,ids]:[organizationId];switch(key){
  case"accounts":return(await runtime.db.query(`SELECT id,code,name,type,subtype,normal_balance AS "normalBalance",currency,allow_posting AS "allowPosting",active,parent_account_id AS "parentAccountId",account_group_id AS "accountGroupId",created_at AS "createdAt",updated_at AS "updatedAt" FROM accounts WHERE organization_id=$1${filter} ORDER BY code`,params)).rows;
