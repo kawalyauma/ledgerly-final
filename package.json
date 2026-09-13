@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:web": "vite",
+    "dev:selfhost": "tsx selfhost/server.ts",
+    "start:selfhost": "tsx selfhost/server.ts",
     "build:web": "vite build",
     "preview:web": "vite preview",
     "deploy": "wrangler deploy",
@@ -27,7 +29,9 @@
     "single-origin:ensure": "node scripts/ensure-single-origin.mjs"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.6",
     "@vitejs/plugin-react": "^5.0.2",
+    "docx": "^9.5.1",
     "drizzle-orm": "^0.44.7",
     "hono": "^4.13.5",
     "jose": "^6.1.0",
@@ -37,14 +41,19 @@
     "lucide-react": "^0.542.0",
     "nanoid": "^5.1.6",
     "pdf-lib": "^1.17.1",
+    "pg": "^8.16.3",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "tsx": "^4.20.5",
     "xlsx": "^0.18.5",
     "zod": "^4.1.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.9.5",
     "@cloudflare/workers-types": "^5.20260830.1",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.4",
     "typescript": "^5.9.2",
     "vite": "^7.1.3",
