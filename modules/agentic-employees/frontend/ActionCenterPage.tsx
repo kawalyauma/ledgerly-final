@@ -8,7 +8,7 @@ type ActionRow={
   createdAt:string;updatedAt:string;
 };
 const EMPLOYEE:Record<string,string>={secretary:"Amina · Secretary",dos:"Daniel · DOS",bursar:"Grace · Bursar",headteacher:"Mirembe · Head Teacher",hr:"Sarah · HR",librarian:"Peter · Librarian"};
-const ORDER=["suggested","prepared","awaiting_approval","approved","failed","executed","dismissed"];
+const ORDER=["suggested","prepared","awaiting_approval","approved","executing","failed","executed","dismissed"];
 
 export function ActionCenterPage(){
   const [items,setItems]=useState<ActionRow[]>([]),[busy,setBusy]=useState(""),[error,setError]=useState("");
@@ -19,7 +19,7 @@ export function ActionCenterPage(){
   return <div className="ae-page">
     <div className="ae-hero"><div><span className="ae-kicker">HUMAN-GOVERNED AUTONOMY</span><h1>AI Action Center</h1><p>Employees can prepare real work from verified Ledgerly events. Nothing sensitive executes until a human approves it.</p></div><button className="secondary" onClick={()=>void refresh()}><RefreshCw size={16}/>Refresh</button></div>
     {error&&<div className="ae-error">{error}</div>}
-    <div className="ae-panel"><div className="ae-card-top"><div><h2><ShieldCheck size={18}/>Action lifecycle</h2><p>Suggested → Prepared → Awaiting approval → Approved → Executed. Rejected or dismissed actions stop permanently.</p></div></div></div>
+    <div className="ae-panel"><div className="ae-card-top"><div><h2><ShieldCheck size={18}/>Action lifecycle</h2><p>Suggested → Prepared → Awaiting approval → Approved → Executing → Executed. Rejected or dismissed actions stop permanently.</p></div></div></div>
     {groups.map(group=><div className="ae-panel" key={group.status}><h2>{group.status.replaceAll("_"," ")}</h2><div className="ae-list">
       {group.items.map(item=><div key={item.id}><ClipboardCheck/><div>
         <b>{item.title}</b><small>{EMPLOYEE[item.agentKey]||item.agentKey} · {item.actionType} · requires {item.requiredScope} · {new Date(item.createdAt).toLocaleString()}</small>
@@ -32,6 +32,7 @@ export function ActionCenterPage(){
           {item.status==="prepared"&&<><button disabled={busy.startsWith(item.id)} onClick={()=>void run(item.id,"request-approval")}><Send size={15}/>Request approval</button><button className="secondary" onClick={()=>void run(item.id,"dismiss")}><CircleX size={15}/>Dismiss</button></>}
           {item.status==="awaiting_approval"&&<><button disabled={busy.startsWith(item.id)} onClick={()=>void run(item.id,"review",{decision:"approve"})}><CheckCircle2 size={15}/>Approve</button><button className="secondary" onClick={()=>void run(item.id,"review",{decision:"reject"})}><CircleX size={15}/>Reject</button></>}
           {item.status==="approved"&&<><button disabled={busy.startsWith(item.id)} onClick={()=>void run(item.id,"execute")}><Play size={15}/>Execute</button><button className="secondary" onClick={()=>void run(item.id,"dismiss")}><CircleX size={15}/>Cancel</button></>}
+          {item.status==="executing"&&<small>Execution has been claimed and is in progress. Refresh to see the final result.</small>}
         </div>
       </div></div>)}
     </div></div>)}
