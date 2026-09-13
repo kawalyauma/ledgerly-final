@@ -31,11 +31,11 @@ async function issueTokens(env:Env,userId:string,organizationId:string,role:stri
 async function trustedClient(env:Env,organizationId:string,input:{deviceToken?:string;attendanceDeviceId?:string;attendanceCredential?:string}){
   if(input.deviceToken){
     const tokenHash=await sha256(input.deviceToken);
-    const device=await env.FINANCE_DB.prepare("SELECT id FROM school_mobile_trusted_devices WHERE organization_id=? AND token_hash=? AND revoked_at IS NULL LIMIT 1")
-      .bind(organizationId,tokenHash).first<{id:string}>();
+    const device=await env.FINANCE_DB.prepare("SELECT id,created_by AS userId FROM school_mobile_trusted_devices WHERE organization_id=? AND token_hash=? AND revoked_at IS NULL LIMIT 1")
+      .bind(organizationId,tokenHash).first<{id:string;userId:string|null}>();
     if(device){
       await env.FINANCE_DB.prepare("UPDATE school_mobile_trusted_devices SET last_used_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(device.id).run();
-      return {clientKey:`mobile:${device.id}`,kind:"mobile" as const,id:device.id};
+      return {clientKey:`mobile:${device.id}`,kind:"mobile" as const,id:device.id,userId:device.userId};
     }
   }
   if(input.attendanceDeviceId&&input.attendanceCredential){
@@ -45,7 +45,7 @@ async function trustedClient(env:Env,organizationId:string,input:{deviceToken?:s
       WHERE d.organization_id=? AND d.id=? AND d.status='active' AND c.credential_hash=? AND c.revoked_at IS NULL
         AND (c.expires_at IS NULL OR c.expires_at>CURRENT_TIMESTAMP)
       ORDER BY c.created_at DESC LIMIT 1`).bind(organizationId,input.attendanceDeviceId,credentialHash).first<{id:string}>().catch(()=>null);
-    if(device)return {clientKey:`attendance:${device.id}`,kind:"attendance" as const,id:device.id};
+    if(device)return {clientKey:`attendance:${device.id}`,kind:"attendance" as const,id:device.id,userId:null};
   }
   throw new AppError(401,"TRUSTED_DEVICE_REQUIRED","PIN login is available only on a trusted Ledgerly mobile device or enrolled attendance kiosk");
 }
@@ -86,13 +86,14 @@ schoolMobilePinPublicRoutes.post("/pin-login",async c=>{
     JOIN users u ON u.id=p.user_id
     JOIN memberships m ON m.user_id=p.user_id AND m.organization_id=p.organization_id
     LEFT JOIN school_user_profiles sp ON sp.user_id=p.user_id AND sp.organization_id=p.organization_id
-    WHERE p.organization_id=? AND p.pin_fingerprint=? LIMIT 1`).bind(v.organizationId,fingerprint).first<{userId:string;pinHash:string;displayName:string;status:string;role:string;scopes:string;staffNumber:string|null;schoolStatus:string|null;schoolLockedUntil:string|null}>();
+    WHERE p.organization_id=? AND p.pin_fingerprint=? AND (? IS NULL OR p.user_id=?) LIMIT 1`)
+    .bind(v.organizationId,fingerprint,client.userId,client.userId).first<{userId:string;pinHash:string;displayName:string;status:string;role:string;scopes:string;staffNumber:string|null;schoolStatus:string|null;schoolLockedUntil:string|null}>();
   const valid=!!row&&row.status==="active"&&await verifyPassword(pinSecret(c.env,v.organizationId,v.pin),row.pinHash);
   const schoolBlocked=!!row?.schoolStatus&&(row.schoolStatus==="inactive"||row.schoolStatus==="suspended"||(row.schoolStatus==="locked"&&(!row.schoolLockedUntil||new Date(row.schoolLockedUntil)>new Date())));
   if(!valid||schoolBlocked){
     const failure=await failedAttempt(db,v.organizationId,client.clientKey,limiter);
     await db.prepare("INSERT INTO school_login_events (id,organization_id,user_id,identifier,event_type,ip_address,user_agent,reason) VALUES (?,?,?,?, 'failure',?,?,?)")
-      .bind(createId("sle"),v.organizationId,row?.userId??null,"mobile-pin",c.req.header("CF-Connecting-IP")??null,c.req.header("User-Agent")??null,schoolBlocked?"School account unavailable":"Invalid mobile PIN").run().catch(()=>undefined);
+      .bind(createId("sle"),v.organizationId,row?.userId??client.userId??null,"mobile-pin",c.req.header("CF-Connecting-IP")??null,c.req.header("User-Agent")??null,schoolBlocked?"School account unavailable":"Invalid mobile PIN").run().catch(()=>undefined);
     if(failure.lockedUntil)throw new AppError(429,"PIN_TEMPORARILY_LOCKED","Too many incorrect PIN attempts. This device is locked for 5 minutes.",{retryAfterSeconds:300});
     throw new AppError(401,"INVALID_PIN",`Incorrect PIN. ${Math.max(0,5-failure.attempts)} attempt(s) remain before a temporary lock.`);
   }
@@ -147,7 +148,7 @@ schoolMobilePinAdminRoutes.post("/trusted-devices",async c=>{
   await c.env.FINANCE_DB.prepare("INSERT INTO school_mobile_trusted_devices (id,organization_id,token_hash,label,platform,created_by,last_used_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)")
     .bind(id,p.organizationId,await sha256(token),parsed.data.label??"Ledgerly Mobile",parsed.data.platform??"android",p.userId).run();
   await audit(c.env.FINANCE_DB,c,"school.mobile_device.trusted","school_mobile_device",id,{label:parsed.data.label??"Ledgerly Mobile"});
-  return c.json({data:{id,deviceToken:token,organizationId:p.organizationId}},201);
+  return c.json({data:{id,deviceToken:token,organizationId:p.organizationId,userId:p.userId}},201);
 });
 
 schoolMobilePinAdminRoutes.delete("/trusted-devices/:id",async c=>{
