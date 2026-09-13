@@ -1,4 +1,4 @@
-name: Agentic Employees v1.6 CI
+name: Agentic Employees v1.7 CI
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
       - "modules/printerly/backend/agentic-print.ts"
       - "migrations/0106_agentic_generated_documents.sql"
       - "migrations/0107_agentic_images_and_delegated_actions.sql"
+      - "migrations/0108_agentic_employee_memory.sql"
       - "src/index.ts"
       - "src/types.ts"
       - "package.json"
@@ -52,10 +53,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Refresh dependency lock
         run: npm install --package-lock-only --ignore-scripts
-
       - name: Commit refreshed dependency lock on feature branch
         if: github.event_name == 'push' && github.ref_name == 'feature/agentic-employees-selfhost-documents-v1-5'
         shell: bash
@@ -65,15 +64,13 @@ jobs:
           git config user.name "ledgerly-ci"
           git config user.email "ledgerly-ci@users.noreply.github.com"
           git add package-lock.json
-          git commit -m "chore: refresh lockfile for Agentic v1.6"
+          git commit -m "chore: refresh lockfile for Agentic v1.7"
           git push origin HEAD:${GITHUB_REF_NAME}
-
       - run: npm ci
       - run: npm run modules:sync
       - run: npm run typecheck
       - run: npm test
       - run: npm run build:web
-
       - name: Apply Agentic PostgreSQL schema
         shell: bash
         run: |
@@ -81,9 +78,10 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v15.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v16.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v17.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT pdf_page_count FROM ae_generated_documents LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT ocr_text,vision_summary FROM ae_image_attachments LIMIT 0"
-
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT memory_type,visibility,priority,due_at,use_count FROM ae_memories LIMIT 0"
       - name: Generate DOCX, XLSX, PPTX and printable PDFs
         shell: bash
         run: |
@@ -101,7 +99,6 @@ jobs:
             await stat(`${root}/${artifact.sourceObjectKey}`);await stat(`${root}/${artifact.pdfObjectKey}`);
           }
           TS
-
       - name: Node self-host API smoke test
         shell: bash
         run: |
