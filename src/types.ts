@@ -1,3 +1,27 @@
+export type AgentDocumentFormat = "docx" | "xlsx" | "pptx";
+
+export interface AgentDocumentGenerateInput {
+  documentId: string;
+  organizationId: string;
+  agentKey: string;
+  title: string;
+  format: AgentDocumentFormat;
+  spec: Record<string, unknown>;
+}
+
+export interface AgentDocumentArtifact {
+  sourceObjectKey: string;
+  pdfObjectKey: string;
+  sourceMimeType: string;
+  sourceSizeBytes: number;
+  pdfSizeBytes: number;
+  checksumSha256: string;
+}
+
+export interface AgentDocumentService {
+  generate(input: AgentDocumentGenerateInput): Promise<AgentDocumentArtifact>;
+}
+
 export interface Env {
   FINANCE_DB: D1Database;
   REPORTS_BUCKET: R2Bucket;
@@ -10,6 +34,13 @@ export interface Env {
   JWT_SECRET: string;
   JWT_ISSUER: string;
   JWT_AUDIENCE: string;
+  SELFHOST_RUNTIME?: "postgresql" | string;
+  AGENT_DOCUMENT_SERVICE?: AgentDocumentService;
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_MODEL_LUNA?: string;
+  OPENAI_MODEL_TERRA?: string;
+  OPENAI_MODEL_SOL?: string;
   WHATSAPP_SUPPORT_HUB_URL?: string;
   WHATSAPP_SUPPORT_APP_KEY?: string;
   WHATSAPP_SUPPORT_WEBHOOK_SECRET?: string;
