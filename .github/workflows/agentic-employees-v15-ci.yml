@@ -1,0 +1,124 @@
+name: Agentic Employees v1.5 CI
+
+on:
+  push:
+    branches: [feature/agentic-employees-selfhost-documents-v1-5]
+  pull_request:
+    paths:
+      - "selfhost/**"
+      - "modules/agentic-employees/**"
+      - "modules/printerly/backend/agentic-print.ts"
+      - "migrations/0106_agentic_generated_documents.sql"
+      - "src/index.ts"
+      - "src/types.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/agentic-employees-v15-ci.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ledgerly
+          POSTGRES_PASSWORD: ledgerly
+          POSTGRES_DB: ledgerly
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledgerly -d ledgerly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://ledgerly:ledgerly@127.0.0.1:5432/ledgerly
+      LEDGERLY_STORAGE_DIR: /tmp/ledgerly-agent-documents
+      LEDGERLY_HOST: 127.0.0.1
+      LEDGERLY_PORT: 8080
+      ENVIRONMENT: test
+      JWT_SECRET: ci-only-agentic-secret-at-least-32-characters
+      JWT_ISSUER: ledgerly
+      JWT_AUDIENCE: ledgerly-api
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Refresh dependency lock
+        run: npm install --package-lock-only --ignore-scripts
+
+      - name: Commit refreshed dependency lock on feature branch
+        if: github.event_name == 'push' && github.ref_name == 'feature/agentic-employees-selfhost-documents-v1-5'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- package-lock.json; then
+            exit 0
+          fi
+          git config user.name "ledgerly-ci"
+          git config user.email "ledgerly-ci@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "chore: refresh lockfile for Agentic v1.5"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+      - run: npm ci
+      - run: npm run modules:sync
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:web
+
+      - name: Apply Agentic PostgreSQL schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v15.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT pdf_page_count FROM ae_generated_documents LIMIT 0"
+
+      - name: Generate DOCX, XLSX, PPTX and printable PDFs
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx <<'TS'
+          import { stat } from 'node:fs/promises';
+          import { LocalR2Bucket } from './selfhost/local-bucket.ts';
+          import { createAgentDocumentService } from './selfhost/document-service.ts';
+          const root=process.env.LEDGERLY_STORAGE_DIR!;
+          const service=createAgentDocumentService(new LocalR2Bucket(root) as any);
+          for (const format of ['docx','xlsx','pptx'] as const) {
+            const spec=format==='xlsx'
+              ? {sheets:[{name:'Summary',rows:[['Metric','Value'],['Learners',120]]}]}
+              : format==='pptx'
+                ? {slides:[{title:'School brief',bullets:['Verified item one','Verified item two']}]}
+                : {sections:[{heading:'Overview',paragraphs:['Verified school summary.'],bullets:['Item one','Item two']}]};
+            const artifact=await service.generate({documentId:`ci-${format}`,organizationId:'org-ci',agentKey:'headteacher',title:`CI ${format.toUpperCase()} document`,format,spec});
+            if (artifact.sourceSizeBytes < 100 || artifact.pdfSizeBytes < 100 || artifact.pdfPageCount < 1) throw new Error(`Invalid ${format} artifact`);
+            await stat(`${root}/${artifact.sourceObjectKey}`);
+            await stat(`${root}/${artifact.pdfObjectKey}`);
+          }
+          TS
+
+      - name: Node self-host API smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run start:selfhost >/tmp/ledgerly-agentic-selfhost.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/system/health >/tmp/agentic-health.json; then
+              break
+            fi
+            sleep 1
+          done
+          cat /tmp/agentic-health.json
+          grep -q '"status":"ok"' /tmp/agentic-health.json
