@@ -19,6 +19,16 @@ async function markApproval(env:Env,organizationId:string,approvalId:string,stat
     WHERE id=? AND organization_id=? AND status='approved'`).bind(status,error||null,approvalId,organizationId).run();
 }
 
+async function claimLinkedAction(env:Env,organizationId:string,approvalId:string){
+  const linked=await env.FINANCE_DB.prepare("SELECT id,status FROM ae_actions WHERE organization_id=? AND approval_id=?")
+    .bind(organizationId,approvalId).first<{id:string;status:string}>();
+  if(!linked)return null;
+  const claim=await env.FINANCE_DB.prepare("UPDATE ae_actions SET status='executing',updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='approved'")
+    .bind(linked.id,organizationId).run();
+  if(!Number(claim.meta.changes||0))throw new AppError(409,"ACTION_ALREADY_CLAIMED",`AI action is ${linked.status} and cannot execute again`);
+  return linked.id;
+}
+
 async function executeCommunication(env:Env,principal:AuthPrincipal,approvalId:string,payload:ApprovalPayload){
   if(!hasScope(principal,"communications:write"))throw new AppError(403,"FORBIDDEN","Executing an AI communication requires communications:write");
   const audience=payload.audience||{},audienceKind=String(audience.kind||"students");
@@ -50,6 +60,7 @@ export async function executeApprovedAction(env:Env,principal:AuthPrincipal,appr
   if(!approval)throw new AppError(404,"NOT_FOUND","AI approval not found");
   if(approval.status!=="approved")throw new AppError(409,"INVALID_STATE","Only an approved action can be executed");
   let payload:any;try{payload=JSON.parse(approval.payloadJson||"{}");}catch{throw new AppError(422,"INVALID_APPROVAL_PAYLOAD","Approval payload is invalid");}
+  const linkedActionId=await claimLinkedAction(env,principal.organizationId,approvalId);
   try{
     if(approval.actionType==="communication.campaign.send")return await executeCommunication(env,principal,approvalId,payload as ApprovalPayload);
     if(approval.actionType==="work.task.create"){
@@ -61,6 +72,8 @@ export async function executeApprovedAction(env:Env,principal:AuthPrincipal,appr
   }catch(error){
     const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);
     await markApproval(env,principal.organizationId,approvalId,"failed",text);
+    if(linkedActionId)await env.FINANCE_DB.prepare("UPDATE ae_actions SET status='failed',failure_text=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='executing'")
+      .bind(text,linkedActionId,principal.organizationId).run();
     throw error;
   }
 }
