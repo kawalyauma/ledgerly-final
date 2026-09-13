@@ -28,7 +28,8 @@ import { boardingFeature } from "./boarding/index.js";
 import { transportFeature } from "./transport/index.js";
 import { parentPortalFeature } from "./parent-portal/index.js";
 import { academicsFeature } from "./academics/index.js";
+import { examsFeature } from "./exams/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsFeature];
