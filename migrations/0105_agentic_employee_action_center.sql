@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS ae_actions (
   required_scope TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}',
   idempotency_key TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'suggested' CHECK(status IN ('suggested','prepared','awaiting_approval','approved','executed','failed','dismissed')),
+  status TEXT NOT NULL DEFAULT 'suggested' CHECK(status IN ('suggested','prepared','awaiting_approval','approved','executing','executed','failed','dismissed')),
   approval_id TEXT,
   result_entity_type TEXT,
   result_entity_id TEXT,
@@ -45,7 +45,7 @@ AFTER UPDATE OF status ON ae_approvals
 FOR EACH ROW WHEN NEW.status IN ('rejected','cancelled') AND OLD.status<>NEW.status
 BEGIN
   UPDATE ae_actions SET status='dismissed',dismissed_by=NEW.reviewed_by,dismissed_at=COALESCE(NEW.reviewed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
-  WHERE organization_id=NEW.organization_id AND approval_id=NEW.id AND status IN ('awaiting_approval','approved');
+  WHERE organization_id=NEW.organization_id AND approval_id=NEW.id AND status IN ('awaiting_approval','approved','executing');
 END;
 
 CREATE TRIGGER IF NOT EXISTS ae_action_approval_executed
