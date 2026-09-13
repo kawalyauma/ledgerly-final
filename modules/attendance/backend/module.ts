@@ -2,15 +2,17 @@ import "./mobile-sync-adapter";
 import type { BackendModuleDefinition } from "../../backend-types";
 import { attendanceRoutes } from "./routes";
 import { attendanceDeviceRoutes } from "./device-routes";
+import { attendanceDeviceContextRoutes } from "./device-context-routes";
 import { attendanceDeviceEnrollmentRoutes,attendanceKioskEnrollmentRoutes } from "./enrollment-routes";
 
 export const moduleDefinition: BackendModuleDefinition = {
   key: "attendance",
   name: "Attendance",
-  version: "1.3.0",
+  version: "1.4.0",
   order: 26,
   publicRoutes: [
     { basePath: "/api/v1/attendance/device", router: attendanceDeviceRoutes },
+    { basePath: "/api/v1/attendance/device-context", router: attendanceDeviceContextRoutes },
     { basePath: "/api/v1/attendance/device-enrollment", router: attendanceDeviceEnrollmentRoutes },
   ],
   routes: [
