@@ -7,7 +7,7 @@ import {enabledMobileModules,type ModuleAvailability} from "./moduleAvailability
 type GroupKey="school"|"people"|"finance";
 type ModuleItem={key:string;group:GroupKey;icon:string;title:string;copy:string;onPress:()=>void};
 
-export function HomeScreen({session,onSession,onAttendance,onSchool,onAcademics,onExams,onBooks,onHumanResources,onPayrollPayments,onContacts,onCommunications,onTasksWork,onFinanceCore,onPrinterly,onSecurityCameras,onLogout}:{session:MobileSession;onSession:SessionUpdater;onAttendance:()=>void;onSchool:()=>void;onAcademics:()=>void;onExams:()=>void;onBooks:()=>void;onHumanResources:()=>void;onPayrollPayments:()=>void;onContacts:()=>void;onCommunications:()=>void;onTasksWork:()=>void;onFinanceCore:()=>void;onPrinterly:()=>void;onSecurityCameras:()=>void;onLogout:()=>void}){
+export function HomeScreen({session,onSession,onAttendance,onSchool,onAcademics,onExams,onBooks,onHumanResources,onPayrollPayments,onContacts,onCommunications,onTasksWork,onAgenticEmployees,onFinanceCore,onPrinterly,onSecurityCameras,onLogout}:{session:MobileSession;onSession:SessionUpdater;onAttendance:()=>void;onSchool:()=>void;onAcademics:()=>void;onExams:()=>void;onBooks:()=>void;onHumanResources:()=>void;onPayrollPayments:()=>void;onContacts:()=>void;onCommunications:()=>void;onTasksWork:()=>void;onAgenticEmployees:()=>void;onFinanceCore:()=>void;onPrinterly:()=>void;onSecurityCameras:()=>void;onLogout:()=>void}){
  const name=session.identifier.includes("@")?session.identifier.split("@")[0]:session.identifier;
  const[enabledKeys,setEnabledKeys]=useState<Set<string>|null>(null),[source,setSource]=useState<ModuleAvailability["source"]>("unverified"),[refreshing,setRefreshing]=useState(false),[moduleError,setModuleError]=useState("");
  async function load(){setRefreshing(true);setModuleError("");try{const result=await enabledMobileModules(session,onSession);setSource(result.source);setEnabledKeys(result.modules?new Set(result.modules.map(x=>x.moduleKey)):null)}catch(e){setModuleError(e instanceof Error?e.message:String(e))}finally{setRefreshing(false)}}
@@ -22,6 +22,7 @@ export function HomeScreen({session,onSession,onAttendance,onSchool,onAcademics,
   {key:"contacts",group:"people",icon:"C",title:"Contacts",copy:"Shared people directory for school, communications and operational workflows.",onPress:onContacts},
   {key:"communications",group:"people",icon:"M",title:"Messages & Notifications",copy:"SMS, approved WhatsApp templates, campaigns, schedules and delivery history.",onPress:onCommunications},
   {key:"tasks-work",group:"people",icon:"W",title:"Tasks & Work",copy:"Projects, assignments, checklists, comments, time tracking and work chat.",onPress:onTasksWork},
+  {key:"agentic-employees",group:"people",icon:"AI",title:"Agentic Employees",copy:"Work with your AI Secretary, DOS, Bursar, Head Teacher assistant, HR Officer and Librarian.",onPress:onAgenticEmployees},
   {key:"payroll-payments",group:"finance",icon:"$",title:"Payroll & Payments",copy:"Payroll, payslips, salary batches, supplier payments, receipts and reversals.",onPress:onPayrollPayments},
   {key:"ledgerly-core",group:"finance",icon:"₵",title:"Ledgerly Finance Core",copy:"Accounts, journals, banking, budgets, inventory, tax and finance reports.",onPress:onFinanceCore},
   {key:"printerly",group:"finance",icon:"P",title:"Printerly",copy:"Remote printing, secure release, printer health, costing and usage reporting.",onPress:onPrinterly},
@@ -30,7 +31,7 @@ export function HomeScreen({session,onSession,onAttendance,onSchool,onAcademics,
  const modules=enabledKeys?all.filter(x=>enabledKeys.has(x.key)):all;
  const groups=useMemo(()=>[
   {key:"school" as GroupKey,title:"School & learning",copy:"Daily academic and school operations"},
-  {key:"people" as GroupKey,title:"People & communication",copy:"Staff, contacts, messaging and teamwork"},
+  {key:"people" as GroupKey,title:"People & communication",copy:"Staff, contacts, messaging, teamwork and AI employees"},
   {key:"finance" as GroupKey,title:"Finance & services",copy:"Money, printing and physical operations"},
  ].map(g=>({...g,items:modules.filter(x=>x.group===g.key)})).filter(g=>g.items.length),[modules]);
  const Module=({item}:{item:ModuleItem})=><TouchableOpacity accessibilityRole="button" activeOpacity={.88} style={s.module} onPress={item.onPress}><View style={s.moduleTop}><View style={s.icon}><Text style={s.iconText}>{item.icon}</Text></View><View style={s.moduleText}><Text style={s.moduleTitle}>{item.title}</Text><Text style={s.moduleCopy}>{item.copy}</Text></View><Text style={s.moduleArrow}>›</Text></View></TouchableOpacity>;
