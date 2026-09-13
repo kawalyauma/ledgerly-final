@@ -10,12 +10,12 @@ type ExtraToolName = "resolve_guardian_family" | "family_comprehensive_report" |
 const extraSpecs: Record<ExtraToolName, any> = {
   resolve_guardian_family: {
     type: "function", name: "resolve_guardian_family", strict: false,
-    description: "Resolve a guardian and students using recorded school guardian links. Never infer family relationships from surnames.",
+    description: "Resolve a guardian and students using recorded school guardian links. Never infer family relationships from surnames. Use studentGender=male for sons and female for daughters.",
     parameters: { type: "object", properties: { query: { type: "string" }, studentGender: { type: "string", enum: ["all", "male", "female"] } }, required: ["query"], additionalProperties: false },
   },
   family_comprehensive_report: {
     type: "function", name: "family_comprehensive_report", strict: false,
-    description: "Build a cumulative family report from published academic results, official attendance and posted fee data. Return ambiguity instead of guessing a guardian.",
+    description: "Build a cumulative family report from published academic results, official attendance and posted fee data. Use studentGender=male for sons and female for daughters. Return ambiguity instead of guessing a guardian.",
     parameters: { type: "object", properties: {
       guardianQuery: { type: "string" }, studentGender: { type: "string", enum: ["all", "male", "female"] },
       includeAcademic: { type: "boolean" }, includeAttendance: { type: "boolean" }, includeFinance: { type: "boolean" },
@@ -38,14 +38,23 @@ const extraAllow: Partial<Record<AgentDefinition["key"], readonly ExtraToolName[
   headteacher: ["resolve_guardian_family", "family_comprehensive_report", "delegate_to_employee"],
 };
 
+const legacyDefault: Partial<Record<AgentDefinition["key"], readonly string[]>> = {
+  secretary: ["school_snapshot", "search_students", "search_staff", "communications_summary", "prepare_communication"],
+  dos: ["school_snapshot", "search_students", "search_staff", "academics_overview", "lesson_plan_queue", "scheme_coverage", "prepare_communication"],
+  headteacher: ["school_snapshot", "search_students", "search_staff", "academics_overview", "lesson_plan_queue", "scheme_coverage", "hr_overview", "hr_leave_queue", "fee_collection_summary", "fee_arrears_summary", "books_overview", "communications_summary", "prepare_communication"],
+};
+
 function sameSet(a: readonly string[], b: readonly string[]) {
-  return a.length === b.length && b.every(value => new Set(a).has(value));
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every(value => set.has(value));
 }
 
 function extraAllowed(agent: AgentDefinition, tool: ExtraToolName, requested?: string[] | null) {
   if (!(extraAllow[agent.key] || []).includes(tool)) return false;
-  if (!requested) return true;
-  if (sameSet(requested, agent.tools)) return true;
+  if (!requested || sameSet(requested, agent.tools)) return true;
+  const previous = legacyDefault[agent.key];
+  if (previous && sameSet(requested, previous)) return true;
   return requested.includes(tool);
 }
 
