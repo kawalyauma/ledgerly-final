@@ -1,13 +1,17 @@
-describe("attendance kiosk UI v2 interaction contract",()=>{
-  it("keeps attendance capture methods and direction semantics explicit",()=>{
-    const methods=["FACE","QR","NFC","MANUAL"];
+describe("attendance kiosk name-only interaction contract",()=>{
+  it("uses name lookup as the only kiosk attendance capture method",()=>{
+    const methods=["MANUAL"];
+    expect(methods).toEqual(["MANUAL"]);
+    expect(methods).not.toEqual(expect.arrayContaining(["FACE","QR","NFC"]));
+  });
+
+  it("keeps arrival and departure semantics explicit",()=>{
     const directions=["IN","OUT"];
-    expect(methods).toEqual(expect.arrayContaining(["FACE","QR","NFC","MANUAL"]));
     expect(directions).toEqual(["IN","OUT"]);
   });
 
   it("uses a short success acknowledgement window",()=>{
-    const acknowledgementMs=2600;
+    const acknowledgementMs=2400;
     expect(acknowledgementMs).toBeGreaterThanOrEqual(2000);
     expect(acknowledgementMs).toBeLessThanOrEqual(3000);
   });
