@@ -4,6 +4,7 @@ import type {MobileSession} from "../auth";
 import type {SessionUpdater} from "../apiClient";
 import {OverviewTab} from "./OverviewTab";
 import {PrintTab} from "./PrintTab";
+import {ReceiptsTab} from "./ReceiptsTab";
 import {ScannerlyTab} from "./ScannerlyTab";
 import {RulesTab} from "./RulesTab";
 import {BatchesTab} from "./BatchesTab";
@@ -16,19 +17,19 @@ import {SuppliesTab} from "./SuppliesTab";
 import {ProcurementTab} from "./ProcurementTab";
 import {AdminTab} from "./AdminTab";
 
-type Tab="overview"|"print"|"scannerly"|"rules"|"batches"|"reports"|"audit"|"routing"|"release"|"privacy"|"supplies"|"procurement"|"admin";
-const TABS:[Tab,string][]=[["overview","Overview"],["print","Print"],["scannerly","Scannerly"],["rules","Rules"],["batches","Batches"],["reports","Reports"],["audit","Audit"],["routing","Routing"],["release","Release"],["privacy","Privacy"],["supplies","Supplies"],["procurement","Procurement"],["admin","Admin"]];
-const HINTS:Record<Tab,string>={overview:"Printer service activity",print:"Create print jobs",scannerly:"Scan documents",rules:"Print policies",batches:"Batch operations",reports:"Usage & costing",audit:"Activity trail",routing:"Printer routing",release:"Secure release",privacy:"Document privacy",supplies:"Consumables & stock",procurement:"Purchasing workflow",admin:"Printerly administration"};
+type Tab="overview"|"print"|"receipts"|"scannerly"|"rules"|"batches"|"reports"|"audit"|"routing"|"release"|"privacy"|"supplies"|"procurement"|"admin";
+const TABS:[Tab,string][]=[["overview","Overview"],["print","Print"],["receipts","Receipts"],["scannerly","Scannerly"],["rules","Rules"],["batches","Batches"],["reports","Reports"],["audit","Audit"],["routing","Routing"],["release","Release"],["privacy","Privacy"],["supplies","Supplies"],["procurement","Procurement"],["admin","Admin"]];
+const HINTS:Record<Tab,string>={overview:"Printer service activity",print:"Create print jobs",receipts:"Automatic receipt printing",scannerly:"Scan documents",rules:"Print policies",batches:"Batch operations",reports:"Usage & costing",audit:"Activity trail",routing:"Printer routing",release:"Secure release",privacy:"Document privacy",supplies:"Consumables & stock",procurement:"Purchasing workflow",admin:"Printerly administration"};
 
 export function PrinterlyWorkspaceScreen({session,onSession,onBack}:{session:MobileSession;onSession:SessionUpdater;onBack:()=>void}){
   const[tab,setTab]=useState<Tab>("overview");
   const label=TABS.find(([id])=>id===tab)?.[1]??"Overview";
-  const content=tab==="overview"?<OverviewTab session={session} onSession={onSession}/>:tab==="print"?<PrintTab session={session} onSession={onSession}/>:tab==="scannerly"?<ScannerlyTab session={session} onSession={onSession}/>:tab==="rules"?<RulesTab session={session} onSession={onSession}/>:tab==="batches"?<BatchesTab session={session} onSession={onSession}/>:tab==="reports"?<ReportsTab session={session} onSession={onSession}/>:tab==="audit"?<AuditTab session={session} onSession={onSession}/>:tab==="routing"?<RoutingTab session={session} onSession={onSession}/>:tab==="release"?<ReleaseTab session={session} onSession={onSession}/>:tab==="privacy"?<PrivacyTab session={session} onSession={onSession}/>:tab==="supplies"?<SuppliesTab session={session} onSession={onSession}/>:tab==="procurement"?<ProcurementTab session={session} onSession={onSession}/>:<AdminTab session={session} onSession={onSession}/>;
+  const content=tab==="overview"?<OverviewTab session={session} onSession={onSession}/>:tab==="print"?<PrintTab session={session} onSession={onSession}/>:tab==="receipts"?<ReceiptsTab session={session} onSession={onSession}/>:tab==="scannerly"?<ScannerlyTab session={session} onSession={onSession}/>:tab==="rules"?<RulesTab session={session} onSession={onSession}/>:tab==="batches"?<BatchesTab session={session} onSession={onSession}/>:tab==="reports"?<ReportsTab session={session} onSession={onSession}/>:tab==="audit"?<AuditTab session={session} onSession={onSession}/>:tab==="routing"?<RoutingTab session={session} onSession={onSession}/>:tab==="release"?<ReleaseTab session={session} onSession={onSession}/>:tab==="privacy"?<PrivacyTab session={session} onSession={onSession}/>:tab==="supplies"?<SuppliesTab session={session} onSession={onSession}/>:tab==="procurement"?<ProcurementTab session={session} onSession={onSession}/>:<AdminTab session={session} onSession={onSession}/>;
   return <SafeAreaView style={s.root}>
     <StatusBar barStyle="light-content" backgroundColor="#2a302d"/>
     <View style={s.header}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={s.back}><Text style={s.backText}>←</Text></TouchableOpacity>
-      <View style={s.headerCopy}><Text style={s.eyebrow}>PRINTERLY · v1.12</Text><Text style={s.title}>{label}</Text><Text style={s.sub}>{HINTS[tab]}</Text></View>
+      <View style={s.headerCopy}><Text style={s.eyebrow}>PRINTERLY · v1.15</Text><Text style={s.title}>{label}</Text><Text style={s.sub}>{HINTS[tab]}</Text></View>
       <View style={s.badge}><Text style={s.badgeText}>NODE</Text></View>
     </View>
     <View style={s.tabsShell}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabs}>{TABS.map(([id,itemLabel])=><TouchableOpacity accessibilityRole="tab" accessibilityState={{selected:tab===id}} key={id} onPress={()=>setTab(id)} style={[s.tab,tab===id&&s.tabOn]}><Text style={[s.tabText,tab===id&&s.tabTextOn]}>{itemLabel}</Text></TouchableOpacity>)}</ScrollView></View>
