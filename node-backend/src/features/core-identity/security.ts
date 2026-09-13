@@ -12,7 +12,24 @@ const SCRYPT_P = 1;
 const KEY_BYTES = 32;
 const MAXMEM = 64 * 1024 * 1024;
 
-export const allScopes = ["accounts:read","accounts:write","journals:read","journals:write","reports:read","reports:write","contacts:read","contacts:write","products:read","products:write","documents:read","documents:write","payments:read","payments:write","payroll:read","payroll:write","periods:read","periods:write","admin:read","admin:write","communications:read","communications:write","school:read","school:write"];
+export const allScopes = [
+  "accounts:read","accounts:write",
+  "journals:read","journals:write",
+  "reports:read","reports:write",
+  "contacts:read","contacts:write",
+  "products:read","products:write",
+  "documents:read","documents:write",
+  "payments:read","payments:write",
+  "payroll:read","payroll:write",
+  "periods:read","periods:write",
+  "admin:read","admin:write",
+  "communications:read","communications:write",
+  "school:read","school:write",
+  "hr:read","hr:write",
+  "work:read","work:write",
+  "exams:read","exams:write",
+  "nvr:read","nvr:write",
+];
 
 export function createId(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }
 export function randomToken(bytes = 32): string { return randomBytes(bytes).toString("base64url"); }
