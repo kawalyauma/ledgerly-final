@@ -3,6 +3,7 @@ import type { AuthPrincipal } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { queueDocumentIntent, queueJournalIntent } from "../finance-mobile/intents.js";
 import { queueHrLeaveIntent, queueHrOnboardingCompletionIntent } from "../human-resources/mobile-intents.js";
+import { queuePayrollPaymentIntent } from "../payroll/mobile-intents.js";
 
 export async function queueMobileWrite(runtime:Runtime,principal:AuthPrincipal,input:{moduleKey:string;collectionKey:string;recordId:string;deviceId:string;clientTimestamp:string;payload:unknown}){
   const shared={id:input.recordId,organizationId:principal.organizationId,userId:principal.userId,deviceId:input.deviceId,clientTimestamp:input.clientTimestamp,role:principal.role,payload:input.payload};
@@ -24,6 +25,11 @@ export async function queueMobileWrite(runtime:Runtime,principal:AuthPrincipal,i
   if(input.moduleKey==="human-resources"&&input.collectionKey==="onboarding-completion-intents"){
     const data=await queueHrOnboardingCompletionIntent(runtime,shared);
     await runtime.queue.publish("hr-mobile.intents",{},{queue:"hr-mobile",maxAttempts:3}).catch(()=>undefined);
+    return data;
+  }
+  if(input.moduleKey==="payroll-payments"&&input.collectionKey==="payment-draft-intents"){
+    const data=await queuePayrollPaymentIntent(runtime,shared);
+    await runtime.queue.publish("payroll-mobile.intents",{},{queue:"payroll-mobile",maxAttempts:3}).catch(()=>undefined);
     return data;
   }
   throw new AppError(409,"READ_ONLY_COLLECTION","Collection is not writable");
