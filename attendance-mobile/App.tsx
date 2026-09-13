@@ -91,6 +91,7 @@ export default function App(){
     return <><StatusBar hidden/><KioskExperienceScreen registration={registration} onReset={()=>{setRegistration(null);setAttendanceView("register")}} onOpenSettings={changePurpose} onRequestPinLock={()=>void requestKioskLock()}/></>;
   }
 
+  if(kioskPinRequested&&kioskContext&&registration)return <MobilePinLockScreen heading="Unlock employee workspace" schoolLabel={kioskContext.name||"Ledgerly attendance kiosk"} onUnlock={unlockKiosk}/>;
   if((locked||(!session&&!!authContext&&!forcePasswordLogin))&&authContext)return <MobilePinLockScreen heading={session?"Ledgerly is locked":"Employee sign in"} schoolLabel="Trusted school device" employeeLabel={session?.displayName} onUnlock={unlockNormal} onUsePassword={usePasswordInstead}/>;
   if(!session)return <LoginScreen onLogin={signedIn}/>;
   if(route==="school")return <SchoolWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
