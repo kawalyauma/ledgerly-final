@@ -1,5 +1,6 @@
 package com.ledgerlyattendance
 
+import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.view.View
@@ -9,7 +10,8 @@ import com.facebook.react.bridge.*
 class KioskManagerModule(private val context:ReactApplicationContext):ReactContextBaseJavaModule(context){
   override fun getName()="KioskManager"
   private fun dpm()=context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-  @ReactMethod fun status(promise:Promise){promise.resolve(Arguments.createMap().apply{putBoolean("deviceOwner",dpm().isDeviceOwnerApp(context.packageName));putBoolean("lockTaskPermitted",dpm().isLockTaskPermitted(context.packageName))})}
+  private fun am()=context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+  @ReactMethod fun status(promise:Promise){promise.resolve(Arguments.createMap().apply{putBoolean("deviceOwner",dpm().isDeviceOwnerApp(context.packageName));putBoolean("lockTaskPermitted",dpm().isLockTaskPermitted(context.packageName));putBoolean("active",am().lockTaskModeState!=ActivityManager.LOCK_TASK_MODE_NONE)})}
   @ReactMethod fun enter(promise:Promise){
     val activity=context.currentActivity?:return promise.reject("NO_ACTIVITY","No active kiosk activity")
     try{
@@ -20,14 +22,14 @@ class KioskManagerModule(private val context:ReactApplicationContext):ReactConte
       }
       activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
       activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-      activity.startLockTask()
+      if(am().lockTaskModeState==ActivityManager.LOCK_TASK_MODE_NONE)activity.startLockTask()
       promise.resolve(true)
     }catch(e:Exception){promise.reject("KIOSK_ENTER_FAILED",e)}
   }
   @ReactMethod fun exit(promise:Promise){
     try{
       context.currentActivity?.let{activity->
-        activity.stopLockTask()
+        if(am().lockTaskModeState!=ActivityManager.LOCK_TASK_MODE_NONE)activity.stopLockTask()
         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         activity.window.decorView.systemUiVisibility=View.SYSTEM_UI_FLAG_VISIBLE
       }
