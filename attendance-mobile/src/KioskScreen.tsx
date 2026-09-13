@@ -1,94 +1,247 @@
 import {useCallback,useEffect,useMemo,useRef,useState} from "react";
-import {AppState,SafeAreaView,ScrollView,StyleSheet,Text,TextInput,TouchableOpacity,View} from "react-native";
-import {Camera,useCameraDevice,useCameraPermission,useCodeScanner} from "react-native-vision-camera";
-import {fetchBootstrap,fetchFaceState,fetchFaceTemplates} from "./api";
-import {DeviceManager,FaceEngine,KioskManager,LedgerlyNfc,OfflineStore,nfcEvents} from "./native";
+import {AppState,SafeAreaView,StyleSheet,Text,TextInput,TouchableOpacity,View} from "react-native";
+import {fetchBootstrap} from "./api";
+import {DeviceManager,KioskManager,OfflineStore} from "./native";
 import {cacheBootstrap,cachedBootstrap,enqueue,eventId} from "./storage";
 import {flush} from "./sync";
-import type {AttendanceEvent,Bootstrap,CaptureMethod,Direction,FaceChallenge,FaceState,Registration,RosterPerson} from "./types";
+import type {AttendanceEvent,Bootstrap,Direction,Registration,RosterPerson} from "./types";
 
-type Result={person:RosterPerson;method:CaptureMethod;verificationMode?:"STANDARD"|"TEST"};
-type Inspection=Awaited<ReturnType<typeof FaceEngine.inspect>>;
-const sleep=(ms:number)=>new Promise<void>(resolve=>setTimeout(()=>resolve(),ms));
-const initials=(name:string)=>name.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join("").toUpperCase();
+type Result={person:RosterPerson;direction:Direction};
 
 export function KioskScreen({registration,onReset,onOpenSettings}:{registration:Registration;onReset:()=>void;onOpenSettings?:()=>void}){
-  const[bootstrap,setBootstrap]=useState<Bootstrap|null>(null),[faceState,setFaceState]=useState<FaceState|null>(null);
+  const[bootstrap,setBootstrap]=useState<Bootstrap|null>(null);
   const[pendingCount,setPendingCount]=useState(0),[failedCount,setFailedCount]=useState(0),[online,setOnline]=useState(false);
   const[direction,setDirection]=useState<Direction>("IN"),[result,setResult]=useState<Result|null>(null),[error,setError]=useState("");
-  const[query,setQuery]=useState(""),[selectedPerson,setSelectedPerson]=useState<RosterPerson|null>(null),[showCamera,setShowCamera]=useState(false);
+  const[query,setQuery]=useState(""),[selectedPerson,setSelectedPerson]=useState<RosterPerson|null>(null);
   const[logoTaps,setLogoTaps]=useState(0),[exitOpen,setExitOpen]=useState(false),[exitPin,setExitPin]=useState("");
-  const[faceBusy,setFaceBusy]=useState(false),[facePrompt,setFacePrompt]=useState(""),[cameraFacing,setCameraFacing]=useState<"front"|"back">("front");
-  const busy=useRef(false),camera=useRef<any>(null),lastCode=useRef({value:"",at:0});
-  const device=useCameraDevice(cameraFacing),permission=useCameraPermission();
+  const busy=useRef(false);
 
-  const syncNow=useCallback(async()=>{try{const r=await flush(registration);setPendingCount(r.remaining);setFailedCount(r.failed);setOnline(true)}catch{setOnline(false);setPendingCount(await OfflineStore.count());setFailedCount(await OfflineStore.failedCount())}},[registration]);
-  const syncFace=useCallback(async()=>{try{const state=await fetchFaceState(registration);setFaceState(state);await FaceEngine.configure(state.settings.matchThreshold,state.settings.ambiguityMargin,state.settings.livenessThreshold,state.settings.qualityThreshold);const health=await FaceEngine.healthCheck();if(health.healthy){const signature=`${state.templates.version||"0"}:${state.templates.count}`;if(await OfflineStore.getSecure("face.templates.signature")!==signature||health.templateCount!==state.templates.count){const templates=await fetchFaceTemplates(registration);await FaceEngine.replaceTemplates(JSON.stringify(templates.templates));await OfflineStore.putSecure("face.templates.signature",signature)}}return state}catch{return null}},[registration]);
-  const refresh=useCallback(async()=>{try{const fresh=await fetchBootstrap(registration);setBootstrap(fresh);await cacheBootstrap(fresh);setOnline(true);if(fresh.camera?.preferredFacing)setCameraFacing(fresh.camera.preferredFacing);if(fresh.device.direction!=="BOTH")setDirection(fresh.device.direction);await Promise.all([syncNow(),syncFace()])}catch(e){setOnline(false);setError(e instanceof Error?e.message:String(e));const cached=await cachedBootstrap();if(cached)setBootstrap(cached)}},[registration,syncNow,syncFace]);
+  const syncNow=useCallback(async()=>{
+    try{
+      const r=await flush(registration);
+      setPendingCount(r.remaining);
+      setFailedCount(r.failed);
+      setOnline(true);
+    }catch{
+      setOnline(false);
+      setPendingCount(await OfflineStore.count());
+      setFailedCount(await OfflineStore.failedCount());
+    }
+  },[registration]);
 
-  const index=useMemo(()=>{const map=new Map<string,RosterPerson>();for(const p of bootstrap?.roster||[])for(const key of[p.id,p.admissionNumber,p.studentNumber,p.staffNumber])if(key)map.set(String(key).trim().toLowerCase(),p);for(const x of bootstrap?.identifiers||[]){const p=bootstrap?.roster.find(v=>v.id===x.personId);if(p)map.set(x.identifier.trim().toLowerCase(),p)}return map},[bootstrap]);
-  const matches=useMemo(()=>{const q=query.trim().toLowerCase();if(!q)return[];return(bootstrap?.roster||[]).filter(p=>[p.name,p.admissionNumber,p.studentNumber,p.staffNumber,p.groupName].some(v=>String(v||"").toLowerCase().includes(q))).slice(0,8)},[bootstrap,query]);
-  const studentCount=useMemo(()=>(bootstrap?.roster||[]).filter(x=>!x.staffNumber).length,[bootstrap]);
-  const staffCount=useMemo(()=>(bootstrap?.roster||[]).filter(x=>!!x.staffNumber).length,[bootstrap]);
+  const refresh=useCallback(async()=>{
+    try{
+      const fresh=await fetchBootstrap(registration);
+      setBootstrap(fresh);
+      await cacheBootstrap(fresh);
+      setOnline(true);
+      if(fresh.device.direction!=="BOTH")setDirection(fresh.device.direction);
+      await syncNow();
+    }catch(e){
+      setOnline(false);
+      setError(e instanceof Error?e.message:String(e));
+      const cached=await cachedBootstrap();
+      if(cached){
+        setBootstrap(cached);
+        if(cached.device.direction!=="BOTH")setDirection(cached.device.direction);
+      }
+    }
+  },[registration,syncNow]);
 
-  const record=useCallback(async(person:RosterPerson,method:CaptureMethod,extra:Partial<AttendanceEvent>={})=>{if(busy.current)return;busy.current=true;setError("");try{const event:AttendanceEvent={clientEventId:eventId(),personType:person.staffNumber?"staff":"student",personId:person.id,direction,method,verificationMode:extra.verificationMode||((method==="MANUAL")?"SUPERVISED":"STANDARD"),confidence:extra.confidence,matchMargin:extra.matchMargin,livenessScore:extra.livenessScore,capturedAt:new Date().toISOString(),metadata:{deviceCapturedOffline:!online,cameraSource:method==="FACE"?"device":undefined,cameraFacing:method==="FACE"?cameraFacing:undefined,...(extra.metadata||{})}};setPendingCount(await enqueue(event));setResult({person,method,verificationMode:event.verificationMode==="TEST"?"TEST":"STANDARD"});setQuery("");setSelectedPerson(null);void syncNow();setTimeout(()=>setResult(null),2600)}finally{busy.current=false}},[cameraFacing,direction,online,syncNow]);
-  const identifyCode=useCallback(async(value:string,method:CaptureMethod)=>{const clean=value.trim().toLowerCase();if(!clean||busy.current)return;const now=Date.now();if(lastCode.current.value===clean&&now-lastCode.current.at<3000)return;lastCode.current={value:clean,at:now};const person=index.get(clean);if(!person){setError("We couldn't match that card or code. Try search instead.");return}await record(person,method)},[index,record]);
+  const roster=bootstrap?.roster||[];
+  const studentCount=useMemo(()=>roster.filter(p=>!p.staffNumber).length,[roster]);
+  const staffCount=useMemo(()=>roster.filter(p=>!!p.staffNumber).length,[roster]);
+  const matches=useMemo(()=>{
+    const q=query.trim().toLowerCase();
+    if(!q)return[];
+    return roster.filter(p=>[p.name,p.admissionNumber,p.studentNumber,p.staffNumber,p.groupName]
+      .some(v=>String(v||"").toLowerCase().includes(q))).slice(0,10);
+  },[query,roster]);
 
-  useEffect(()=>{void permission.requestPermission();void refresh();void KioskManager.enter().catch(()=>{});void LedgerlyNfc.enable().catch(()=>{});const timer=setInterval(()=>{void syncNow();void syncFace()},20000);const state=AppState.addEventListener("change",x=>{if(x==="active"){void syncNow();void syncFace()}});return()=>{state.remove();clearInterval(timer);void LedgerlyNfc.disable()}},[permission,refresh,syncNow,syncFace]);
-  useEffect(()=>{const listener=nfcEvents.addListener("LedgerlyNfcTag",(value:Object)=>void identifyCode(String(value),"NFC"));return()=>listener.remove()},[identifyCode]);
-  const scanner=useCodeScanner({codeTypes:["qr","code-128","code-39","ean-13","ean-8"],onCodeScanned:codes=>{const value=codes[0]?.value;if(value)void identifyCode(value,"QR")}});
-  const testMode=!!(bootstrap?.testMode&&new Date(bootstrap.testMode.expiresAt)>new Date());
+  const record=useCallback(async(person:RosterPerson)=>{
+    if(busy.current)return;
+    busy.current=true;
+    setError("");
+    try{
+      const event:AttendanceEvent={
+        clientEventId:eventId(),
+        personType:person.staffNumber?"staff":"student",
+        personId:person.id,
+        direction,
+        method:"MANUAL",
+        verificationMode:"SUPERVISED",
+        capturedAt:new Date().toISOString(),
+        metadata:{deviceCapturedOffline:!online,entryMode:"NAME_LOOKUP"}
+      };
+      setPendingCount(await enqueue(event));
+      setResult({person,direction});
+      setQuery("");
+      setSelectedPerson(null);
+      void syncNow();
+      setTimeout(()=>setResult(null),2400);
+    }catch(e){
+      setError(e instanceof Error?e.message:String(e));
+    }finally{
+      busy.current=false;
+    }
+  },[direction,online,syncNow]);
 
-  async function captureSequence():Promise<{photos:string[];challenge:FaceChallenge;captureMs:number}>{if(!camera.current)throw new Error("Camera is not ready");const started=Date.now(),photos:string[]=[];const until=Date.now()+9000;let last="";while(Date.now()<until){setFacePrompt(last||"Look at the camera");try{const shot=await camera.current.takeSnapshot({quality:85});const check:Inspection=await FaceEngine.inspect(shot.path);last=check.guidance;if(check.faceArea>=.08&&check.brightness>=.22&&check.sharpness>=.18&&check.ready){photos.push(shot.path);setFacePrompt("");return{photos,challenge:"DISABLED" as FaceChallenge,captureMs:Date.now()-started}}}catch{last="Center one face in the frame"}await sleep(150)}throw new Error(`${last||"Face capture"} timed out. Please try again.`)}
-  async function face(){if(faceBusy||!camera.current||!device||!permission.hasPermission)return;setFaceBusy(true);setError("");try{const health=await FaceEngine.healthCheck();if(!health.healthy)throw new Error(health.modelError||"Face recognition is unavailable");if(!health.templateCount)throw new Error("No face templates are synced yet");const capture=await captureSequence();const match=await FaceEngine.identify(capture.photos,testMode,!!bootstrap?.testMode?.allowScreenImage,!!bootstrap?.testMode?.allowPrintedImage,capture.challenge);const person=bootstrap?.roster.find(p=>p.id===match.personId);if(!person)throw new Error("Recognized person is not on this kiosk roster");await record(person,"FACE",{verificationMode:testMode?"TEST":"STANDARD",confidence:match.confidence,matchMargin:match.matchMargin,livenessScore:match.livenessScore})}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setFacePrompt("");setFaceBusy(false)}}
+  useEffect(()=>{
+    void refresh();
+    void KioskManager.enter().catch(()=>{});
+    const timer=setInterval(()=>void syncNow(),20000);
+    const state=AppState.addEventListener("change",value=>{
+      if(value==="active"){
+        void KioskManager.enter().catch(()=>{});
+        void syncNow();
+      }
+    });
+    return()=>{state.remove();clearInterval(timer)};
+  },[refresh,syncNow]);
 
-  function tapLogo(){const next=logoTaps+1;if(next>=5){setExitOpen(true);setLogoTaps(0)}else{setLogoTaps(next);setTimeout(()=>setLogoTaps(0),2500)}}
-  async function exit(){if(!await DeviceManager.verifyExitPin(exitPin)){setError("Incorrect administrator PIN");return}await KioskManager.exit();setExitOpen(false);onOpenSettings?.()}
+  function tapLogo(){
+    const next=logoTaps+1;
+    if(next>=5){setExitOpen(true);setLogoTaps(0)}
+    else{setLogoTaps(next);setTimeout(()=>setLogoTaps(0),2500)}
+  }
+
+  async function exit(){
+    if(!await DeviceManager.verifyExitPin(exitPin)){setError("Incorrect administrator PIN");return}
+    await KioskManager.exit();
+    setExitOpen(false);
+    setExitPin("");
+    onOpenSettings?.();
+  }
 
   return <SafeAreaView style={s.root}>
-    {testMode?<View style={s.test}><Text style={s.testTitle}>TEST MODE</Text><Text style={s.testText}>Face captures are not official attendance.</Text></View>:null}
     <View style={s.header}>
-      <TouchableOpacity onPress={tapLogo} activeOpacity={.8}><View style={s.brandRow}><View style={s.brandMark}><Text style={s.brandLetter}>L</Text></View><View><Text style={s.brand}>Ledgerly</Text><Text style={s.brandSub}>SMART ATTENDANCE</Text></View></View></TouchableOpacity>
-      <View style={s.headerRight}><View style={[s.statusDot,{backgroundColor:online?"#35d07f":"#ffb14a"}]}/><View><Text style={s.deviceName}>{bootstrap?.device.name||"Attendance kiosk"}</Text><Text style={s.statusText}>{online?"Live & synced":"Offline mode"}{pendingCount?`  ·  ${pendingCount} queued`:""}</Text></View></View>
+      <TouchableOpacity onPress={tapLogo} activeOpacity={.8}>
+        <Text style={s.brand}>ledgerly</Text>
+        <Text style={s.brandSub}>ATTENDANCE</Text>
+      </TouchableOpacity>
+      <View style={s.headerRight}>
+        <Text style={s.location}>{bootstrap?.device.name||"Attendance kiosk"}</Text>
+        <View style={s.statusLine}>
+          <View style={[s.statusDot,online?s.statusOnline:s.statusOffline]}/>
+          <Text style={s.statusText}>{online?"Online":"Offline mode"}</Text>
+          {pendingCount?<Text style={s.statusText}> · {pendingCount} waiting</Text>:null}
+        </View>
+      </View>
     </View>
 
-    <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-      <View style={s.hero}>
-        <View style={s.heroGlow}/><Text style={s.eyebrow}>WELCOME</Text><Text style={s.heroTitle}>Mark your attendance</Text><Text style={s.heroText}>Use face recognition, scan your ID, tap NFC, or find your name below.</Text>
-        <View style={s.stats}><View style={s.stat}><Text style={s.statValue}>{studentCount}</Text><Text style={s.statLabel}>Students</Text></View><View style={s.statDivider}/><View style={s.stat}><Text style={s.statValue}>{staffCount}</Text><Text style={s.statLabel}>Staff</Text></View><View style={s.statDivider}/><View style={s.stat}><Text style={s.statValue}>{pendingCount}</Text><Text style={s.statLabel}>Pending</Text></View></View>
+    <View style={s.hero}>
+      <View style={s.heroCopy}>
+        <Text style={s.eyebrow}>WELCOME</Text>
+        <Text style={s.heroTitle}>Find your name</Text>
+        <Text style={s.heroText}>Search your name, select your profile, then confirm whether you are arriving or leaving.</Text>
+      </View>
+      <View style={s.summaryRow}>
+        <View style={s.summaryCard}><Text style={s.summaryValue}>{roster.length}</Text><Text style={s.summaryLabel}>People</Text></View>
+        <View style={s.summaryCard}><Text style={s.summaryValue}>{studentCount}</Text><Text style={s.summaryLabel}>Students</Text></View>
+        <View style={s.summaryCard}><Text style={s.summaryValue}>{staffCount}</Text><Text style={s.summaryLabel}>Staff</Text></View>
+      </View>
+    </View>
+
+    <View style={s.directionWrap}>
+      <Text style={s.sectionLabel}>WHAT ARE YOU DOING?</Text>
+      <View style={s.segment}>
+        <TouchableOpacity disabled={bootstrap?.device.direction!=="BOTH"&&bootstrap?.device.direction!=="IN"} style={[s.segmentButton,direction==="IN"&&s.segmentActive]} onPress={()=>setDirection("IN")}>
+          <Text style={[s.segmentIcon,direction==="IN"&&s.segmentTextActive]}>↓</Text>
+          <View><Text style={[s.segmentTitle,direction==="IN"&&s.segmentTextActive]}>Arriving</Text><Text style={[s.segmentHint,direction==="IN"&&s.segmentHintActive]}>Check in</Text></View>
+        </TouchableOpacity>
+        <TouchableOpacity disabled={bootstrap?.device.direction!=="BOTH"&&bootstrap?.device.direction!=="OUT"} style={[s.segmentButton,direction==="OUT"&&s.segmentActive]} onPress={()=>setDirection("OUT")}>
+          <Text style={[s.segmentIcon,direction==="OUT"&&s.segmentTextActive]}>↑</Text>
+          <View><Text style={[s.segmentTitle,direction==="OUT"&&s.segmentTextActive]}>Leaving</Text><Text style={[s.segmentHint,direction==="OUT"&&s.segmentHintActive]}>Check out</Text></View>
+        </TouchableOpacity>
+      </View>
+    </View>
+
+    <View style={s.searchCard}>
+      <Text style={s.searchTitle}>Search school directory</Text>
+      <Text style={s.searchHelp}>Start typing your name. You can also use an admission or staff number.</Text>
+      <View style={s.searchBox}>
+        <Text style={s.searchGlyph}>⌕</Text>
+        <TextInput
+          style={s.searchInput}
+          value={query}
+          onChangeText={value=>{setQuery(value);setSelectedPerson(null);setError("")}}
+          placeholder="Type your name…"
+          placeholderTextColor="#7f948a"
+          autoCapitalize="words"
+          autoCorrect={false}
+        />
+        {query?<TouchableOpacity onPress={()=>{setQuery("");setSelectedPerson(null)}}><Text style={s.clear}>×</Text></TouchableOpacity>:null}
       </View>
 
-      <View style={s.directionBar}><Text style={s.directionTitle}>I AM</Text><View style={s.segment}><TouchableOpacity disabled={bootstrap?.device.direction!=="BOTH"&&direction!=="IN"} onPress={()=>setDirection("IN")} style={[s.segmentButton,direction==="IN"&&s.segmentActive]}><Text style={[s.segmentText,direction==="IN"&&s.segmentTextActive]}>ARRIVING</Text></TouchableOpacity><TouchableOpacity disabled={bootstrap?.device.direction!=="BOTH"&&direction!=="OUT"} onPress={()=>setDirection("OUT")} style={[s.segmentButton,direction==="OUT"&&s.segmentActive]}><Text style={[s.segmentText,direction==="OUT"&&s.segmentTextActive]}>LEAVING</Text></TouchableOpacity></View></View>
+      {query.trim()&&!selectedPerson?<View style={s.results}>
+        {matches.length?matches.map(person=><TouchableOpacity key={`${person.staffNumber?"staff":"student"}:${person.id}`} style={s.resultRow} onPress={()=>{setSelectedPerson(person);setQuery(person.name);setError("")}}>
+          <View style={s.smallAvatar}><Text style={s.smallAvatarText}>{person.name.split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase()}</Text></View>
+          <View style={s.resultCopy}><Text style={s.resultName}>{person.name}</Text><Text style={s.resultMeta}>{person.staffNumber?"Staff":"Student"}{person.groupName?` · ${person.groupName}`:""}</Text></View>
+          <Text style={s.chevron}>›</Text>
+        </TouchableOpacity>):<View style={s.empty}><Text style={s.emptyTitle}>No match found</Text><Text style={s.emptyText}>Check the spelling or ask an administrator to confirm your school record.</Text></View>}
+      </View>:null}
 
-      <View style={s.quickRow}>
-        <TouchableOpacity style={[s.quickCard,s.quickPrimary]} onPress={()=>setShowCamera(v=>!v)}><Text style={s.quickIcon}>◉</Text><Text style={s.quickTitleLight}>Face / QR</Text><Text style={s.quickMetaLight}>{showCamera?"Hide camera":"Open camera"}</Text></TouchableOpacity>
-        <View style={s.quickCard}><Text style={s.quickIconDark}>⌁</Text><Text style={s.quickTitle}>NFC ready</Text><Text style={s.quickMeta}>Tap your card</Text></View>
+      {selectedPerson?<View style={s.personCard}>
+        <View style={s.avatar}><Text style={s.avatarText}>{selectedPerson.name.split(/\s+/).slice(0,2).map(x=>x[0]).join("").toUpperCase()}</Text></View>
+        <Text style={s.personName}>{selectedPerson.name}</Text>
+        <Text style={s.personType}>{selectedPerson.staffNumber?"STAFF MEMBER":"STUDENT"}</Text>
+        <View style={s.personFacts}>
+          <View style={s.fact}><Text style={s.factLabel}>NUMBER</Text><Text style={s.factValue}>{selectedPerson.staffNumber||selectedPerson.admissionNumber||selectedPerson.studentNumber||"—"}</Text></View>
+          <View style={s.fact}><Text style={s.factLabel}>CLASS / DEPARTMENT</Text><Text style={s.factValue}>{selectedPerson.groupName||"—"}</Text></View>
+        </View>
+        <TouchableOpacity style={s.confirm} onPress={()=>void record(selectedPerson)} activeOpacity={.85}>
+          <Text style={s.confirmText}>{direction==="IN"?"Confirm arrival":"Confirm departure"}</Text>
+          <Text style={s.confirmArrow}>→</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={s.notMe} onPress={()=>{setSelectedPerson(null);setQuery("")}}><Text style={s.notMeText}>This is not me</Text></TouchableOpacity>
+      </View>:null}
+    </View>
+
+    <View style={s.footer}>
+      <Text style={s.footerText}>Name-only attendance · {online?"Synced with Ledgerly":"Saved safely offline"}</Text>
+      {failedCount?<Text style={s.footerWarning}>{failedCount} rejected item{failedCount===1?"":"s"} need attention</Text>:null}
+    </View>
+
+    {error?<View style={s.errorBanner}><Text style={s.errorTitle}>Couldn’t complete that</Text><Text style={s.errorText}>{error}</Text></View>:null}
+
+    {result?<View style={s.successOverlay}>
+      <View style={s.successCard}>
+        <View style={s.successCheck}><Text style={s.successCheckText}>✓</Text></View>
+        <Text style={s.successHello}>{result.direction==="IN"?"Welcome":"Goodbye"}</Text>
+        <Text style={s.successName}>{result.person.name}</Text>
+        <Text style={s.successGroup}>{result.person.groupName||"School member"}</Text>
+        <View style={s.successPill}><Text style={s.successPillText}>{result.direction==="IN"?"ARRIVAL RECORDED":"DEPARTURE RECORDED"}</Text></View>
+        <Text style={s.successTime}>{new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</Text>
       </View>
+    </View>:null}
 
-      {showCamera?<View style={s.cameraCard}>{device&&permission.hasPermission?<Camera ref={camera} style={StyleSheet.absoluteFill} device={device} isActive={showCamera} codeScanner={scanner} photo={true}/>:<View style={s.cameraFallback}><Text style={s.cameraFallbackTitle}>Camera unavailable</Text><Text style={s.cameraFallbackText}>You can still use NFC or search.</Text></View>}<View style={s.cameraShade}/><View style={s.cameraGuide}><View style={s.faceRing}/><Text style={s.cameraPrompt}>{facePrompt||"Center your face or show a QR code"}</Text><TouchableOpacity disabled={faceBusy} style={s.faceButton} onPress={()=>void face()}><Text style={s.faceButtonText}>{faceBusy?"Checking…":"Recognize face"}</Text></TouchableOpacity></View><TouchableOpacity style={s.flip} onPress={()=>setCameraFacing(x=>x==="front"?"back":"front")}><Text style={s.flipText}>↻</Text></TouchableOpacity></View>:null}
-
-      <View style={s.searchCard}><Text style={s.sectionKicker}>MANUAL LOOKUP</Text><Text style={s.sectionTitle}>Find your name</Text><View style={s.searchWrap}><Text style={s.searchIcon}>⌕</Text><TextInput style={s.search} value={query} onChangeText={v=>{setQuery(v);setSelectedPerson(null);setError("")}} placeholder="Name, admission or staff number" placeholderTextColor="#8a9892" autoCapitalize="words"/></View>
-        {query.trim()&&!selectedPerson?<View style={s.dropdown}>{matches.length?matches.map(p=><TouchableOpacity key={`${p.staffNumber?"staff":"student"}:${p.id}`} style={s.option} onPress={()=>{setSelectedPerson(p);setQuery(p.name);setError("")}}><View style={s.optionAvatar}><Text style={s.optionAvatarText}>{initials(p.name)}</Text></View><View style={s.optionBody}><Text style={s.optionName}>{p.name}</Text><Text style={s.optionMeta}>{p.staffNumber?"Staff":"Student"}{p.groupName?` · ${p.groupName}`:""}</Text></View><Text style={s.chevron}>›</Text></TouchableOpacity>):<Text style={s.noMatches}>No matching school member found</Text>}</View>:null}
-        {selectedPerson?<View style={s.personCard}><View style={s.bigAvatar}><Text style={s.bigAvatarText}>{initials(selectedPerson.name)}</Text></View><View style={s.personInfo}><Text style={s.personType}>{selectedPerson.staffNumber?"STAFF MEMBER":"STUDENT"}</Text><Text style={s.personName}>{selectedPerson.name}</Text><Text style={s.personMeta}>{selectedPerson.groupName||"School member"} · {selectedPerson.staffNumber||selectedPerson.admissionNumber||selectedPerson.studentNumber||"No number"}</Text></View><TouchableOpacity style={s.confirm} onPress={()=>void record(selectedPerson,"MANUAL")}><Text style={s.confirmArrow}>✓</Text></TouchableOpacity></View>:null}
+    {exitOpen?<View style={s.modalShade}>
+      <View style={s.exitCard}>
+        <Text style={s.exitTitle}>Administrator settings</Text>
+        <Text style={s.exitHelp}>Enter the kiosk exit PIN to change device settings.</Text>
+        <TextInput style={s.exitInput} secureTextEntry keyboardType="number-pad" value={exitPin} onChangeText={setExitPin} placeholder="Exit PIN" placeholderTextColor="#87958e"/>
+        <View style={s.exitActions}>
+          <TouchableOpacity onPress={()=>{setExitOpen(false);setExitPin("")}}><Text style={s.cancel}>Cancel</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>void exit()}><Text style={s.exitConfirm}>Device settings</Text></TouchableOpacity>
+          <TouchableOpacity onPress={async()=>{await DeviceManager.clearRegistration();onReset()}}><Text style={s.reset}>Reset kiosk</Text></TouchableOpacity>
+        </View>
       </View>
-      {error?<View style={s.errorBox}><Text style={s.errorIcon}>!</Text><Text style={s.error}>{error}</Text></View>:null}
-      <Text style={s.footer}>Secure attendance · {online?"Connected":"Working offline"}{failedCount?` · ${failedCount} need review`:""}</Text>
-    </ScrollView>
-
-    {result?<View style={s.overlay}><View style={s.success}><View style={s.successCheck}><Text style={s.successCheckText}>✓</Text></View><Text style={s.successKicker}>{direction==="IN"?"WELCOME":"SEE YOU SOON"}</Text><Text style={s.successTitle}>{result.person.name}</Text><Text style={s.successGroup}>{result.person.groupName||"School member"}</Text><View style={s.successPill}><Text style={s.successPillText}>{result.verificationMode==="TEST"?"TEST CAPTURE":direction==="IN"?"CHECKED IN":"CHECKED OUT"} · {new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</Text></View></View></View>:null}
-    {exitOpen?<View style={s.overlay}><View style={s.exit}><Text style={s.exitKicker}>ADMINISTRATOR</Text><Text style={s.exitTitle}>Kiosk controls</Text><TextInput style={s.exitInput} secureTextEntry keyboardType="number-pad" value={exitPin} onChangeText={setExitPin} placeholder="Enter admin PIN"/><View style={s.exitActions}><TouchableOpacity onPress={()=>setExitOpen(false)}><Text style={s.cancel}>Cancel</Text></TouchableOpacity><TouchableOpacity onPress={()=>void exit()}><Text style={s.exitConfirm}>Settings</Text></TouchableOpacity><TouchableOpacity onPress={async()=>{await DeviceManager.clearRegistration();onReset()}}><Text style={s.reset}>Reset</Text></TouchableOpacity></View></View></View>:null}
-  </SafeAreaView>
+    </View>:null}
+  </SafeAreaView>;
 }
 
 const s=StyleSheet.create({
-  root:{flex:1,backgroundColor:"#061712"},content:{paddingBottom:30},test:{backgroundColor:"#ffca52",paddingHorizontal:18,paddingVertical:8},testTitle:{fontSize:11,fontWeight:"900",letterSpacing:1.2,color:"#3c2b00"},testText:{fontSize:11,color:"#5f4700",marginTop:1},
-  header:{height:78,paddingHorizontal:18,flexDirection:"row",alignItems:"center",justifyContent:"space-between",borderBottomWidth:1,borderBottomColor:"#173129"},brandRow:{flexDirection:"row",alignItems:"center",gap:10},brandMark:{width:40,height:40,borderRadius:14,backgroundColor:"#29c77d",alignItems:"center",justifyContent:"center"},brandLetter:{fontSize:22,fontWeight:"900",color:"#052016"},brand:{fontSize:19,fontWeight:"900",color:"#fff"},brandSub:{fontSize:8,fontWeight:"800",letterSpacing:1.5,color:"#6e9c8a",marginTop:1},headerRight:{flexDirection:"row",alignItems:"center",gap:8},statusDot:{width:8,height:8,borderRadius:4},deviceName:{fontSize:12,fontWeight:"800",color:"#e8f4ef",textAlign:"right"},statusText:{fontSize:10,color:"#759b8c",textAlign:"right",marginTop:2},
-  hero:{margin:14,borderRadius:26,backgroundColor:"#0d2c22",padding:24,overflow:"hidden",borderWidth:1,borderColor:"#174333"},heroGlow:{position:"absolute",width:220,height:220,borderRadius:110,backgroundColor:"#164c38",right:-80,top:-100,opacity:.65},eyebrow:{fontSize:10,fontWeight:"900",letterSpacing:2,color:"#45dc95"},heroTitle:{fontSize:31,lineHeight:36,fontWeight:"900",color:"#fff",marginTop:7,maxWidth:"85%"},heroText:{fontSize:13,lineHeight:20,color:"#9fc0b3",marginTop:8,maxWidth:"90%"},stats:{marginTop:22,flexDirection:"row",alignItems:"center",backgroundColor:"rgba(4,22,16,.55)",borderRadius:17,paddingVertical:13},stat:{flex:1,alignItems:"center"},statValue:{fontSize:20,fontWeight:"900",color:"#fff"},statLabel:{fontSize:9,fontWeight:"700",color:"#789d8e",marginTop:2,textTransform:"uppercase"},statDivider:{width:1,height:25,backgroundColor:"#214a3b"},
-  directionBar:{paddingHorizontal:15,marginBottom:13},directionTitle:{fontSize:9,fontWeight:"900",letterSpacing:1.4,color:"#6f9586",marginBottom:7},segment:{height:48,borderRadius:15,backgroundColor:"#0c251d",padding:4,flexDirection:"row",borderWidth:1,borderColor:"#17362b"},segmentButton:{flex:1,borderRadius:11,alignItems:"center",justifyContent:"center"},segmentActive:{backgroundColor:"#2dcc83"},segmentText:{fontSize:12,fontWeight:"900",letterSpacing:.6,color:"#6f9586"},segmentTextActive:{color:"#062117"},
-  quickRow:{flexDirection:"row",gap:10,paddingHorizontal:15,marginBottom:13},quickCard:{flex:1,minHeight:92,borderRadius:20,backgroundColor:"#f3f7f5",padding:16,borderWidth:1,borderColor:"#e0e9e5"},quickPrimary:{backgroundColor:"#2dcc83",borderColor:"#2dcc83"},quickIcon:{fontSize:24,color:"#062117",fontWeight:"900"},quickIconDark:{fontSize:24,color:"#164735",fontWeight:"900"},quickTitleLight:{fontSize:15,fontWeight:"900",color:"#062117",marginTop:6},quickMetaLight:{fontSize:11,color:"#155d41",marginTop:2},quickTitle:{fontSize:15,fontWeight:"900",color:"#10271e",marginTop:6},quickMeta:{fontSize:11,color:"#71837b",marginTop:2},
-  cameraCard:{height:370,marginHorizontal:15,marginBottom:13,borderRadius:24,overflow:"hidden",backgroundColor:"#102a21"},cameraShade:{...StyleSheet.absoluteFillObject,backgroundColor:"rgba(3,16,12,.20)"},cameraGuide:{...StyleSheet.absoluteFillObject,alignItems:"center",justifyContent:"center"},faceRing:{width:170,height:220,borderRadius:90,borderWidth:3,borderColor:"rgba(255,255,255,.85)"},cameraPrompt:{color:"#fff",fontWeight:"800",fontSize:12,marginTop:13,textShadowColor:"#000",textShadowRadius:4},faceButton:{marginTop:13,backgroundColor:"#2dcc83",paddingHorizontal:24,paddingVertical:12,borderRadius:14},faceButtonText:{fontWeight:"900",color:"#062117"},flip:{position:"absolute",right:14,top:14,width:40,height:40,borderRadius:20,backgroundColor:"rgba(4,22,16,.72)",alignItems:"center",justifyContent:"center"},flipText:{color:"#fff",fontSize:22,fontWeight:"900"},cameraFallback:{flex:1,alignItems:"center",justifyContent:"center"},cameraFallbackTitle:{fontSize:18,fontWeight:"900",color:"#fff"},cameraFallbackText:{fontSize:12,color:"#8daf9f",marginTop:5},
-  searchCard:{marginHorizontal:15,borderRadius:24,backgroundColor:"#f6f9f7",padding:18},sectionKicker:{fontSize:9,fontWeight:"900",letterSpacing:1.5,color:"#269b67"},sectionTitle:{fontSize:24,fontWeight:"900",color:"#10271e",marginTop:4,marginBottom:13},searchWrap:{height:54,borderRadius:16,backgroundColor:"#fff",borderWidth:1,borderColor:"#dce6e1",flexDirection:"row",alignItems:"center",paddingHorizontal:14},searchIcon:{fontSize:24,color:"#4b6a5d",marginRight:8},search:{flex:1,color:"#10271e",fontSize:15},dropdown:{marginTop:8,borderRadius:16,backgroundColor:"#fff",borderWidth:1,borderColor:"#dce6e1",overflow:"hidden"},option:{minHeight:66,paddingHorizontal:12,flexDirection:"row",alignItems:"center",borderBottomWidth:1,borderBottomColor:"#edf2ef"},optionAvatar:{width:40,height:40,borderRadius:14,backgroundColor:"#e4f6ed",alignItems:"center",justifyContent:"center"},optionAvatarText:{fontSize:12,fontWeight:"900",color:"#168957"},optionBody:{flex:1,marginLeft:11},optionName:{fontSize:14,fontWeight:"900",color:"#14271f"},optionMeta:{fontSize:11,color:"#718079",marginTop:2},chevron:{fontSize:26,color:"#8da097"},noMatches:{padding:20,textAlign:"center",color:"#7a8982"},personCard:{marginTop:12,borderRadius:18,backgroundColor:"#fff",padding:13,flexDirection:"row",alignItems:"center",borderWidth:1,borderColor:"#dce6e1"},bigAvatar:{width:54,height:54,borderRadius:18,backgroundColor:"#168957",alignItems:"center",justifyContent:"center"},bigAvatarText:{fontSize:17,fontWeight:"900",color:"#fff"},personInfo:{flex:1,marginLeft:12},personType:{fontSize:8,fontWeight:"900",letterSpacing:1,color:"#168957"},personName:{fontSize:16,fontWeight:"900",color:"#10271e",marginTop:2},personMeta:{fontSize:10,color:"#718079",marginTop:2},confirm:{width:46,height:46,borderRadius:15,backgroundColor:"#2dcc83",alignItems:"center",justifyContent:"center"},confirmArrow:{fontSize:22,fontWeight:"900",color:"#062117"},
-  errorBox:{marginHorizontal:15,marginTop:10,borderRadius:14,backgroundColor:"#3c1b20",padding:12,flexDirection:"row",alignItems:"center"},errorIcon:{width:24,height:24,borderRadius:12,backgroundColor:"#ff7b87",textAlign:"center",fontWeight:"900",color:"#3c1b20",paddingTop:2},error:{flex:1,color:"#ffc1c7",fontSize:12,marginLeft:9},footer:{textAlign:"center",color:"#54766a",fontSize:10,marginTop:18},
-  overlay:{...StyleSheet.absoluteFillObject,backgroundColor:"rgba(2,13,9,.78)",alignItems:"center",justifyContent:"center",padding:22},success:{width:"100%",maxWidth:430,backgroundColor:"#fff",borderRadius:30,padding:28,alignItems:"center"},successCheck:{width:70,height:70,borderRadius:35,backgroundColor:"#2dcc83",alignItems:"center",justifyContent:"center"},successCheckText:{fontSize:38,fontWeight:"900",color:"#062117"},successKicker:{fontSize:9,fontWeight:"900",letterSpacing:1.8,color:"#20a66c",marginTop:18},successTitle:{fontSize:27,fontWeight:"900",color:"#10271e",textAlign:"center",marginTop:5},successGroup:{fontSize:13,color:"#718079",marginTop:4},successPill:{marginTop:17,backgroundColor:"#e8f8f0",paddingHorizontal:14,paddingVertical:9,borderRadius:20},successPillText:{fontSize:10,fontWeight:"900",color:"#168957"},
-  exit:{width:"100%",maxWidth:430,backgroundColor:"#fff",borderRadius:26,padding:24},exitKicker:{fontSize:9,fontWeight:"900",letterSpacing:1.4,color:"#168957"},exitTitle:{fontSize:25,fontWeight:"900",color:"#10271e",marginTop:4,marginBottom:16},exitInput:{height:52,borderWidth:1,borderColor:"#d5ded9",borderRadius:14,paddingHorizontal:14,color:"#10271e"},exitActions:{flexDirection:"row",justifyContent:"space-between",marginTop:20},cancel:{color:"#718079",fontWeight:"800"},exitConfirm:{color:"#168957",fontWeight:"900"},reset:{color:"#b4232c",fontWeight:"900"}
+  root:{flex:1,backgroundColor:"#061a14"},
+  header:{paddingHorizontal:22,paddingTop:10,paddingBottom:12,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},
+  brand:{fontSize:27,fontWeight:"900",color:"#f6fffb",letterSpacing:-1},brandSub:{fontSize:9,fontWeight:"900",color:"#56d49a",letterSpacing:2.2,marginTop:1},
+  headerRight:{alignItems:"flex-end",maxWidth:"58%"},location:{color:"#f0fff8",fontSize:14,fontWeight:"800",textAlign:"right"},statusLine:{flexDirection:"row",alignItems:"center",marginTop:4},statusDot:{width:7,height:7,borderRadius:4,marginRight:6},statusOnline:{backgroundColor:"#50e39b"},statusOffline:{backgroundColor:"#f5ad42"},statusText:{color:"#91b7a6",fontSize:10,fontWeight:"700"},
+  hero:{marginHorizontal:16,borderRadius:24,backgroundColor:"#0c2a20",padding:20,borderWidth:1,borderColor:"#173f31"},heroCopy:{maxWidth:"92%"},eyebrow:{color:"#58dc9d",fontSize:10,fontWeight:"900",letterSpacing:1.8},heroTitle:{color:"white",fontSize:31,fontWeight:"900",letterSpacing:-1.2,marginTop:5},heroText:{color:"#9bbbad",fontSize:13,lineHeight:19,marginTop:6},summaryRow:{flexDirection:"row",gap:9,marginTop:18},summaryCard:{flex:1,borderRadius:16,backgroundColor:"#10372a",paddingVertical:12,paddingHorizontal:13},summaryValue:{color:"white",fontSize:22,fontWeight:"900"},summaryLabel:{color:"#86ad9b",fontSize:9,fontWeight:"800",textTransform:"uppercase",letterSpacing:.8,marginTop:2},
+  directionWrap:{paddingHorizontal:16,marginTop:14},sectionLabel:{color:"#719888",fontSize:9,fontWeight:"900",letterSpacing:1.4,marginBottom:7,marginLeft:3},segment:{flexDirection:"row",gap:10},segmentButton:{flex:1,minHeight:62,borderRadius:18,borderWidth:1,borderColor:"#24483a",backgroundColor:"#0b241c",paddingHorizontal:14,flexDirection:"row",alignItems:"center",gap:10},segmentActive:{backgroundColor:"#e9fff4",borderColor:"#e9fff4"},segmentIcon:{color:"#76a18e",fontSize:25,fontWeight:"400"},segmentTextActive:{color:"#0c3a27"},segmentTitle:{color:"#e4f5ed",fontSize:15,fontWeight:"900"},segmentHint:{color:"#6f9785",fontSize:10,marginTop:1},segmentHintActive:{color:"#56806d"},
+  searchCard:{flex:1,marginHorizontal:16,marginTop:14,borderRadius:24,backgroundColor:"#f6faf8",padding:18},searchTitle:{fontSize:21,fontWeight:"900",color:"#11261d"},searchHelp:{color:"#667a70",fontSize:12,lineHeight:17,marginTop:3,marginBottom:12},searchBox:{height:54,borderRadius:16,backgroundColor:"white",borderWidth:1,borderColor:"#d8e5de",flexDirection:"row",alignItems:"center",paddingHorizontal:14},searchGlyph:{fontSize:23,color:"#4a7762",marginRight:8},searchInput:{flex:1,color:"#13271e",fontSize:17,fontWeight:"700",paddingVertical:0},clear:{fontSize:28,color:"#83958c",paddingHorizontal:4},
+  results:{marginTop:10,borderRadius:16,backgroundColor:"white",borderWidth:1,borderColor:"#dde8e2",overflow:"hidden",maxHeight:330},resultRow:{minHeight:58,paddingHorizontal:12,paddingVertical:9,flexDirection:"row",alignItems:"center",borderBottomWidth:1,borderBottomColor:"#edf3f0"},smallAvatar:{width:38,height:38,borderRadius:12,backgroundColor:"#daf3e7",alignItems:"center",justifyContent:"center",marginRight:10},smallAvatarText:{color:"#176943",fontSize:12,fontWeight:"900"},resultCopy:{flex:1},resultName:{color:"#142820",fontSize:15,fontWeight:"900"},resultMeta:{color:"#75867e",fontSize:10,marginTop:2},chevron:{color:"#78a18d",fontSize:25,fontWeight:"500"},empty:{padding:20,alignItems:"center"},emptyTitle:{color:"#273a32",fontWeight:"900"},emptyText:{color:"#84938c",fontSize:11,textAlign:"center",marginTop:4,lineHeight:16},
+  personCard:{marginTop:12,alignItems:"center",backgroundColor:"white",borderRadius:18,borderWidth:1,borderColor:"#dce7e1",padding:16},avatar:{width:58,height:58,borderRadius:18,backgroundColor:"#158858",alignItems:"center",justifyContent:"center"},avatarText:{color:"white",fontSize:20,fontWeight:"900"},personName:{color:"#10271d",fontSize:22,fontWeight:"900",marginTop:9,textAlign:"center"},personType:{color:"#19885a",fontSize:9,fontWeight:"900",letterSpacing:1.2,marginTop:2},personFacts:{width:"100%",flexDirection:"row",gap:9,marginTop:13},fact:{flex:1,borderRadius:12,backgroundColor:"#f4f8f6",padding:10},factLabel:{color:"#84968d",fontSize:8,fontWeight:"900",letterSpacing:.8},factValue:{color:"#1c3027",fontSize:12,fontWeight:"800",marginTop:3},confirm:{width:"100%",height:51,borderRadius:15,backgroundColor:"#128454",marginTop:12,paddingHorizontal:17,flexDirection:"row",alignItems:"center",justifyContent:"space-between"},confirmText:{color:"white",fontSize:16,fontWeight:"900"},confirmArrow:{color:"white",fontSize:22},notMe:{paddingTop:11,paddingHorizontal:15},notMeText:{color:"#71847a",fontSize:11,fontWeight:"700"},
+  footer:{paddingHorizontal:20,paddingVertical:10,alignItems:"center"},footerText:{color:"#799e8e",fontSize:10,fontWeight:"700"},footerWarning:{color:"#f3bd61",fontSize:10,fontWeight:"800",marginTop:2},
+  errorBanner:{position:"absolute",left:18,right:18,bottom:22,backgroundColor:"#4f1e23",borderRadius:16,padding:14,borderWidth:1,borderColor:"#843941",elevation:10},errorTitle:{color:"#ffdfe1",fontWeight:"900"},errorText:{color:"#eab9bd",fontSize:11,marginTop:2,lineHeight:16},
+  successOverlay:{position:"absolute",left:0,right:0,top:0,bottom:0,backgroundColor:"rgba(3,16,12,.88)",alignItems:"center",justifyContent:"center",padding:24},successCard:{width:"100%",maxWidth:420,backgroundColor:"#f8fffb",borderRadius:30,padding:28,alignItems:"center",elevation:18},successCheck:{width:76,height:76,borderRadius:24,backgroundColor:"#19a96c",alignItems:"center",justifyContent:"center"},successCheckText:{color:"white",fontSize:44,fontWeight:"900"},successHello:{color:"#49816a",fontSize:13,fontWeight:"900",letterSpacing:1.2,textTransform:"uppercase",marginTop:19},successName:{color:"#10271e",fontSize:29,fontWeight:"900",letterSpacing:-1,textAlign:"center",marginTop:4},successGroup:{color:"#73857c",marginTop:4},successPill:{backgroundColor:"#ddf7ea",borderRadius:999,paddingHorizontal:15,paddingVertical:8,marginTop:17},successPillText:{color:"#157b50",fontSize:10,fontWeight:"900",letterSpacing:.8},successTime:{color:"#8b9b94",fontSize:12,fontWeight:"700",marginTop:10},
+  modalShade:{position:"absolute",left:0,right:0,top:0,bottom:0,backgroundColor:"rgba(2,12,9,.78)",alignItems:"center",justifyContent:"center",padding:22},exitCard:{width:"100%",maxWidth:430,backgroundColor:"white",borderRadius:22,padding:20,elevation:15},exitTitle:{fontSize:21,fontWeight:"900",color:"#17281f"},exitHelp:{fontSize:12,color:"#718079",marginTop:4,marginBottom:14},exitInput:{borderWidth:1,borderColor:"#d5e1db",borderRadius:13,padding:13,color:"#17281f",fontSize:17},exitActions:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",marginTop:18},cancel:{color:"#718079",fontWeight:"800"},exitConfirm:{color:"#148356",fontWeight:"900"},reset:{color:"#b4232c",fontWeight:"900"}
 });
