@@ -12,11 +12,12 @@ import { createPrinterlyRetentionRoutes } from './retention-routes.js';
 import { sweepPrinterlyRetention } from './retention-jobs.js';
 import { createScannerlyRoutes } from './scannerly-routes.js';
 import { createScannerlyNodeRoutes } from './scannerly-node.js';
+import { createScannerlyRoutingRoutes } from './scannerly-routing.js';
 
 export const printerlyFeature: BackendFeature={
   key:'printerly',
-  version:'1.8.0',
-  mount(app,runtime){app.route('/api/v1/printerly',createPrinterlyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeAuthRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeJobRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyCostingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyQuotaRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyPolicyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyReleaseUserRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRoutingBatchRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyStationRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRetentionRoutes(runtime));app.route('/api/v1/printerly',createScannerlyRoutes(runtime));app.route('/api/v1/printerly',createScannerlyNodeRoutes(runtime));},
+  version:'1.9.0',
+  mount(app,runtime){app.route('/api/v1/printerly',createPrinterlyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeAuthRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyNodeJobRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyCostingRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyQuotaRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyPolicyRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyReleaseUserRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRoutingBatchRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyStationRoutes(runtime));app.route('/api/v1/printerly',createPrinterlyRetentionRoutes(runtime));app.route('/api/v1/printerly',createScannerlyRoutes(runtime));app.route('/api/v1/printerly',createScannerlyNodeRoutes(runtime));app.route('/api/v1/printerly',createScannerlyRoutingRoutes(runtime));},
   registerJobs(registry){registry.register('printerly.retention.sweep',sweepPrinterlyRetention);},
   schedules:[{name:'printerly-retention-sweep',cron:'17 * * * *',kind:'printerly.retention.sweep',queue:'printerly',maxAttempts:3}],
 };
