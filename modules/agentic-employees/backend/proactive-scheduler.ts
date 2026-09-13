@@ -14,11 +14,14 @@ type DueSchedule = {
 };
 
 export async function runDueProactiveSchedules(env: Env) {
-  const due = await env.FINANCE_DB.prepare(`SELECT id,organization_id AS organizationId,workflow_key AS workflowKey,actor_user_id AS actorUserId,
-    cadence,run_hour AS runHour,run_minute AS runMinute,weekday
-    FROM ae_proactive_schedules
-    WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at<=CURRENT_TIMESTAMP
-    ORDER BY next_run_at LIMIT 20`).all<DueSchedule>();
+  const due = await env.FINANCE_DB.prepare(`SELECT s.id,s.organization_id AS organizationId,s.workflow_key AS workflowKey,s.actor_user_id AS actorUserId,
+    s.cadence,s.run_hour AS runHour,s.run_minute AS runMinute,s.weekday
+    FROM ae_proactive_schedules s
+    JOIN memberships m ON m.organization_id=s.organization_id AND m.user_id=s.actor_user_id
+    JOIN users u ON u.id=m.user_id
+    WHERE s.enabled=1 AND s.next_run_at IS NOT NULL AND s.next_run_at<=CURRENT_TIMESTAMP
+      AND u.status='active' AND m.role IN ('owner','admin')
+    ORDER BY s.next_run_at LIMIT 20`).all<DueSchedule>();
 
   for (const schedule of due.results) {
     try {
