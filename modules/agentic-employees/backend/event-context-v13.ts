@@ -23,7 +23,7 @@ export async function evaluateEmployeeEvent(db:D1Database,event:EventEnvelope,se
     return result;
   }
   if(!settings.enabled)return{ignored:true,ignoreReason:"Event reactions are disabled for this school"};
-  const row=await db.prepare(`SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,
+  const row=await db.prepare(`SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,p.teacher_user_id AS teacherUserId,
     c.name AS className,s.name AS subjectName,TRIM(sp.first_name||' '||sp.last_name) AS teacherName
     FROM acad_lesson_plans p JOIN school_classes c ON c.id=p.class_id JOIN school_subjects s ON s.id=p.subject_id
     LEFT JOIN school_staff_profiles sp ON sp.organization_id=p.organization_id AND sp.user_id=p.teacher_user_id

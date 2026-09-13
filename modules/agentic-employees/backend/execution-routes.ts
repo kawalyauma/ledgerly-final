@@ -7,6 +7,10 @@ export const agenticExecutionRoutes = new Hono<{ Bindings: Env; Variables: AppVa
 
 agenticExecutionRoutes.post("/approvals/:id/execute", requireScope("school:write"), async c => {
   const principal = c.get("principal");
-  const data = await executeApprovedAction(c.env, principal, c.req.param("id"));
+  const approvalId=c.req.param("id");
+  const data = await executeApprovedAction(c.env, principal, approvalId);
+  await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP
+    WHERE organization_id=? AND approval_id=? AND status='executed'`)
+    .bind((data as any).entityType||null,(data as any).entityId||null,principal.userId,principal.organizationId,approvalId).run();
   return c.json({ data });
 });
