@@ -7,11 +7,13 @@ import { createExamFinalizationRoutes } from "./finalization.js";
 import { createExamParityRoutes } from "./parity.js";
 import { createExamBulkRoutes } from "./bulk.js";
 import { createExamHistoryRoutes } from "./history.js";
+import { createExamMarkIntegrityRoutes } from "./marks-integrity.js";
 
 export const examsFeature: BackendFeature = {
   key: "exams",
-  version: "1.4.0",
+  version: "1.5.0",
   mount(app,runtime){
+    app.route("/api/v1/exams",createExamMarkIntegrityRoutes(runtime));
     app.route("/api/v1/exams",createExamBulkRoutes(runtime));
     app.route("/api/v1/exams",createExamHistoryRoutes(runtime));
     app.route("/api/v1/exams",createExamParityRoutes(runtime));
