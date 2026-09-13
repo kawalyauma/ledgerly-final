@@ -12,7 +12,7 @@ const errorText=(e:unknown)=>e instanceof Error?e.message:String(e);
 const isNetworkError=(e:unknown)=>e instanceof MobileApiError&&e.status===0;
 const studentName=(x:Student)=>[x.firstName,x.middleName,x.lastName].filter(Boolean).join(" ")||"Student";
 const ugx=(value:unknown)=>`UGX ${Number(value||0).toLocaleString("en-UG",{maximumFractionDigits:0})}`;
-const externalReference=(studentId:string)=>`MOB-${Date.now()}-${studentId.slice(-8)}`.slice(0,250);
+const newExternalReference=(studentId:string)=>`MOB-${Date.now()}-${studentId.slice(-8)}-${Math.random().toString(36).slice(2,8)}`.slice(0,250);
 const tone=(status:string):"neutral"|"good"|"warn"|"bad"=>status==="paid"?"good":status==="failed"||status==="posting_failed"?"bad":"warn";
 
 export function SchoolPayTab({session,onSession}:{session:MobileSession;onSession:SessionUpdater}){
@@ -31,7 +31,9 @@ export function SchoolPayTab({session,onSession}:{session:MobileSession;onSessio
   const[reason,setReason]=useState("School fees payment");
   const[eventType,setEventType]=useState<"SCHOOL_FEES"|"OTHER_FEES">("SCHOOL_FEES");
   const[method,setMethod]=useState<"request"|"register">("request");
+  const[attemptReference,setAttemptReference]=useState("");
   const studentOptions=useMemo(()=>students.map(x=>({label:studentName(x),value:x.id,detail:x.admissionNumber||x.studentNumber||"No admission number"})),[students]);
+  const changePayment=(change:()=>void)=>{setAttemptReference("");change()};
 
   async function load(){
     setLoading(true);setError("");
@@ -54,12 +56,14 @@ export function SchoolPayTab({session,onSession}:{session:MobileSession;onSessio
     if(!Number.isSafeInteger(value)||value<=0)return Alert.alert("Enter a valid amount","SchoolPay accepts positive whole UGX amounts.");
     if(!reason.trim())return Alert.alert("Enter a payment reason");
     if(method==="request"&&phone.trim().length<7)return Alert.alert("Enter the payer phone number");
+    const externalReference=attemptReference||newExternalReference(studentId);
+    if(!attemptReference)setAttemptReference(externalReference);
     setBusy(true);setError("");
     try{
-      const base={studentPaymentCode:studentId,externalReference:externalReference(studentId),amount:value,reason:reason.trim(),eventType};
+      const base={studentPaymentCode:studentId,externalReference,amount:value,reason:reason.trim(),eventType};
       const created=method==="request"?await schoolPayApi.request(client,{...base,phoneNumber:phone.trim()}):await schoolPayApi.register(client,base);
       Alert.alert(method==="request"?"Debit request sent":"Payment registered",created.paymentReference?`SchoolPay reference: ${created.paymentReference}`:"SchoolPay accepted the request.");
-      setAmount("");setOnline(true);await load();setMode("history");
+      setAmount("");setAttemptReference("");setOnline(true);await load();setMode("history");
     }catch(e){
       if(isNetworkError(e))setOnline(false);
       Alert.alert("SchoolPay request failed",errorText(e));
@@ -98,12 +102,12 @@ export function SchoolPayTab({session,onSession}:{session:MobileSession;onSessio
       {mode==="collect"?<>
         <SectionTitle title="Collect school fees" subtitle="Send a SchoolPay debit prompt or register an ad-hoc payment"/>
         <Card>
-          <SelectField label="Learner" value={studentId} onChange={setStudentId} options={studentOptions} placeholder="Choose learner"/>
-          <Field label="Amount (UGX)" value={amount} onChangeText={x=>setAmount(x.replace(/[^0-9]/g,""))} keyboardType="number-pad" placeholder="150000"/>
-          <SelectField label="Collection method" value={method} onChange={x=>setMethod(x as "request"|"register")} options={[{label:"Instant debit request",value:"request",detail:"Prompt the payer phone"},{label:"Register payment",value:"register",detail:"Create a SchoolPay payment reference"}]}/>
-          <SelectField label="Fee type" value={eventType} onChange={x=>setEventType(x as "SCHOOL_FEES"|"OTHER_FEES")} options={[{label:"School fees",value:"SCHOOL_FEES"},{label:"Other / supplementary fee",value:"OTHER_FEES"}]}/>
-          {method==="request"?<Field label="Payer phone number" value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholder="0772 123 456"/>:null}
-          <Field label="Reason" value={reason} onChangeText={setReason} maxLength={500}/>
+          <SelectField label="Learner" value={studentId} onChange={x=>changePayment(()=>setStudentId(x))} options={studentOptions} placeholder="Choose learner"/>
+          <Field label="Amount (UGX)" value={amount} onChangeText={x=>changePayment(()=>setAmount(x.replace(/[^0-9]/g,"")))} keyboardType="number-pad" placeholder="150000"/>
+          <SelectField label="Collection method" value={method} onChange={x=>changePayment(()=>setMethod(x as "request"|"register"))} options={[{label:"Instant debit request",value:"request",detail:"Prompt the payer phone"},{label:"Register payment",value:"register",detail:"Create a SchoolPay payment reference"}]}/>
+          <SelectField label="Fee type" value={eventType} onChange={x=>changePayment(()=>setEventType(x as "SCHOOL_FEES"|"OTHER_FEES"))} options={[{label:"School fees",value:"SCHOOL_FEES"},{label:"Other / supplementary fee",value:"OTHER_FEES"}]}/>
+          {method==="request"?<Field label="Payer phone number" value={phone} onChangeText={x=>changePayment(()=>setPhone(x))} keyboardType="phone-pad" placeholder="0772 123 456"/>:null}
+          <Field label="Reason" value={reason} onChangeText={x=>changePayment(()=>setReason(x))} maxLength={500}/>
           <PrimaryButton title={busy?"Sending…":method==="request"?"Send debit request":"Register SchoolPay payment"} disabled={busy||!online} onPress={()=>void collect()}/>
         </Card>
       </>:<>
