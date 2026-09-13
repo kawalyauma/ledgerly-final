@@ -7,7 +7,7 @@ import "./agentic-employees.css";
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "AI Employees",
-  version: "1.2.0",
+  version: "1.2.5",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
