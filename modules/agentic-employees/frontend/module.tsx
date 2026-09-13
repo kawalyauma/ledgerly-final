@@ -7,7 +7,7 @@ import "./agentic-employees.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
-  name: "AI Employees",
+  name: "Agentic Employees",
   version: "1.3.0",
   order: 75,
   routes: {
@@ -17,7 +17,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   },
   navigation: [
     {
-      label: "AI Employees",
+      label: "Agentic Employees",
       icon: Bot,
       order: 75,
       items: [
