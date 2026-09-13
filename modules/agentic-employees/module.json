@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "1.6.0",
-  "description": "Tenant-safe agentic school employees with PostgreSQL self-hosting, camera/image OCR, role-scoped Ledgerly operations, saved DOCX/XLSX/PPTX generation and governed Printerly execution.",
+  "version": "1.7.0",
+  "description": "Tenant-safe agentic school employees with PostgreSQL self-hosting, AI Vision OCR, role-scoped Ledgerly operations, durable employee memory, Office generation and governed Printerly execution.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -15,19 +15,17 @@
     "models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
     "agents": ["secretary", "dos", "bursar", "headteacher", "hr", "librarian"],
     "features": [
-      "agent-workspaces", "bounded-tool-calling", "tenant-isolation", "human-approval-gates", "tool-audit-log", "task-execution",
-      "model-tier-routing", "custom-agent-prompts", "academics-supervision-tools", "hr-leave-tools", "fees-collection-analysis",
-      "books-stock-and-distribution-tools", "communications-health-tools", "approved-communications-execution", "proactive-schedules",
-      "proactive-run-history", "school-timezone-scheduling", "controlled-agent-delegation", "headteacher-daily-brief",
-      "guardian-family-resolution", "cumulative-family-reports", "published-results-readonly-analysis", "cumulative-attendance-analysis",
-      "family-finance-analysis", "durable-event-inbox", "payment-posted-reactions", "absence-escalation", "approved-leave-reactions",
-      "low-stock-reactions", "overdue-lesson-plan-reactions", "event-reaction-retries", "event-reaction-audit",
-      "headteacher-exception-briefing", "ai-action-center", "event-to-action-proposals", "approved-work-task-execution",
-      "idempotent-action-execution", "conversation-task-preparation", "postgresql-selfhost-runtime", "node-hono-runtime",
-      "docx-generation", "xlsx-generation", "pptx-generation", "saved-agent-documents", "printable-pdf-companions",
-      "printerly-governed-printing", "printer-policy-and-quota-enforcement", "image-capture", "image-preview", "vision-ocr",
-      "handwriting-and-table-extraction", "image-evidence-workflows", "role-scoped-system-catalog", "delegated-api-read-access",
-      "governed-system-mutations", "short-lived-delegated-jwt", "agent-role-and-user-scope-intersection"
+      "agent-workspaces", "conversation-memory", "working-memory", "institutional-memory", "memory-search", "memory-management-ui", "memory-provenance", "memory-due-dates",
+      "bounded-tool-calling", "tenant-isolation", "human-approval-gates", "tool-audit-log", "task-execution", "model-tier-routing", "custom-agent-prompts",
+      "academics-supervision-tools", "hr-leave-tools", "fees-collection-analysis", "books-stock-and-distribution-tools", "communications-health-tools",
+      "approved-communications-execution", "proactive-schedules", "proactive-run-history", "school-timezone-scheduling", "controlled-agent-delegation", "headteacher-daily-brief",
+      "guardian-family-resolution", "cumulative-family-reports", "published-results-readonly-analysis", "cumulative-attendance-analysis", "family-finance-analysis",
+      "durable-event-inbox", "payment-posted-reactions", "absence-escalation", "approved-leave-reactions", "low-stock-reactions", "overdue-lesson-plan-reactions",
+      "event-reaction-retries", "event-reaction-audit", "headteacher-exception-briefing", "ai-action-center", "event-to-action-proposals", "approved-work-task-execution",
+      "idempotent-action-execution", "conversation-task-preparation", "postgresql-selfhost-runtime", "node-hono-runtime", "docx-generation", "xlsx-generation", "pptx-generation",
+      "saved-agent-documents", "printable-pdf-companions", "printerly-governed-printing", "printer-policy-and-quota-enforcement", "image-capture", "image-preview", "vision-ocr",
+      "handwriting-and-table-extraction", "image-evidence-workflows", "role-scoped-system-catalog", "delegated-api-read-access", "governed-system-mutations",
+      "short-lived-delegated-jwt", "agent-role-and-user-scope-intersection"
     ]
   }
 }
