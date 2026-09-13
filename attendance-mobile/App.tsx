@@ -19,6 +19,7 @@ import {PayrollPaymentsWorkspaceScreen} from "./src/mobile/payroll-payments/Payr
 import {ContactsWorkspaceScreen} from "./src/mobile/contacts/ContactsWorkspaceScreen";
 import {CommunicationsWorkspaceScreen} from "./src/mobile/communications/CommunicationsWorkspaceScreen";
 import {TasksWorkWorkspaceScreen} from "./src/mobile/tasks-work/TasksWorkWorkspaceScreen";
+import {AgenticEmployeesWorkspaceScreen} from "./src/mobile/agentic-employees/AgenticEmployeesWorkspaceScreen";
 import {FinanceCoreWorkspaceScreen} from "./src/mobile/finance-core/FinanceCoreWorkspaceScreen";
 import {PrinterlyWorkspaceScreen} from "./src/mobile/printerly/PrinterlyWorkspaceScreen";
 import {SecurityCamerasWorkspaceScreen} from "./src/mobile/security-cameras/SecurityCamerasWorkspaceScreen";
@@ -28,7 +29,7 @@ import {CameraModeScreen} from "./src/mobile/camera/CameraModeScreen";
 import {clearMobileSyncAccountData} from "./src/mobile/syncClient";
 import {useNormalMobileSync} from "./src/mobile/syncRuntime";
 
-type Route="home"|"attendance"|"school"|"academics"|"exams"|"books"|"human-resources"|"payroll-payments"|"contacts"|"communications"|"tasks-work"|"finance-core"|"printerly"|"security-cameras";
+type Route="home"|"attendance"|"school"|"academics"|"exams"|"books"|"human-resources"|"payroll-payments"|"contacts"|"communications"|"tasks-work"|"agentic-employees"|"finance-core"|"printerly"|"security-cameras";
 export default function App(){
   const[ready,setReady]=useState(false),[onboarded,setOnboarded]=useState(false),[session,setSession]=useState<MobileSession|null>(null),[purpose,setPurpose]=useState<DevicePurpose|null>(null),[purposeSettingsOpen,setPurposeSettingsOpen]=useState(false),[route,setRoute]=useState<Route>("home"),[attendanceView,setAttendanceView]=useState<"landing"|"workspace"|"register"|"kiosk">("landing"),[registration,setRegistration]=useState<Registration|null|undefined>(undefined);
   useNormalMobileSync(session,purpose,updateSession);
@@ -55,10 +56,11 @@ export default function App(){
   if(route==="contacts")return <ContactsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="communications")return <CommunicationsWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="tasks-work")return <TasksWorkWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
+  if(route==="agentic-employees")return <AgenticEmployeesWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="finance-core")return <FinanceCoreWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="printerly")return <PrinterlyWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="security-cameras")return <SecurityCamerasWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setRoute("home")}/>;
   if(route==="attendance"){if(registration===undefined)return <View style={s.loading}><ActivityIndicator color="#55c894"/></View>;if(attendanceView==="register")return <ActivationScreen onActivated={(next:Registration)=>{setRegistration(next);setAttendanceView("landing")}}/>;if(attendanceView==="kiosk"&&registration)return <><StatusBar hidden/><KioskScreen registration={registration} onReset={()=>{setRegistration(null);setAttendanceView("landing")}} onOpenSettings={changePurpose}/></>;if(attendanceView==="workspace")return <AttendanceWorkspaceScreen session={session} onSession={updateSession} onBack={()=>setAttendanceView("landing")} onOpenKiosk={()=>setAttendanceView(registration?"kiosk":"register")}/>;return <AttendanceModuleScreen registration={registration} onBack={()=>setRoute("home")} onWorkspace={()=>setAttendanceView("workspace")} onRegister={()=>setAttendanceView("register")} onLaunch={()=>setAttendanceView("kiosk")}/>}
-  return <HomeScreen session={session} onSession={updateSession} onAttendance={()=>{setAttendanceView("landing");setRoute("attendance")}} onSchool={()=>setRoute("school")} onAcademics={()=>setRoute("academics")} onExams={()=>setRoute("exams")} onBooks={()=>setRoute("books")} onHumanResources={()=>setRoute("human-resources")} onPayrollPayments={()=>setRoute("payroll-payments")} onContacts={()=>setRoute("contacts")} onCommunications={()=>setRoute("communications")} onTasksWork={()=>setRoute("tasks-work")} onFinanceCore={()=>setRoute("finance-core")} onPrinterly={()=>setRoute("printerly")} onSecurityCameras={()=>setRoute("security-cameras")} onLogout={requestLogout}/>;
+  return <HomeScreen session={session} onSession={updateSession} onAttendance={()=>{setAttendanceView("landing");setRoute("attendance")}} onSchool={()=>setRoute("school")} onAcademics={()=>setRoute("academics")} onExams={()=>setRoute("exams")} onBooks={()=>setRoute("books")} onHumanResources={()=>setRoute("human-resources")} onPayrollPayments={()=>setRoute("payroll-payments")} onContacts={()=>setRoute("contacts")} onCommunications={()=>setRoute("communications")} onTasksWork={()=>setRoute("tasks-work")} onAgenticEmployees={()=>setRoute("agentic-employees")} onFinanceCore={()=>setRoute("finance-core")} onPrinterly={()=>setRoute("printerly")} onSecurityCameras={()=>setRoute("security-cameras")} onLogout={requestLogout}/>;
 }
 const s=StyleSheet.create({loading:{flex:1,backgroundColor:"#071c16",alignItems:"center",justifyContent:"center"},loaderMark:{width:58,height:58,borderRadius:18,backgroundColor:"#19955f",alignItems:"center",justifyContent:"center"},loaderLetter:{color:"white",fontSize:30,fontWeight:"900"},loadingText:{color:"#9fb9ae",fontSize:12,fontWeight:"800",marginTop:10}});
