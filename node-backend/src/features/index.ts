@@ -33,7 +33,8 @@ import { humanResourcesFeature } from "./human-resources/index.js";
 import { payrollFeature } from "./payroll/index.js";
 import { communicationsFeature } from "./communications/index.js";
 import { tasksWorkFeature } from "./tasks-work/index.js";
+import { printerlyFeature } from "./printerly/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature];
