@@ -1,0 +1,90 @@
+CREATE TABLE school_lesson_plans (
+  id text PRIMARY KEY,
+  organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  academic_year_id text NOT NULL REFERENCES school_academic_years(id) ON DELETE RESTRICT,
+  term_id text NOT NULL REFERENCES school_terms(id) ON DELETE RESTRICT,
+  class_id text NOT NULL REFERENCES school_classes(id) ON DELETE RESTRICT,
+  stream_id text REFERENCES school_streams(id) ON DELETE SET NULL,
+  subject_id text NOT NULL REFERENCES school_subjects(id) ON DELETE RESTRICT,
+  teacher_staff_id text REFERENCES school_staff_profiles(id) ON DELETE SET NULL,
+  scheme_item_id text REFERENCES school_scheme_items(id) ON DELETE SET NULL,
+  lesson_date date NOT NULL,
+  starts_at time,
+  ends_at time,
+  topic text NOT NULL,
+  subtopic text,
+  competency text,
+  learning_outcomes text NOT NULL,
+  prior_knowledge text,
+  teaching_methods text,
+  learning_resources text,
+  introduction text,
+  lesson_development text,
+  assessment text,
+  conclusion text,
+  differentiation text,
+  homework text,
+  teacher_reflection text,
+  status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','approved','changes_requested','delivered','cancelled')),
+  submitted_at timestamptz,
+  submitted_by text REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at timestamptz,
+  reviewed_by text REFERENCES users(id) ON DELETE SET NULL,
+  review_notes text,
+  delivered_at timestamptz,
+  created_by text REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX school_lesson_plans_scope_idx ON school_lesson_plans(organization_id,academic_year_id,term_id,lesson_date,status);
+
+CREATE TABLE school_lesson_plan_stages (
+  id text PRIMARY KEY,
+  organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  lesson_plan_id text NOT NULL REFERENCES school_lesson_plans(id) ON DELETE CASCADE,
+  sequence integer NOT NULL CHECK (sequence > 0),
+  duration_minutes integer CHECK (duration_minutes IS NULL OR duration_minutes > 0),
+  teacher_activity text,
+  learner_activity text,
+  resources text,
+  assessment text,
+  UNIQUE (organization_id,lesson_plan_id,sequence)
+);
+
+CREATE TABLE school_lesson_plan_reviews (
+  id text PRIMARY KEY,
+  organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  lesson_plan_id text NOT NULL REFERENCES school_lesson_plans(id) ON DELETE CASCADE,
+  action text NOT NULL CHECK (action IN ('submitted','approved','changes_requested','resubmitted','delivered','cancelled')),
+  notes text,
+  actor_user_id text REFERENCES users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE school_academic_observations (
+  id text PRIMARY KEY,
+  organization_id text NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  lesson_plan_id text REFERENCES school_lesson_plans(id) ON DELETE SET NULL,
+  teacher_staff_id text NOT NULL REFERENCES school_staff_profiles(id) ON DELETE CASCADE,
+  class_id text REFERENCES school_classes(id) ON DELETE SET NULL,
+  stream_id text REFERENCES school_streams(id) ON DELETE SET NULL,
+  subject_id text REFERENCES school_subjects(id) ON DELETE SET NULL,
+  observed_on date NOT NULL,
+  observer_user_id text REFERENCES users(id) ON DELETE SET NULL,
+  observation_type text NOT NULL DEFAULT 'lesson_observation' CHECK (observation_type IN ('lesson_observation','record_inspection','scheme_check','lesson_plan_check')),
+  preparation_score integer CHECK (preparation_score BETWEEN 0 AND 5),
+  delivery_score integer CHECK (delivery_score BETWEEN 0 AND 5),
+  learner_engagement_score integer CHECK (learner_engagement_score BETWEEN 0 AND 5),
+  assessment_score integer CHECK (assessment_score BETWEEN 0 AND 5),
+  classroom_management_score integer CHECK (classroom_management_score BETWEEN 0 AND 5),
+  strengths text,
+  improvement_areas text,
+  agreed_actions text,
+  follow_up_on date,
+  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','acknowledged','follow_up_due','closed')),
+  teacher_acknowledged_at timestamptz,
+  closed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX school_academic_observations_teacher_idx ON school_academic_observations(organization_id,teacher_staff_id,observed_on DESC);
