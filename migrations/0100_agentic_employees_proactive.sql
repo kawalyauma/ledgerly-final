@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS ae_proactive_schedules (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, workflow_key TEXT NOT NULL, agent_key TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, cadence TEXT NOT NULL DEFAULT 'daily', run_hour INTEGER NOT NULL DEFAULT 7, run_minute INTEGER NOT NULL DEFAULT 0, weekday INTEGER, config_json TEXT NOT NULL DEFAULT '{}', last_run_at TEXT, next_run_at TEXT, updated_by TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (organization_id, workflow_key));
+
+CREATE TABLE IF NOT EXISTS ae_proactive_runs (id TEXT PRIMARY KEY, organization_id TEXT NOT NULL, schedule_id TEXT, workflow_key TEXT NOT NULL, agent_key TEXT NOT NULL, conversation_id TEXT, parent_run_id TEXT, trigger_type TEXT NOT NULL DEFAULT 'scheduled', status TEXT NOT NULL DEFAULT 'running', summary TEXT, error_text TEXT, model TEXT, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TEXT, metadata_json TEXT NOT NULL DEFAULT '{}');
+
+CREATE INDEX IF NOT EXISTS idx_ae_proactive_due ON ae_proactive_schedules(enabled,next_run_at);
+CREATE INDEX IF NOT EXISTS idx_ae_proactive_runs_recent ON ae_proactive_runs(organization_id,started_at);
