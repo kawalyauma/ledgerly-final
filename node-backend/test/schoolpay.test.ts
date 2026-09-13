@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { schoolPaySyncHash, validateSchoolPayDateRange } from "../src/features/schoolpay/reconciliation.js";
 import {
   decryptSchoolPaySecret,
   encryptSchoolPaySecret,
@@ -17,6 +18,16 @@ describe("SchoolPay gateway crypto", () => {
       "68dca8806e869e518038a3e2317fd8ae6045aca3a1ac166e91ea61763c03d928",
     )).toBe(true);
     expect(verifySchoolPayWebhookSignature("demo-password", "SP-000123", "0".repeat(64))).toBe(false);
+  });
+
+  it("matches the SchoolPay uppercase MD5 reconciliation hash contract", () => {
+    expect(schoolPaySyncHash("123456", "2024-01-15", "your_secret_password")).toBe("8C25020661588EC8BE2A7452344E8B6F");
+  });
+
+  it("enforces the SchoolPay 31-day reconciliation range", () => {
+    expect(validateSchoolPayDateRange("2024-01-01", "2024-01-31")).toEqual({ days: 31 });
+    expect(() => validateSchoolPayDateRange("2024-01-01", "2024-02-01")).toThrow();
+    expect(() => validateSchoolPayDateRange("2024-02-31", "2024-02-31")).toThrow();
   });
 
   it("encrypts each school API password with authenticated encryption", () => {

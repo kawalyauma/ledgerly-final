@@ -4,8 +4,16 @@ import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { requireScope } from "../core-identity/security.js";
-import { captureSchoolPayWebhook, configureSchoolPay, listSchoolPayEvents, schoolPayConfigSummary } from "./service.js";
+import { listSchoolPayReconciliations, reconcileSchoolPayTransactions } from "./reconciliation.js";
+import {
+  captureSchoolPayWebhook,
+  configureSchoolPay,
+  listSchoolPayEvents,
+  retrySchoolPayEvent,
+  schoolPayConfigSummary,
+} from "./service.js";
 
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const configInput = z.object({
   schoolCode: z.string().min(1).max(120),
   apiPassword: z.string().min(1).max(500),
@@ -14,6 +22,7 @@ const configInput = z.object({
   enabled: z.boolean().default(true),
   autoAllocate: z.boolean().default(true),
 });
+const reconcileInput = z.object({ fromDate: date, toDate: date.optional() });
 
 const feePayment = z.object({
   amount: z.union([z.string(), z.number()]),
@@ -25,11 +34,13 @@ const feePayment = z.object({
   studentName: z.string().nullable().optional(),
   studentRegistrationNumber: z.string().nullable().optional(),
   transactionCompletionStatus: z.string().nullable().optional(),
+  supplementaryFeeDescription: z.string().nullable().optional(),
+  supplementaryFeeId: z.string().nullable().optional(),
 }).passthrough();
 
 const webhookInput = z.object({
   signature: z.string().min(1),
-  type: z.string().min(1),
+  type: z.enum(["SCHOOL_FEES", "OTHER_FEES"]),
   payment: feePayment,
 }).passthrough();
 
@@ -54,6 +65,28 @@ export function createSchoolPayAdminRoutes(runtime: Runtime) {
     const principal = c.get("principal");
     const limit = Number(c.req.query("limit") ?? 100);
     return c.json({ data: await listSchoolPayEvents(runtime, principal.organizationId, limit) });
+  });
+
+  routes.post("/events/:eventId/retry", requireScope("school:write"), async (c) => {
+    const principal = c.get("principal");
+    const result = await retrySchoolPayEvent(runtime, principal.organizationId, c.req.param("eventId"));
+    return c.json({ data: result });
+  });
+
+  routes.post("/reconcile", requireScope("school:write"), async (c) => {
+    const parsed = reconcileInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid SchoolPay reconciliation request", parsed.error.flatten());
+    const principal = c.get("principal");
+    const result = await reconcileSchoolPayTransactions(
+      runtime, principal.organizationId, principal.userId, parsed.data.fromDate, parsed.data.toDate ?? parsed.data.fromDate,
+    );
+    return c.json({ data: result }, 201);
+  });
+
+  routes.get("/reconciliations", async (c) => {
+    const principal = c.get("principal");
+    const limit = Number(c.req.query("limit") ?? 50);
+    return c.json({ data: await listSchoolPayReconciliations(runtime, principal.organizationId, limit) });
   });
 
   return routes;
