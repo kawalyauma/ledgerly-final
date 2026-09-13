@@ -12,7 +12,8 @@ function mapRow(row:any):MemoryRow{return{id:String(row.id),agentKey:String(row.
 
 export async function listRelevantMemories(db:D1Database,organizationId:string,agentKey:AgentKey,query?:string,limit=30){
  const q=String(query||"").trim();const like=`%${q}%`;const base=`SELECT id,agent_key AS agentKey,memory_type AS memoryType,visibility,title,content,status,priority,due_at AS dueAt,tags_json AS tagsJson,source_conversation_id AS sourceConversationId,created_at AS createdAt,updated_at AS updatedAt,use_count AS useCount FROM ae_memories WHERE organization_id=? AND (agent_key=? OR visibility='organization') AND ((memory_type='working' AND status IN ('open','in_progress','waiting')) OR (memory_type='institutional' AND status='active'))`;
- const result=q?await db.prepare(`${base} AND (title LIKE ? OR content LIKE ? OR tags_json LIKE ?) ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,due_at,updated_at DESC LIMIT ?`).bind(organizationId,agentKey,like,like,like,limit).all<any>():await db.prepare(`${base} ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,due_at,updated_at DESC LIMIT ?`).bind(organizationId,agentKey,limit).all<any>();
+ const order=` ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,due_at,updated_at DESC LIMIT ?`;
+ const result=q?await db.prepare(`${base} AND (title LIKE ? OR content LIKE ? OR CAST(tags_json AS TEXT) LIKE ?)${order}`).bind(organizationId,agentKey,like,like,like,limit).all<any>():await db.prepare(`${base}${order}`).bind(organizationId,agentKey,limit).all<any>();
  return result.results.map(mapRow);
 }
 
