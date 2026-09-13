@@ -15,7 +15,7 @@ import { createDocument, postDocument } from "./services/documents";
 import { createJournal, postJournal } from "./services/ledger";
 import { backendModules } from "../modules/backend-registry.generated";
 
-const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+export const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 app.use("*", requestId());
 app.use("*", secureHeaders());
 app.use("/api/*", cors({ origin: [], allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-API-Key", "X-Organization-Id", "X-User-Id"], allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"], maxAge: 86400 }));
