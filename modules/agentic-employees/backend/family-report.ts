@@ -27,6 +27,8 @@ export async function buildFamilyReport(
   const includeAcademic = options.includeAcademic !== false;
   const includeAttendance = options.includeAttendance !== false;
   const includeFinance = options.includeFinance !== false;
+  const organization = await db.prepare("SELECT name,base_currency AS baseCurrency FROM organizations WHERE id=?")
+    .bind(organizationId).first<{ name?: string; baseCurrency?: string }>();
   const studentReports: Array<Record<string, unknown>> = [];
 
   for (const student of family.students) {
@@ -50,6 +52,8 @@ export async function buildFamilyReport(
 
   const report = {
     generatedAt: new Date().toISOString(),
+    organization: { id: organizationId, name: organization?.name || null, currency: organization?.baseCurrency || "UGX" },
+    moneyUnit: "minor",
     dataPolicy: {
       guardianResolution: "verified school_student_guardians links only",
       academics: includeAcademic ? "published exam/report-card evidence only" : "excluded",
