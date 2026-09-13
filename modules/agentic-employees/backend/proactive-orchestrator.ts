@@ -23,5 +23,16 @@ export async function runProactiveWorkflow(env: Env, organizationId: string, act
     }
   }
 
-  return runSingleProactive(env, organizationId, actorUserId, "headteacher_daily_brief", triggerType, scheduleId, null, { specialistReports: reports });
+  const exceptions = await env.FINANCE_DB.prepare(`SELECT r.severity,r.title,r.summary,r.recommended_action AS recommendedAction,
+    r.agent_key AS agentKey,e.event_type AS eventType,e.occurred_at AS occurredAt
+    FROM ae_event_reactions r JOIN ae_event_inbox e ON e.id=r.event_id AND e.organization_id=r.organization_id
+    WHERE r.organization_id=? AND r.acknowledged_at IS NULL AND r.severity IN ('attention','urgent')
+      AND r.created_at>=datetime('now','-48 hours')
+    ORDER BY CASE r.severity WHEN 'urgent' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 20`)
+    .bind(organizationId).all();
+
+  return runSingleProactive(env, organizationId, actorUserId, "headteacher_daily_brief", triggerType, scheduleId, null, {
+    specialistReports: reports,
+    unacknowledgedEventExceptions: exceptions.results,
+  });
 }
