@@ -30,14 +30,13 @@ export function createApp(options: {
   app.use("/api/*", cors(corsConfig));
   app.use("/auth/*", cors(corsConfig));
 
-  // Every versioned API is authenticated by default. Explicitly public API routes must be allow-listed here.
-  // Printerly /node routes authenticate with appliance bearer tokens inside the feature itself.
   if (options.runtime) {
     const auth = requireAuth(options.runtime);
     app.use("/api/v1/*", async (c, next) => {
       const mobileOffline = c.req.path === "/api/v1/mobile-sync/offline" || c.req.path.startsWith("/api/v1/mobile-sync/offline/");
       const printerlyNode = c.req.path.startsWith("/api/v1/printerly/node/");
-      if (mobileOffline || printerlyNode) {
+      const nvrDevice = c.req.path.startsWith("/api/v1/nvr/device/");
+      if (mobileOffline || printerlyNode || nvrDevice) {
         await next();
         return;
       }
