@@ -1,0 +1,54 @@
+name: Mobile employee PIN access
+
+on:
+  pull_request:
+    paths:
+      - 'attendance-mobile/**'
+      - 'modules/school/backend/mobile-pin.ts'
+      - 'modules/school/backend/module.ts'
+      - 'modules/school/backend/index.ts'
+      - 'modules/school/frontend/MobilePinAccessPage.tsx'
+      - 'modules/school/frontend/module.tsx'
+      - 'modules/attendance/backend/device-context-routes.ts'
+      - 'modules/attendance/backend/module.ts'
+      - 'migrations/0110_mobile_employee_pin.sql'
+      - 'selfhost/postgres/mobile-employee-pin.sql'
+      - '.github/workflows/mobile-employee-pin-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  web-and-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --runInBand
+      - run: npm run build:web
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: attendance-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.11.0'
+          cache: npm
+          cache-dependency-path: attendance-mobile/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --runInBand --passWithNoTests
+      - name: Compile Android Kotlin
+        run: ./gradlew :app:compileDebugKotlin --no-daemon
+        working-directory: attendance-mobile/android
