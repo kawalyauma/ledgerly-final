@@ -10,11 +10,13 @@ import { createSchoolFileRoutes } from "./files.js";
 import { createSchoolFeeRoutes } from "./fees.js";
 import { createAttendanceRoutes } from "./attendance.js";
 import { createClinicRoutes } from "./clinic.js";
+import { createSchoolIntegrityRoutes } from "./integrity.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
-  version: "3.0.0",
+  version: "3.1.0",
   mount(app,runtime){
+    app.route("/api/v1/school",createSchoolIntegrityRoutes(runtime));
     app.route("/api/v1/school",createSchoolRoutes(runtime));
     app.route("/api/v1/school/student-management",createStudentRoutes(runtime));
     app.route("/api/v1/school/student-management",createAdmissionRoutes(runtime));
