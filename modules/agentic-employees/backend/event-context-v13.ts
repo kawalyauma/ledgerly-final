@@ -1,8 +1,21 @@
 import type { EventSettings, EventEnvelope, EvaluatedEvent } from "./event-context";
 import { evaluateEvent as evaluateBaseEvent } from "./event-context";
+import { attendanceSeverity, booksStockSeverity } from "./event-policy";
 
 export async function evaluateEmployeeEvent(db:D1Database,event:EventEnvelope,settings:EventSettings):Promise<EvaluatedEvent>{
-  if(event.eventType!=="academics.lesson_plan_overdue") return evaluateBaseEvent(db,event,settings);
+  if(event.eventType!=="academics.lesson_plan_overdue"){
+    const result=await evaluateBaseEvent(db,event,settings);
+    if(event.eventType==="attendance.student_absent"&&result.facts){
+      const count=Number((result.facts as any).absencesInWindow||0);
+      result.severity=attendanceSeverity(count,settings.attendanceAttentionCount,settings.attendanceUrgentCount);
+      result.secondaryAgentKey=result.severity==="urgent"?"headteacher":undefined;
+    }
+    if(event.eventType==="books.stock_changed"&&result.facts){
+      const severity=booksStockSeverity(Number((result.facts as any).available||0),settings.booksLowStockThreshold);
+      if(severity)result.severity=severity;
+    }
+    return result;
+  }
   if(!settings.enabled)return{ignored:true,ignoreReason:"Event reactions are disabled for this school"};
   const row=await db.prepare(`SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,
     c.name AS className,s.name AS subjectName,TRIM(sp.first_name||' '||sp.last_name) AS teacherName
