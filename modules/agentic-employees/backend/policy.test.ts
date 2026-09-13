@@ -12,6 +12,7 @@ describe("agentic employee policy", () => {
     expect(actionNeedsApproval("work.task.create")).toBe(true);
     expect(actionNeedsApproval("document.generate")).toBe(true);
     expect(actionNeedsApproval("printerly.document.print")).toBe(true);
+    expect(actionNeedsApproval("system.api.request")).toBe(true);
     expect(actionNeedsApproval("finance.write")).toBe(true);
     expect(actionNeedsApproval("academic.write")).toBe(true);
     expect(actionNeedsApproval("school_snapshot")).toBe(false);
@@ -22,7 +23,7 @@ describe("agentic employee policy", () => {
     expect(resolveModel("sol", { OPENAI_MODEL_SOL: "custom-sol" })).toBe("custom-sol");
   });
 
-  it("separates employee responsibilities and gives each employee governed document tools", () => {
+  it("separates employee responsibilities and gives each employee governed document and system tools", () => {
     expect(AGENTS.bursar.tools).toContain("fee_balance_lookup");
     expect(AGENTS.bursar.tools).toContain("fee_collection_summary");
     expect(AGENTS.dos.tools).toContain("lesson_plan_queue");
@@ -35,6 +36,9 @@ describe("agentic employee policy", () => {
       expect(agent.tools).toContain("list_saved_documents");
       expect(agent.tools).toContain("prepare_document");
       expect(agent.tools).toContain("prepare_print_document");
+      expect(agent.tools).toContain("system_catalog");
+      expect(agent.tools).toContain("system_read");
+      expect(agent.tools).toContain("prepare_system_action");
     }
   });
 });
