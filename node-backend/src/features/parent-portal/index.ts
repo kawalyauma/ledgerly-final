@@ -3,11 +3,13 @@ import { createParentPortalRoutes } from "./routes.js";
 import { createParentPortalParityRoutes } from "./parity.js";
 import { createParentPortalAcademicRoutes } from "./academics.js";
 import { createParentPortalConsentRoutes } from "./consents.js";
+import { createParentPortalMessagingHomeworkRoutes } from "./messages-homework.js";
 
 export const parentPortalFeature: BackendFeature = {
   key: "parent-portal",
-  version: "1.3.0",
+  version: "1.4.0",
   mount(app, runtime) {
+    app.route("/api/v1/parent-portal", createParentPortalMessagingHomeworkRoutes(runtime));
     app.route("/api/v1/parent-portal", createParentPortalConsentRoutes(runtime));
     app.route("/api/v1/parent-portal", createParentPortalAcademicRoutes(runtime));
     app.route("/api/v1/parent-portal", createParentPortalParityRoutes(runtime));
