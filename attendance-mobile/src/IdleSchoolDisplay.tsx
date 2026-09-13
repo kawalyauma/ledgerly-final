@@ -80,7 +80,7 @@ export function IdleSchoolDisplay({summary,panelIntervalMs,onDismiss}:Props){
     </Animated.View>
     <View style={s.footer}>
       <View style={s.dots}>{PANELS.map((_,i)=><View key={i} style={[s.dot,i===panelIndex&&s.dotActive]}/>)}</View>
-      <Text style={s.tapHint}>Touch anywhere to return to attendance</Text>
+      <Text style={s.tapHint}>Touch anywhere to unlock Ledgerly</Text>
       <Text style={s.refresh}>{summary?`Updated ${new Date(summary.generatedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"})}`:"Loading live school status…"}</Text>
     </View>
   </Pressable>;

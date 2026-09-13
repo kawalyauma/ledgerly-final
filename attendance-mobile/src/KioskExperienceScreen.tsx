@@ -7,9 +7,9 @@ import {loadLiveSchoolSummary,type LiveSchoolSummary} from "./liveSchoolSummary"
 import {KioskManager} from "./native";
 import type {Registration} from "./types";
 
-type Props={registration:Registration;onReset:()=>void;onOpenSettings?:()=>void};
+type Props={registration:Registration;onReset:()=>void;onOpenSettings?:()=>void;onRequestPinLock?:()=>void};
 
-export function KioskExperienceScreen({registration,onReset,onOpenSettings}:Props){
+export function KioskExperienceScreen({registration,onReset,onOpenSettings,onRequestPinLock}:Props){
   const[settings,setSettings]=useState<KioskDisplaySettings>(DEFAULT_KIOSK_DISPLAY_SETTINGS);
   const[idle,setIdle]=useState(false);
   const[summary,setSummary]=useState<LiveSchoolSummary|null>(null);
@@ -25,6 +25,11 @@ export function KioskExperienceScreen({registration,onReset,onOpenSettings}:Prop
     idleTimer.current=setTimeout(()=>{if(mounted.current)setIdle(true)},active.idleTimeoutMs);
   },[]);
   const activity=useCallback(()=>{setIdle(false);armIdle()},[armIdle]);
+  const requestPinLock=useCallback(()=>{
+    setIdle(false);
+    if(idleTimer.current){clearTimeout(idleTimer.current);idleTimer.current=null}
+    if(onRequestPinLock)onRequestPinLock();else armIdle();
+  },[armIdle,onRequestPinLock]);
   const refreshSummary=useCallback(async()=>{
     const next=await loadLiveSchoolSummary(registration).catch(()=>null);
     if(next&&mounted.current)setSummary(next);
@@ -70,9 +75,9 @@ export function KioskExperienceScreen({registration,onReset,onOpenSettings}:Prop
 
   useEffect(()=>{if(idle)void refreshSummary()},[idle,refreshSummary]);
 
-  return <View style={s.root} onStartShouldSetResponderCapture={()=>{activity();return false}}>
+  return <View style={s.root} onStartShouldSetResponderCapture={()=>{if(!idle)activity();return false}}>
     <KioskScreen registration={registration} onReset={onReset} onOpenSettings={onOpenSettings}/>
-    {idle&&settings.liveDisplayEnabled?<IdleSchoolDisplay summary={summary} panelIntervalMs={settings.panelIntervalMs} onDismiss={activity}/>:null}
+    {idle&&settings.liveDisplayEnabled?<IdleSchoolDisplay summary={summary} panelIntervalMs={settings.panelIntervalMs} onDismiss={requestPinLock}/>:null}
   </View>;
 }
 

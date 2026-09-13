@@ -1,8 +1,8 @@
 {
   "key": "school-management",
   "name": "School Management",
-  "version": "1.9.0",
-  "description": "School administration, fees, promotion, discipline, students, staff, identity and academic setup",
+  "version": "1.11.0",
+  "description": "School administration, fees, promotion, discipline, students, staff, identity, mobile PIN access and academic setup",
   "category": "education",
   "core": false,
   "active": true,
@@ -10,6 +10,7 @@
     "backendModules": [
       "setup",
       "iam",
+      "mobile-pin-access",
       "student-management",
       "promotion-engine",
       "discipline-behaviour",

@@ -19,10 +19,10 @@ import { ensureSchoolDefaults } from "./bootstrap";
 export const schoolRoutes = new Hono<{Bindings:Env;Variables:AppVariables}>();
 schoolRoutes.get("/manifest", c => c.json({
   data: {
-    key: "school-management", name: "School Management", version: "1.9.0",
-    backendModules: ["setup", "iam", "student-management", "promotion-engine", "discipline-behaviour", "staff-teacher-management", "files", "fees-billing"],
+    key: "school-management", name: "School Management", version: "1.11.0",
+    backendModules: ["setup", "iam", "mobile-pin-access", "student-management", "promotion-engine", "discipline-behaviour", "staff-teacher-management", "files", "fees-billing"],
     plannedModules: ["library", "boarding", "transport"],
-    integratesWith: ["academics", "exams", "communications"],
+    integratesWith: ["academics", "attendance", "exams", "communications"],
     accountingIntegration: true,
   }
 }));
@@ -35,5 +35,4 @@ schoolRoutes.route("/promotion", schoolPromotionRoutes);
 schoolRoutes.route("/discipline", schoolDisciplineRoutes);
 schoolRoutes.route("/staff-management", schoolStaffRoutes);
 schoolRoutes.route("/files", schoolFileRoutes);
-
 schoolRoutes.route("/fees", schoolFeesRoutes);
