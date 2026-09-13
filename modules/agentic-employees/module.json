@@ -1,7 +1,7 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tenant-safe agentic school employees powered by OpenAI models with Ledgerly tool controls, approvals and audit trails.",
   "category": "automation",
   "core": false,
@@ -9,7 +9,7 @@
   "manifest": {
     "standalone": true,
     "requiresModules": ["school-management"],
-    "requiresDataFrom": ["school-management", "communications", "human-resources"],
+    "requiresDataFrom": ["school-management", "academics", "communications", "human-resources", "books"],
     "sharedCore": ["organizations", "users", "school_students", "school_staff_profiles"],
     "provider": "openai-responses",
     "models": ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"],
@@ -22,7 +22,13 @@
       "tool-audit-log",
       "task-execution",
       "model-tier-routing",
-      "custom-agent-prompts"
+      "custom-agent-prompts",
+      "academics-supervision-tools",
+      "hr-leave-tools",
+      "fees-collection-analysis",
+      "books-stock-and-distribution-tools",
+      "communications-health-tools",
+      "approved-communications-execution"
     ]
   }
 }

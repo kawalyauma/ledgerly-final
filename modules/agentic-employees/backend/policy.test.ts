@@ -8,8 +8,9 @@ describe("agentic employee policy", () => {
   });
 
   it("keeps sensitive actions behind approval", () => {
-    expect(actionNeedsApproval("communication.send")).toBe(true);
+    expect(actionNeedsApproval("communication.campaign.send")).toBe(true);
     expect(actionNeedsApproval("finance.write")).toBe(true);
+    expect(actionNeedsApproval("academic.write")).toBe(true);
     expect(actionNeedsApproval("school_snapshot")).toBe(false);
   });
 
@@ -20,7 +21,11 @@ describe("agentic employee policy", () => {
 
   it("separates employee responsibilities", () => {
     expect(AGENTS.bursar.tools).toContain("fee_balance_lookup");
+    expect(AGENTS.bursar.tools).toContain("fee_collection_summary");
+    expect(AGENTS.dos.tools).toContain("lesson_plan_queue");
     expect(AGENTS.dos.tools).not.toContain("fee_balance_lookup");
+    expect(AGENTS.hr.tools).toContain("hr_leave_queue");
+    expect(AGENTS.librarian.tools).toContain("learner_book_history");
     expect(AGENTS.headteacher.modelTier).toBe("sol");
   });
 });
