@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { schoolPayAdhocHash } from "../src/features/schoolpay/adhoc.js";
 import { schoolPaySyncHash, validateSchoolPayDateRange } from "../src/features/schoolpay/reconciliation.js";
+import { schoolPayAdhocRecoveryDelayMinutes } from "../src/features/schoolpay/recovery.js";
 import {
   decryptSchoolPaySecret,
   encryptSchoolPaySecret,
@@ -25,14 +26,18 @@ describe("SchoolPay gateway crypto", () => {
     expect(schoolPaySyncHash("123456", "2024-01-15", "your_secret_password")).toBe("8C25020661588EC8BE2A7452344E8B6F");
   });
 
-  it("builds the SchoolPay ad-hoc MD5 hash from school code, identifying reference and password", () => {
-    expect(schoolPayAdhocHash("809", "63140", "your_secret_password")).toBe("7048334550C3D92E29900C242D346F91");
+  it("uses the SchoolPay ad-hoc identifying reference hash contract", () => {
+    expect(schoolPayAdhocHash("809", "63140", "password")).toBe("95EDAC058FD62560E1E910FA1E161C1E");
   });
 
   it("enforces the SchoolPay 31-day reconciliation range", () => {
     expect(validateSchoolPayDateRange("2024-01-01", "2024-01-31")).toEqual({ days: 31 });
     expect(() => validateSchoolPayDateRange("2024-01-01", "2024-02-01")).toThrow();
     expect(() => validateSchoolPayDateRange("2024-02-31", "2024-02-31")).toThrow();
+  });
+
+  it("backs off repeated SchoolPay ad-hoc recovery checks", () => {
+    expect([1, 2, 3, 4, 5, 20].map(schoolPayAdhocRecoveryDelayMinutes)).toEqual([5, 10, 15, 30, 60, 60]);
   });
 
   it("encrypts each school API password with authenticated encryption", () => {

@@ -5,12 +5,16 @@ import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { requireScope } from "../core-identity/security.js";
 import {
-  captureSchoolPayAdhocCallback,
   initiateSchoolPayAdhoc,
   listSchoolPayAdhocIntents,
-  refreshSchoolPayAdhocStatus,
 } from "./adhoc.js";
+import { getSchoolPayDiagnostics } from "./diagnostics.js";
 import { listSchoolPayReconciliations, reconcileSchoolPayTransactions } from "./reconciliation.js";
+import {
+  captureSchoolPayAdhocCallbackLocked,
+  recoverPendingSchoolPayAdhoc,
+  refreshSchoolPayAdhocStatusLocked,
+} from "./recovery.js";
 import {
   captureSchoolPayWebhook,
   configureSchoolPay,
@@ -86,6 +90,16 @@ export function createSchoolPayAdminRoutes(runtime: Runtime) {
     return c.json({ data: configured });
   });
 
+  routes.get("/health", async (c) => {
+    const principal = c.get("principal");
+    return c.json({ data: await getSchoolPayDiagnostics(runtime, principal.organizationId) });
+  });
+
+  routes.get("/diagnostics", async (c) => {
+    const principal = c.get("principal");
+    return c.json({ data: await getSchoolPayDiagnostics(runtime, principal.organizationId) });
+  });
+
   routes.get("/events", async (c) => {
     const principal = c.get("principal");
     const limit = Number(c.req.query("limit") ?? 100);
@@ -120,6 +134,16 @@ export function createSchoolPayAdminRoutes(runtime: Runtime) {
     return c.json({ data: await listSchoolPayAdhocIntents(runtime, principal.organizationId, limit) });
   });
 
+  routes.post("/adhoc/recover", requireScope("school:write"), async (c) => {
+    const principal = c.get("principal");
+    const result = await recoverPendingSchoolPayAdhoc(runtime, {
+      organizationId: principal.organizationId,
+      limit: 100,
+      force: true,
+    });
+    return c.json({ data: result });
+  });
+
   routes.post("/adhoc/register", requireScope("school:write"), async (c) => {
     const parsed = adhocBaseInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid SchoolPay ad-hoc register request", parsed.error.flatten());
@@ -144,7 +168,7 @@ export function createSchoolPayAdminRoutes(runtime: Runtime) {
 
   routes.get("/adhoc/:paymentReference/status", requireScope("school:write"), async (c) => {
     const principal = c.get("principal");
-    const result = await refreshSchoolPayAdhocStatus(runtime, principal.organizationId, c.req.param("paymentReference"));
+    const result = await refreshSchoolPayAdhocStatusLocked(runtime, principal.organizationId, c.req.param("paymentReference"));
     return c.json({ data: result });
   });
 
@@ -157,7 +181,7 @@ export function createSchoolPayWebhookRoutes(runtime: Runtime) {
   routes.post("/:webhookKey/adhoc", async (c) => {
     const parsed = adhocCallbackInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new AppError(422, "INVALID_SCHOOLPAY_ADHOC_CALLBACK", "Invalid SchoolPay ad-hoc callback payload", parsed.error.flatten());
-    const result = await captureSchoolPayAdhocCallback(runtime, c.req.param("webhookKey"), parsed.data);
+    const result = await captureSchoolPayAdhocCallbackLocked(runtime, c.req.param("webhookKey"), parsed.data);
     return c.json({ data: result }, 200);
   });
 

@@ -1,6 +1,7 @@
 import type { ClaimedJob } from "../../queue/postgres-queue.js";
 import type { Runtime } from "../../runtime.js";
 import { reconcileSchoolPayTransactions } from "./reconciliation.js";
+import { recoverPendingSchoolPayAdhoc } from "./recovery.js";
 
 function dateInZone(value: Date, timeZone: string) {
   const parts = new Intl.DateTimeFormat("en", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(value);
@@ -26,4 +27,11 @@ export async function recoverSchoolPayTransactions(_job: ClaimedJob, runtime: Ru
     }
   }
   if (failures.length) throw new Error(`SchoolPay reconciliation failed for ${failures.length} school(s)`);
+}
+
+export async function recoverSchoolPayAdhocPayments(_job: ClaimedJob, runtime: Runtime) {
+  const result = await recoverPendingSchoolPayAdhoc(runtime, { limit: 250 });
+  if (result.selected > 0) {
+    runtime.logger.info({ schoolPayAdhocRecovery: result }, "SchoolPay ad-hoc recovery sweep completed");
+  }
 }
