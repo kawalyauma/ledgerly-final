@@ -8,6 +8,12 @@ import { runProactiveWorkflow } from "./proactive-orchestrator";
 
 export const agenticProactiveRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+function requireAutomationAdmin(c: any) {
+  const p = c.get("principal");
+  if (p.role !== "owner" && p.role !== "admin") throw new AppError(403, "FORBIDDEN", "Only organization owners or admins can control proactive AI schedules");
+  return p;
+}
+
 agenticProactiveRoutes.get("/proactive/schedules", requireScope("school:read"), async c => {
   const p = c.get("principal");
   const rows = await c.env.FINANCE_DB.prepare(`SELECT id,workflow_key AS workflowKey,agent_key AS agentKey,actor_user_id AS actorUserId,enabled,cadence,
@@ -17,7 +23,7 @@ agenticProactiveRoutes.get("/proactive/schedules", requireScope("school:read"), 
 });
 
 agenticProactiveRoutes.post("/proactive/initialize", requireScope("school:write"), async c => {
-  const p = c.get("principal");
+  const p = requireAutomationAdmin(c);
   await ensureDefaultProactiveSchedules(c.env.FINANCE_DB, p.organizationId, p.userId);
   const rows = await c.env.FINANCE_DB.prepare(`SELECT id,workflow_key AS workflowKey,agent_key AS agentKey,actor_user_id AS actorUserId,enabled,cadence,
     run_hour AS runHour,run_minute AS runMinute,weekday,last_run_at AS lastRunAt,next_run_at AS nextRunAt
@@ -28,7 +34,7 @@ agenticProactiveRoutes.post("/proactive/initialize", requireScope("school:write"
 agenticProactiveRoutes.patch("/proactive/schedules/:id", requireScope("school:write"), async c => {
   const parsed = z.object({ enabled: z.boolean().optional(), cadence: z.enum(["daily", "weekly"]).optional(), runHour: z.number().int().min(0).max(23).optional(), runMinute: z.number().int().min(0).max(59).optional(), weekday: z.number().int().min(0).max(6).nullable().optional() }).safeParse(await c.req.json());
   if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid proactive schedule", parsed.error.flatten());
-  const p = c.get("principal");
+  const p = requireAutomationAdmin(c);
   const row = await c.env.FINANCE_DB.prepare("SELECT id,cadence,run_hour AS runHour,run_minute AS runMinute,weekday FROM ae_proactive_schedules WHERE id=? AND organization_id=?")
     .bind(c.req.param("id"), p.organizationId).first<any>();
   if (!row) throw new AppError(404, "NOT_FOUND", "Proactive schedule not found");
@@ -44,7 +50,7 @@ agenticProactiveRoutes.patch("/proactive/schedules/:id", requireScope("school:wr
 });
 
 agenticProactiveRoutes.post("/proactive/run/:workflowKey", requireScope("school:write"), async c => {
-  const p = c.get("principal"), workflowKey = c.req.param("workflowKey");
+  const p = requireAutomationAdmin(c), workflowKey = c.req.param("workflowKey");
   if (!workflowDefinition(workflowKey)) throw new AppError(404, "PROACTIVE_WORKFLOW_NOT_FOUND", "Unknown proactive AI workflow");
   const data = await runProactiveWorkflow(c.env, p.organizationId, p.userId, workflowKey, "manual");
   return c.json({ data }, 201);
