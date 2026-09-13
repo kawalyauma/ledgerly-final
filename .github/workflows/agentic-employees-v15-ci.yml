@@ -1,4 +1,4 @@
-name: Agentic Employees v1.5 CI
+name: Agentic Employees v1.6 CI
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - "modules/agentic-employees/**"
       - "modules/printerly/backend/agentic-print.ts"
       - "migrations/0106_agentic_generated_documents.sql"
+      - "migrations/0107_agentic_images_and_delegated_actions.sql"
       - "src/index.ts"
       - "src/types.ts"
       - "package.json"
@@ -51,7 +52,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Refresh dependency lock
         run: npm install --package-lock-only --ignore-scripts
@@ -61,13 +61,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- package-lock.json; then
-            exit 0
-          fi
+          if git diff --quiet -- package-lock.json; then exit 0; fi
           git config user.name "ledgerly-ci"
           git config user.email "ledgerly-ci@users.noreply.github.com"
           git add package-lock.json
-          git commit -m "chore: refresh lockfile for Agentic v1.5"
+          git commit -m "chore: refresh lockfile for Agentic v1.6"
           git push origin HEAD:${GITHUB_REF_NAME}
 
       - run: npm ci
@@ -82,7 +80,9 @@ jobs:
           set -euo pipefail
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v15.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v16.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT pdf_page_count FROM ae_generated_documents LIMIT 0"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT ocr_text,vision_summary FROM ae_image_attachments LIMIT 0"
 
       - name: Generate DOCX, XLSX, PPTX and printable PDFs
         shell: bash
@@ -95,15 +95,10 @@ jobs:
           const root=process.env.LEDGERLY_STORAGE_DIR!;
           const service=createAgentDocumentService(new LocalR2Bucket(root) as any);
           for (const format of ['docx','xlsx','pptx'] as const) {
-            const spec=format==='xlsx'
-              ? {sheets:[{name:'Summary',rows:[['Metric','Value'],['Learners',120]]}]}
-              : format==='pptx'
-                ? {slides:[{title:'School brief',bullets:['Verified item one','Verified item two']}]}
-                : {sections:[{heading:'Overview',paragraphs:['Verified school summary.'],bullets:['Item one','Item two']}]};
+            const spec=format==='xlsx'?{sheets:[{name:'Summary',rows:[['Metric','Value'],['Learners',120]]}]}:format==='pptx'?{slides:[{title:'School brief',bullets:['Verified item one','Verified item two']}]}:{sections:[{heading:'Overview',paragraphs:['Verified school summary.'],bullets:['Item one','Item two']}]};
             const artifact=await service.generate({documentId:`ci-${format}`,organizationId:'org-ci',agentKey:'headteacher',title:`CI ${format.toUpperCase()} document`,format,spec});
-            if (artifact.sourceSizeBytes < 100 || artifact.pdfSizeBytes < 100 || artifact.pdfPageCount < 1) throw new Error(`Invalid ${format} artifact`);
-            await stat(`${root}/${artifact.sourceObjectKey}`);
-            await stat(`${root}/${artifact.pdfObjectKey}`);
+            if(artifact.sourceSizeBytes<100||artifact.pdfSizeBytes<100||artifact.pdfPageCount<1)throw new Error(`Invalid ${format} artifact`);
+            await stat(`${root}/${artifact.sourceObjectKey}`);await stat(`${root}/${artifact.pdfObjectKey}`);
           }
           TS
 
@@ -115,9 +110,7 @@ jobs:
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/system/health >/tmp/agentic-health.json; then
-              break
-            fi
+            if curl -fsS http://127.0.0.1:8080/system/health >/tmp/agentic-health.json; then break; fi
             sleep 1
           done
           cat /tmp/agentic-health.json
