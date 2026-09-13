@@ -1,12 +1,8 @@
 import {fetchBootstrap} from "./api";
+import {readKioskActivity} from "./kioskActivity";
 import {OfflineStore} from "./native";
 import {cacheBootstrap,cachedBootstrap} from "./storage";
-import type {AttendanceEvent,Bootstrap,Registration,RosterPerson} from "./types";
-
-const STATE_KEY="kiosk.live-display.activity.v1";
-
-type PersonState={personType:"student"|"staff";personId:string;direction:"IN"|"OUT";capturedAt:string;groupName?:string};
-type ActivityState={day:string;events:number;checkIns:number;checkOuts:number;people:Record<string,PersonState>};
+import type {Bootstrap,Registration} from "./types";
 
 export type LiveSchoolSummary={
   generatedAt:string;
@@ -31,28 +27,6 @@ export type LiveSchoolSummary={
   groups:Array<{name:string;present:number;total:number;pct:number}>;
 };
 
-function dayKey(date=new Date()){return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`}
-function emptyState():ActivityState{return{day:dayKey(),events:0,checkIns:0,checkOuts:0,people:{}}}
-
-async function readState():Promise<ActivityState>{
-  try{
-    const raw=await OfflineStore.getSecure(STATE_KEY);
-    const parsed=raw?JSON.parse(raw) as ActivityState:null;
-    if(!parsed||parsed.day!==dayKey())return emptyState();
-    return parsed;
-  }catch{return emptyState()}
-}
-
-export async function recordKioskActivity(person:RosterPerson,event:AttendanceEvent){
-  if(event.verificationMode==="TEST")return;
-  const state=await readState();
-  const key=`${event.personType}:${event.personId}`;
-  state.events+=1;
-  if(event.direction==="IN")state.checkIns+=1;else state.checkOuts+=1;
-  state.people[key]={personType:event.personType,personId:event.personId,direction:event.direction,capturedAt:event.capturedAt,groupName:person.groupName};
-  await OfflineStore.putSecure(STATE_KEY,JSON.stringify(state));
-}
-
 function pct(value:number,total:number){return total?Math.round(value/total*100):0}
 
 export async function loadLiveSchoolSummary(registration:Registration):Promise<LiveSchoolSummary>{
@@ -67,7 +41,7 @@ export async function loadLiveSchoolSummary(registration:Registration):Promise<L
   }catch{
     bootstrap=await cachedBootstrap();
   }
-  const state=await readState();
+  const state=await readKioskActivity();
   const roster=bootstrap?.roster||[];
   const students=roster.filter(person=>!person.staffNumber);
   const staff=roster.filter(person=>!!person.staffNumber);
@@ -84,7 +58,8 @@ export async function loadLiveSchoolSummary(registration:Registration):Promise<L
     groupsMap.set(name,current);
   }
   const groups=[...groupsMap.entries()].map(([name,x])=>({name,present:x.present,total:x.total,pct:pct(x.present,x.total)})).sort((a,b)=>b.present-a.present||a.name.localeCompare(b.name)).slice(0,6);
-  const lastActivityAt=Object.values(state.people).map(x=>x.capturedAt).sort().at(-1);
+  const activityTimes=Object.values(state.people).map(x=>x.capturedAt).sort();
+  const lastActivityAt=activityTimes.length?activityTimes[activityTimes.length-1]:undefined;
   const[pendingSync,failedSync]=await Promise.all([OfflineStore.count().catch(()=>0),OfflineStore.failedCount().catch(()=>0)]);
   return{
     generatedAt:new Date().toISOString(),online,source,
