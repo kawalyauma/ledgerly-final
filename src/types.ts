@@ -15,12 +15,11 @@ export interface AgentDocumentArtifact {
   sourceMimeType: string;
   sourceSizeBytes: number;
   pdfSizeBytes: number;
+  pdfPageCount: number;
   checksumSha256: string;
 }
 
-export interface AgentDocumentService {
-  generate(input: AgentDocumentGenerateInput): Promise<AgentDocumentArtifact>;
-}
+export interface AgentDocumentService { generate(input: AgentDocumentGenerateInput): Promise<AgentDocumentArtifact>; }
 
 export interface Env {
   FINANCE_DB: D1Database;
@@ -62,47 +61,9 @@ export interface AuthPrincipal {
   mobileDeviceId?: string;
 }
 
-export interface AppVariables {
-  principal: AuthPrincipal;
-}
+export interface AppVariables { principal: AuthPrincipal; }
 
-export interface ReportJobMessage {
-  kind?: "report";
-  jobId: string;
-  organizationId: string;
-  reportType: string;
-  filters: Record<string, string | number | boolean | null>;
-  format: "json" | "csv" | "xlsx" | "pdf";
-}
-
+export interface ReportJobMessage { kind?: "report";jobId:string;organizationId:string;reportType:string;filters:Record<string,string|number|boolean|null>;format:"json"|"csv"|"xlsx"|"pdf"; }
 export interface WebhookJobMessage { kind:"webhook";deliveryId:string;organizationId:string }
-
-export interface WorkNotificationJob {
-  kind: "work-notification";
-  deliveryId: string;
-  organizationId: string;
-  notificationId: string;
-  channel: "email" | "sms" | "whatsapp";
-  recipient: string;
-  subject?: string;
-  body: string;
-  templateName?: string;
-  templateLanguage?: string;
-  variables?: string[];
-}
-
-export interface CommunicationJob {
-  kind: "communication";
-  deliveryId: string;
-  organizationId: string;
-  campaignId: string;
-  recipientSnapshotId: string;
-  channel: "sms" | "whatsapp";
-  recipient: string;
-  senderName: string;
-  subject: string;
-  message: string;
-  templateName?: string;
-  templateLanguage?: string;
-  variables?: string[];
-}
+export interface WorkNotificationJob { kind:"work-notification";deliveryId:string;organizationId:string;notificationId:string;channel:"email"|"sms"|"whatsapp";recipient:string;subject?:string;body:string;templateName?:string;templateLanguage?:string;variables?:string[]; }
+export interface CommunicationJob { kind:"communication";deliveryId:string;organizationId:string;campaignId:string;recipientSnapshotId:string;channel:"sms"|"whatsapp";recipient:string;senderName:string;subject:string;message:string;templateName?:string;templateLanguage?:string;variables?:string[]; }
