@@ -4,6 +4,12 @@ import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { requireScope } from "../core-identity/security.js";
+import {
+  captureSchoolPayAdhocCallback,
+  initiateSchoolPayAdhoc,
+  listSchoolPayAdhocIntents,
+  refreshSchoolPayAdhocStatus,
+} from "./adhoc.js";
 import { listSchoolPayReconciliations, reconcileSchoolPayTransactions } from "./reconciliation.js";
 import {
   captureSchoolPayWebhook,
@@ -14,6 +20,7 @@ import {
 } from "./service.js";
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const money = z.union([z.string().min(1), z.number().positive()]);
 const configInput = z.object({
   schoolCode: z.string().min(1).max(120),
   apiPassword: z.string().min(1).max(500),
@@ -23,9 +30,17 @@ const configInput = z.object({
   autoAllocate: z.boolean().default(true),
 });
 const reconcileInput = z.object({ fromDate: date, toDate: date.optional() });
+const adhocBaseInput = z.object({
+  studentPaymentCode: z.string().min(1).max(250),
+  externalReference: z.string().min(1).max(250),
+  amount: money,
+  reason: z.string().min(1).max(500),
+  eventType: z.enum(["SCHOOL_FEES", "OTHER_FEES"]).default("SCHOOL_FEES"),
+});
+const adhocRequestInput = adhocBaseInput.extend({ phoneNumber: z.string().min(7).max(30) });
 
 const feePayment = z.object({
-  amount: z.union([z.string(), z.number()]),
+  amount: money,
   paymentDateAndTime: z.string().min(1),
   schoolpayReceiptNumber: z.string().min(1).max(250),
   sourceChannelTransactionId: z.string().nullable().optional(),
@@ -42,6 +57,16 @@ const webhookInput = z.object({
   signature: z.string().min(1),
   type: z.enum(["SCHOOL_FEES", "OTHER_FEES"]),
   payment: feePayment,
+}).passthrough();
+
+const adhocCallbackInput = z.object({
+  amount: money,
+  channelName: z.string().nullable().optional(),
+  paymentReference: z.string().min(1).max(250),
+  receiptNumber: z.string().nullable().optional(),
+  status: z.string().min(1).max(80),
+  transactionId: z.string().nullable().optional(),
+  returnCode: z.union([z.string(), z.number()]),
 }).passthrough();
 
 export function createSchoolPayAdminRoutes(runtime: Runtime) {
@@ -89,11 +114,53 @@ export function createSchoolPayAdminRoutes(runtime: Runtime) {
     return c.json({ data: await listSchoolPayReconciliations(runtime, principal.organizationId, limit) });
   });
 
+  routes.get("/adhoc", async (c) => {
+    const principal = c.get("principal");
+    const limit = Number(c.req.query("limit") ?? 100);
+    return c.json({ data: await listSchoolPayAdhocIntents(runtime, principal.organizationId, limit) });
+  });
+
+  routes.post("/adhoc/register", requireScope("school:write"), async (c) => {
+    const parsed = adhocBaseInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid SchoolPay ad-hoc register request", parsed.error.flatten());
+    const principal = c.get("principal");
+    const result = await initiateSchoolPayAdhoc(runtime, principal.organizationId, principal.userId, {
+      ...parsed.data,
+      method: "register",
+    });
+    return c.json({ data: result }, result.duplicate ? 200 : 201);
+  });
+
+  routes.post("/adhoc/request", requireScope("school:write"), async (c) => {
+    const parsed = adhocRequestInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid SchoolPay instant debit request", parsed.error.flatten());
+    const principal = c.get("principal");
+    const result = await initiateSchoolPayAdhoc(runtime, principal.organizationId, principal.userId, {
+      ...parsed.data,
+      method: "request",
+    });
+    return c.json({ data: result }, result.duplicate ? 200 : 201);
+  });
+
+  routes.get("/adhoc/:paymentReference/status", requireScope("school:write"), async (c) => {
+    const principal = c.get("principal");
+    const result = await refreshSchoolPayAdhocStatus(runtime, principal.organizationId, c.req.param("paymentReference"));
+    return c.json({ data: result });
+  });
+
   return routes;
 }
 
 export function createSchoolPayWebhookRoutes(runtime: Runtime) {
   const routes = new Hono<AppEnv>();
+
+  routes.post("/:webhookKey/adhoc", async (c) => {
+    const parsed = adhocCallbackInput.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw new AppError(422, "INVALID_SCHOOLPAY_ADHOC_CALLBACK", "Invalid SchoolPay ad-hoc callback payload", parsed.error.flatten());
+    const result = await captureSchoolPayAdhocCallback(runtime, c.req.param("webhookKey"), parsed.data);
+    return c.json({ data: result }, 200);
+  });
+
   routes.post("/:webhookKey", async (c) => {
     const parsed = webhookInput.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new AppError(422, "INVALID_SCHOOLPAY_WEBHOOK", "Invalid SchoolPay webhook payload", parsed.error.flatten());

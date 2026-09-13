@@ -42,6 +42,7 @@ const schema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   RESEND_FROM_EMAIL: z.string().email().optional(),
   SCHOOLPAY_API_BASE_URL: z.string().url().default("https://schoolpay.co.ug"),
+  SCHOOLPAY_PUBLIC_BASE_URL: z.string().url().optional(),
   SCHOOLPAY_SECRET_ENCRYPTION_KEY: z.string().min(32).optional(),
 }).superRefine((value, ctx) => {
   if (value.STORAGE_DRIVER === "minio") {

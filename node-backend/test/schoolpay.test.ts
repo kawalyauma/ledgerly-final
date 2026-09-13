@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { schoolPayAdhocHash } from "../src/features/schoolpay/adhoc.js";
 import { schoolPaySyncHash, validateSchoolPayDateRange } from "../src/features/schoolpay/reconciliation.js";
 import {
   decryptSchoolPaySecret,
@@ -22,6 +23,10 @@ describe("SchoolPay gateway crypto", () => {
 
   it("matches the SchoolPay uppercase MD5 reconciliation hash contract", () => {
     expect(schoolPaySyncHash("123456", "2024-01-15", "your_secret_password")).toBe("8C25020661588EC8BE2A7452344E8B6F");
+  });
+
+  it("builds the SchoolPay ad-hoc MD5 hash from school code, identifying reference and password", () => {
+    expect(schoolPayAdhocHash("809", "63140", "your_secret_password")).toBe("7048334550C3D92E29900C242D346F91");
   });
 
   it("enforces the SchoolPay 31-day reconciliation range", () => {
