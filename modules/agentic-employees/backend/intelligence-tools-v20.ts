@@ -1,6 +1,6 @@
 import { createId } from "../../../src/lib/ids";
 import type { Env } from "../../../src/types";
-import { executeTool as baseExecute,openAiTools as baseTools } from "./memory-tools-v17";
+import { executeTool as baseExecute,openAiTools as baseTools } from "./system-tools-v16";
 import type { ToolContext } from "./tools-v14";
 import { compileSafeQuery,intelligenceCatalog,type SafeQueryPlan } from "./intelligence-registry";
 
