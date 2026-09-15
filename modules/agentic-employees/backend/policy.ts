@@ -21,6 +21,10 @@ export function hasScope(principal:AuthPrincipal,scope:string){return principal.
 export function allowedTools(agent:AgentDefinition,requested?:string[]|null){
  if(!requested)return[...agent.tools];
  const base=new Set<string>(agent.tools),selected=[...new Set(requested)].filter(tool=>base.has(tool));
+ // Existing schools may have saved an allowlist before compound workflows existed.
+ // Anyone who already allowed governed system mutations inherits the safer compound
+ // equivalent automatically, rather than silently losing the new capability.
+ if(selected.includes("prepare_system_action")&&base.has("prepare_system_workflow")&&!selected.includes("prepare_system_workflow"))selected.push("prepare_system_workflow");
  if(agent.key==="dos"||agent.key==="headteacher")for(const tool of timetableTools)if(base.has(tool)&&!selected.includes(tool))selected.push(tool);
  return selected;
 }
