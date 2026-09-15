@@ -7,6 +7,7 @@ import {schoolPermission} from "../../school/backend/common";
 import {AppError} from "../../../src/lib/errors";
 import * as T from "./timetable-intelligence-service";
 import {syncCurriculumLoadRules} from "./timetable-load-rules";
+import {recoveryOptions,substituteCandidates} from "./timetable-recovery-service";
 
 export const academicsTimetableIntelligenceRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 academicsTimetableIntelligenceRoutes.use("*",requireModuleEnabled("school-management"));
@@ -35,6 +36,8 @@ academicsTimetableIntelligenceRoutes.post("/timetables/:id/drafts/:draftId/apply
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/week",read,async c=>c.json({data:await T.weekView(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"),c.req.query("start")||new Date().toISOString().slice(0,10))}));
 academicsTimetableIntelligenceRoutes.post("/timetables/:id/week/materialize",...write,async c=>{const p=principal(c),d=await body(c);return c.json({data:await T.materializeWeek(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"),req(d.startDate,"Week start date"))});});
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/lesson-context",read,async c=>c.json({data:await T.lessonPeriodContext(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"),c.req.query("date"))}));
+academicsTimetableIntelligenceRoutes.get("/timetable-occurrences/:occurrenceId/substitute-options",read,async c=>c.json({data:await substituteCandidates(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("occurrenceId"))}));
+academicsTimetableIntelligenceRoutes.get("/timetable-occurrences/:occurrenceId/recovery-options",read,async c=>c.json({data:await recoveryOptions(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("occurrenceId"),Number(c.req.query("days")||21))}));
 
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/exceptions",read,async c=>c.json({data:await T.listExceptions(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"))}));
 academicsTimetableIntelligenceRoutes.post("/timetables/:id/exceptions",...write,async c=>{const p=principal(c);return c.json({data:await T.createException(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"),await body(c))},201);});
