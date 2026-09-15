@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { CheckCircle2, CreditCard, History, RefreshCw, RotateCcw, Send, Smartphone } from "lucide-react";
-import { can, errorText, get, post } from "../../../web/api";
+import { CheckCircle2, Copy, CreditCard, History, RefreshCw, RotateCcw, Send, Settings2, Smartphone } from "lucide-react";
+import { can, errorText, get, post, put } from "../../../web/api";
 import { useAuth } from "../../../web/auth";
 import { Badge, Button, Card, EmptyState, Field, Notice, SearchableSelect, Spinner } from "../../../web/components/ui";
 
@@ -30,7 +30,20 @@ type Intent = {
 };
 
 type Student = { id: string; admissionNumber?: string; studentNumber?: string; firstName?: string; middleName?: string; lastName?: string };
-type Tab = "collect" | "payments" | "events" | "reconciliation";
+type SchoolPayConfig =
+  | { configured: false }
+  | {
+      configured: true;
+      schoolCode: string;
+      bankAccountId: string;
+      controlAccountId: string;
+      enabled: boolean;
+      autoAllocate: boolean;
+      webhookPath: string;
+      lastWebhookAt: string | null;
+      lastReconciledAt: string | null;
+    };
+type Tab = "configuration" | "collect" | "payments" | "events" | "reconciliation";
 
 const fmt = (value: unknown) => Number(value || 0).toLocaleString("en-UG", { maximumFractionDigits: 0 });
 const when = (value: unknown) => value ? new Date(String(value)).toLocaleString("en-UG") : "—";
@@ -47,7 +60,14 @@ const reference = (studentId: string) => `WEB-${Date.now()}-${studentId.slice(-8
 export function SchoolPayPage() {
   const { principal } = useAuth();
   const write = can(principal, "school:write");
-  const [tab, setTab] = useState<Tab>("collect");
+  const [tab, setTab] = useState<Tab>("configuration");
+  const [config, setConfig] = useState<SchoolPayConfig | null>(null);
+  const [configSchoolCode, setConfigSchoolCode] = useState("");
+  const [configApiPassword, setConfigApiPassword] = useState("");
+  const [configBankAccountId, setConfigBankAccountId] = useState("");
+  const [configControlAccountId, setConfigControlAccountId] = useState("");
+  const [configEnabled, setConfigEnabled] = useState(true);
+  const [configAutoAllocate, setConfigAutoAllocate] = useState(true);
   const [students, setStudents] = useState<Student[]>([]);
   const [intents, setIntents] = useState<Intent[]>([]);
   const [events, setEvents] = useState<R[]>([]);
@@ -72,23 +92,82 @@ export function SchoolPayPage() {
     keywords: `${student.admissionNumber || ""} ${student.studentNumber || ""} ${nameOf(student)}`,
   })), [students]);
 
+  const webhookUrl = useMemo(() => {
+    if (!config?.configured || !config.webhookPath) return "";
+    if (typeof window === "undefined") return config.webhookPath;
+    try { return new URL(config.webhookPath, window.location.origin).toString(); }
+    catch { return config.webhookPath; }
+  }, [config]);
+
   const changePayment = (change: () => void) => { setAttemptReference(""); change(); };
 
   async function load() {
     setLoading(true); setError("");
     try {
-      const [studentRows, paymentRows, eventRows, reconciliationRows, health] = await Promise.all([
+      const [configRow, studentRows, paymentRows, eventRows, reconciliationRows, health] = await Promise.all([
+        get<SchoolPayConfig>("/schoolpay/config"),
         get<Student[]>("/school/student-management/students?status=active&limit=500"),
         get<Intent[]>("/schoolpay/adhoc?limit=100"),
         get<R[]>("/schoolpay/events?limit=100"),
         get<R[]>("/schoolpay/reconciliations?limit=50"),
         get<R>("/schoolpay/health"),
       ]);
+      setConfig(configRow);
+      if (configRow.configured) {
+        setConfigSchoolCode(configRow.schoolCode);
+        setConfigBankAccountId(configRow.bankAccountId);
+        setConfigControlAccountId(configRow.controlAccountId);
+        setConfigEnabled(configRow.enabled);
+        setConfigAutoAllocate(configRow.autoAllocate);
+      } else {
+        setConfigSchoolCode("");
+        setConfigBankAccountId("");
+        setConfigControlAccountId("");
+        setConfigEnabled(true);
+        setConfigAutoAllocate(true);
+      }
+      setConfigApiPassword("");
       setStudents(studentRows); setIntents(paymentRows); setEvents(eventRows); setReconciliations(reconciliationRows); setDiagnostics(health);
     } catch (e) { setError(errorText(e)); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, []);
+
+  async function saveConfiguration(event: FormEvent) {
+    event.preventDefault();
+    if (!write) return;
+    if (!configSchoolCode.trim()) return setError("Enter the SchoolPay school code.");
+    if (!configApiPassword.trim()) return setError("Enter the SchoolPay API password / token. The saved secret is never returned to the web app.");
+    if (!configBankAccountId.trim()) return setError("Enter the Ledgerly cash/bank posting account ID.");
+    if (!configControlAccountId.trim()) return setError("Enter the Ledgerly fees receivable control account ID.");
+    setBusy(true); setError(""); setMessage("");
+    try {
+      const configured = await put<SchoolPayConfig>("/schoolpay/config", {
+        schoolCode: configSchoolCode.trim(),
+        apiPassword: configApiPassword.trim(),
+        bankAccountId: configBankAccountId.trim(),
+        controlAccountId: configControlAccountId.trim(),
+        enabled: configEnabled,
+        autoAllocate: configAutoAllocate,
+      });
+      setConfig(configured);
+      setConfigApiPassword("");
+      setMessage("SchoolPay configuration saved for this school. The API secret was encrypted by the backend and cleared from this form.");
+      setDiagnostics(await get<R>("/schoolpay/health"));
+    } catch (e) { setError(errorText(e)); }
+    finally { setBusy(false); }
+  }
+
+  async function copyWebhook() {
+    if (!webhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(webhookUrl);
+      setMessage("SchoolPay webhook URL copied.");
+      setError("");
+    } catch {
+      setError("Could not copy the webhook automatically. Select the URL and copy it manually.");
+    }
+  }
 
   async function submitPayment(event: FormEvent) {
     event.preventDefault();
@@ -150,20 +229,43 @@ export function SchoolPayPage() {
   }
 
   return <div className="page">
-    <div className="school-page-head"><div><span className="eyebrow">School management · payments</span><h1>SchoolPay</h1><p>Request, verify and reconcile SchoolPay collections against Ledgerly student fees.</p></div><div className="heading-actions"><Button variant="secondary" onClick={() => void load()} disabled={loading || busy}><RefreshCw size={16}/> Refresh</Button></div></div>
+    <div className="school-page-head"><div><span className="eyebrow">School management · payments</span><h1>SchoolPay</h1><p>Configure this school's SchoolPay connection, then request, verify and reconcile collections against Ledgerly student fees.</p></div><div className="heading-actions"><Button variant="secondary" onClick={() => void load()} disabled={loading || busy}><RefreshCw size={16}/> Refresh</Button></div></div>
 
     {diagnostics && <Card><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}><div><strong>SchoolPay connection</strong><p style={{margin:"4px 0 0"}}>Realtime collection, status checks and recovery are handled by the Node server.</p></div><Badge tone={diagnostics.ok === false || diagnostics.status === "error" ? "danger" : "success"}>{diagnostics.status || (diagnostics.ok === false ? "attention" : "connected")}</Badge></div></Card>}
     {error && <Notice tone="danger">{error}</Notice>}
     {message && <Notice tone="success">{message}</Notice>}
 
     <div className="heading-actions" style={{margin:"16px 0",justifyContent:"flex-start",flexWrap:"wrap"}}>
+      <Button variant={tab === "configuration" ? "primary" : "secondary"} onClick={() => setTab("configuration")}><Settings2 size={16}/> Configuration</Button>
       <Button variant={tab === "collect" ? "primary" : "secondary"} onClick={() => setTab("collect")}><Smartphone size={16}/> Collect</Button>
       <Button variant={tab === "payments" ? "primary" : "secondary"} onClick={() => setTab("payments")}><CreditCard size={16}/> Payments</Button>
       <Button variant={tab === "events" ? "primary" : "secondary"} onClick={() => setTab("events")}><History size={16}/> Provider events</Button>
       <Button variant={tab === "reconciliation" ? "primary" : "secondary"} onClick={() => setTab("reconciliation")}><RotateCcw size={16}/> Reconciliation</Button>
     </div>
 
-    {loading ? <Spinner label="Loading SchoolPay"/> : tab === "collect" ? <Card>
+    {loading ? <Spinner label="Loading SchoolPay"/> : tab === "configuration" ? <Card>
+      <form onSubmit={saveConfiguration}>
+        <div className="school-page-head" style={{marginBottom:16}}><div><h2>SchoolPay configuration</h2><p>Each school keeps its own SchoolPay code, encrypted API secret, Ledgerly posting accounts and unique webhook.</p></div><Badge tone={config?.configured && config.enabled ? "success" : "warning"}>{config?.configured ? (config.enabled ? "enabled" : "configured · disabled") : "not configured"}</Badge></div>
+        {!write && <Notice tone="warning">You can view the SchoolPay configuration, but school:write permission is required to change it.</Notice>}
+        <div className="form-grid">
+          <Field label="SchoolPay school code" hint="Use the school code issued by SchoolPay."><input value={configSchoolCode} onChange={e => setConfigSchoolCode(e.target.value)} placeholder="SchoolPay school code" disabled={!write}/></Field>
+          <Field label="API password / token" hint={config?.configured ? "For security the stored secret is never returned. Re-enter it whenever you save configuration changes." : "The backend encrypts this secret before storing it."}><input type="password" autoComplete="new-password" value={configApiPassword} onChange={e => setConfigApiPassword(e.target.value)} placeholder={config?.configured ? "Re-enter secret to save changes" : "SchoolPay API password / token"} disabled={!write}/></Field>
+          <Field label="Ledgerly cash / bank account ID" hint="Must be an active cash posting account belonging to this school."><input value={configBankAccountId} onChange={e => setConfigBankAccountId(e.target.value)} placeholder="Account receiving SchoolPay collections" disabled={!write}/></Field>
+          <Field label="Fees receivable control account ID" hint="Must be an active receivable posting account belonging to this school."><input value={configControlAccountId} onChange={e => setConfigControlAccountId(e.target.value)} placeholder="School fees receivable account" disabled={!write}/></Field>
+          <Field label="Integration status"><select value={configEnabled ? "enabled" : "disabled"} onChange={e => setConfigEnabled(e.target.value === "enabled")} disabled={!write}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></Field>
+          <Field label="Matched payment allocation"><select value={configAutoAllocate ? "automatic" : "manual"} onChange={e => setConfigAutoAllocate(e.target.value === "automatic")} disabled={!write}><option value="automatic">Automatically allocate to student fees</option><option value="manual">Keep matched payments for manual allocation</option></select></Field>
+        </div>
+
+        <div style={{marginTop:16,padding:16,border:"1px solid var(--border)",borderRadius:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}><div><strong>School-specific webhook</strong><p style={{margin:"4px 0 0"}}>Save the configuration first, then copy this exact URL into SchoolPay's webhook/callback settings.</p></div>{config?.configured && <Badge tone="success">generated</Badge>}</div>
+          {webhookUrl ? <div style={{display:"flex",gap:8,alignItems:"center",marginTop:12,flexWrap:"wrap"}}><input readOnly value={webhookUrl} style={{flex:"1 1 440px"}}/><Button type="button" variant="secondary" onClick={() => void copyWebhook()}><Copy size={16}/> Copy webhook</Button></div> : <p style={{margin:"12px 0 0"}}>No webhook yet. Save this school's SchoolPay configuration to generate one.</p>}
+          {config?.configured && <p style={{margin:"10px 0 0"}}><small>Last webhook: {when(config.lastWebhookAt)} · Last reconciliation: {when(config.lastReconciledAt)}</small></p>}
+        </div>
+
+        <p style={{margin:"14px 0 0"}}><small>The SchoolPay API password/token is write-only in the web interface. Ledgerly encrypts it server-side and never returns the stored value to the browser.</small></p>
+        <div className="heading-actions" style={{marginTop:16,justifyContent:"flex-start"}}><Button type="submit" disabled={!write || busy}><CheckCircle2 size={16}/> {busy ? "Saving…" : config?.configured ? "Save configuration" : "Configure SchoolPay"}</Button></div>
+      </form>
+    </Card> : tab === "collect" ? <Card>
       <form onSubmit={submitPayment}>
         <div className="school-page-head" style={{marginBottom:16}}><div><h2>Collect with SchoolPay</h2><p>Instant debit sends a prompt to the payer phone. Register payment creates a SchoolPay reference without a phone debit prompt.</p></div></div>
         {!write && <Notice tone="warning">Your account can view SchoolPay activity but needs the school:write permission to initiate a collection.</Notice>}
