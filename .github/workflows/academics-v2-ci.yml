@@ -1,19 +1,35 @@
-name: Academics v2 learning cycle
+name: Academics v2.1 teaching and smart timetable
 
 on:
   push:
     branches: [main]
     paths:
       - "modules/academics/**"
+      - "modules/agentic-employees/backend/policy.ts"
+      - "modules/agentic-employees/backend/memory-tools-v17.ts"
+      - "modules/agentic-employees/backend/delegation.ts"
       - "migrations/0113_academics_learning_cycle.sql"
+      - "migrations/0114_academics_timetable_intelligence.sql"
+      - "migrations/0115_academics_timetable_delivery_sync.sql"
       - "selfhost/postgres/academics-learning-cycle-v2.sql"
+      - "selfhost/postgres/academics-timetable-intelligence-v21.sql"
+      - "selfhost/postgres/academics-timetable-delivery-sync-v22.sql"
+      - "selfhost/postgres-d1.ts"
       - "attendance-mobile/src/mobile/academics/**"
       - ".github/workflows/academics-v2-ci.yml"
   pull_request:
     paths:
       - "modules/academics/**"
+      - "modules/agentic-employees/backend/policy.ts"
+      - "modules/agentic-employees/backend/memory-tools-v17.ts"
+      - "modules/agentic-employees/backend/delegation.ts"
       - "migrations/0113_academics_learning_cycle.sql"
+      - "migrations/0114_academics_timetable_intelligence.sql"
+      - "migrations/0115_academics_timetable_delivery_sync.sql"
       - "selfhost/postgres/academics-learning-cycle-v2.sql"
+      - "selfhost/postgres/academics-timetable-intelligence-v21.sql"
+      - "selfhost/postgres/academics-timetable-delivery-sync-v22.sql"
+      - "selfhost/postgres-d1.ts"
       - "attendance-mobile/src/mobile/academics/**"
       - ".github/workflows/academics-v2-ci.yml"
 
@@ -29,6 +45,7 @@ jobs:
       - run: npm ci
       - run: npm run modules:sync
       - run: npm run typecheck
+      - run: npm test
       - run: npm run build:web
       - name: Apply D1 migrations from a clean local database
         shell: bash
@@ -36,13 +53,18 @@ jobs:
           set -euo pipefail
           rm -rf /tmp/ledgerly-academics-ci
           npx wrangler d1 migrations apply FINANCE_DB --local --persist-to /tmp/ledgerly-academics-ci
-      - name: Confirm Academics v2 registry
+      - name: Confirm Academics 2.1 registry and timetable capabilities
         shell: bash
         run: |
           set -euo pipefail
           grep -q 'academics' modules/backend-registry.generated.ts
           grep -q 'academics' modules/frontend-registry.generated.tsx
           grep -q 'LearningCycleWorkspace' modules/academics/frontend/module.tsx
+          grep -q 'SmartTimetableWorkspace' modules/academics/frontend/module.tsx
+          grep -q 'draft_timetable' modules/agentic-employees/backend/policy.ts
+          grep -q 'timetable_contingency_options' modules/agentic-employees/backend/policy.ts
+          grep -q 'acad_timetable_occurrences' migrations/0114_academics_timetable_intelligence.sql
+          grep -q 'acad_tt_delivery_occurrence_insert_ai' migrations/0115_academics_timetable_delivery_sync.sql
 
   mobile:
     runs-on: ubuntu-latest
@@ -59,3 +81,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test -- --runInBand --passWithNoTests
+      - name: Confirm smart timetable mobile surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'SmartTimetableTab' src/mobile/academics/TimetableTab.tsx
+          grep -q 'materializeWeek' src/mobile/academics/smartTimetableApi.ts
