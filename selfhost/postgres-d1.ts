@@ -14,6 +14,8 @@ function sqliteFunctions(sql:string){return sql
  // the null-check parameter as text preserves the null predicate and lets the
  // second parameter keep the column's native comparison type.
  .replace(/(\$\d+)\s+IS\s+NULL/gi,"$1::text IS NULL")
+ // SQLite GROUP_CONCAT(expr, separator) is PostgreSQL STRING_AGG(expr, separator).
+ .replace(/GROUP_CONCAT\(\s*([^,()]+)\s*,\s*('(?:[^']|'')*')\s*\)/gi,"STRING_AGG($1, $2)")
  .replace(/IFNULL\(/gi,"COALESCE(")
  .replace(/\s+COLLATE\s+NOCASE/gi,"");}
 function normalizeInsertIgnore(sql:string){if(!/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(sql))return sql;let next=sql.replace(/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i,"INSERT INTO");if(/\bON\s+CONFLICT\b/i.test(next))return next;const returning=next.match(/\s+RETURNING\s+[\s\S]+$/i);if(returning){next=next.slice(0,returning.index)+" ON CONFLICT DO NOTHING"+returning[0];}else next=next.replace(/;?\s*$/," ON CONFLICT DO NOTHING");return next;}
