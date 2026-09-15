@@ -18,6 +18,10 @@ const approve=[requireScope("school:write"),schoolPermission("school.academics:a
 const body=async(c:any)=>c.req.json<Record<string,any>>().catch(()=>({}));
 const required=(v:any,label:string)=>{const x=String(v??"").trim();if(!x)throw new AppError(422,"VALIDATION_ERROR",`${label} is required`);return x;};
 const principal=(c:any)=>c.get("principal");
+function compactDraftMarks(d:any){
+  if(!Array.isArray(d?.marks))return d;
+  return{...d,marks:d.marks.filter((m:any)=>Boolean(m?.absent)||m?.score!==null&&m?.score!==undefined&&String(m.score).trim()!==""||String(m?.remark||"").trim()!==""||String(m?.competencyLevel||"not_assessed")!=="not_assessed")};
+}
 
 academicsLearningCycleRoutes.get("/learning/dashboard",read,async c=>c.json({data:await L.learningDashboard(c.env.FINANCE_DB,principal(c).organizationId)}));
 academicsLearningCycleRoutes.get("/learning/schemes",read,async c=>c.json({data:await L.listLearningSchemes(c.env.FINANCE_DB,principal(c).organizationId)}));
@@ -52,6 +56,6 @@ academicsLearningCycleRoutes.post("/learning/lesson-plans/:id/approve",...approv
 academicsLearningCycleRoutes.post("/learning/lesson-plans/:id/reject",...approve,async c=>{const p=principal(c),d=await body(c);return c.json({data:await L.lessonPlanWorkflow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"),p.userId,"reject",d.feedback||"Revise and resubmit")});});
 
 academicsLearningCycleRoutes.get("/learning/lesson-plans/:id/assessment",read,async c=>c.json({data:await L.assessmentRoster(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"))}));
-academicsLearningCycleRoutes.put("/learning/lesson-plans/:id/assessment",...write,async c=>{const p=principal(c);return c.json({data:await L.saveAssessment(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"),await body(c))});});
+academicsLearningCycleRoutes.put("/learning/lesson-plans/:id/assessment",...write,async c=>{const p=principal(c),d=compactDraftMarks(await body(c));return c.json({data:await L.saveAssessment(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"),d)});});
 academicsLearningCycleRoutes.post("/learning/lesson-plans/:id/assessment/submit",...write,async c=>{const p=principal(c);return c.json({data:await L.submitAssessment(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"))});});
 academicsLearningCycleRoutes.post("/learning/lesson-plans/:id/assessment/reopen",...approve,async c=>{const p=principal(c);return c.json({data:await L.reopenAssessment(c.env.FINANCE_DB,p.organizationId,c.req.param("id"))});});
