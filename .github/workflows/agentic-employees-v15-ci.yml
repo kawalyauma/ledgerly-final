@@ -1,4 +1,4 @@
-name: Agentic Employees v1.7 CI
+name: Agentic Employees v1.9 CI
 
 on:
   push:
@@ -11,6 +11,7 @@ on:
       - "migrations/0106_agentic_generated_documents.sql"
       - "migrations/0107_agentic_images_and_delegated_actions.sql"
       - "migrations/0108_agentic_employee_memory.sql"
+      - "migrations/0111_agentic_ai_provider_settings.sql"
       - "src/index.ts"
       - "src/types.ts"
       - "package.json"
@@ -46,6 +47,7 @@ jobs:
       JWT_SECRET: ci-only-agentic-secret-at-least-32-characters
       JWT_ISSUER: ledgerly
       JWT_AUDIENCE: ledgerly-api
+      AI_PROVIDER_ENCRYPTION_KEY: ci-only-ai-provider-encryption-key-32-chars
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,7 +66,7 @@ jobs:
           git config user.name "ledgerly-ci"
           git config user.email "ledgerly-ci@users.noreply.github.com"
           git add package-lock.json
-          git commit -m "chore: refresh lockfile for Agentic v1.7"
+          git commit -m "chore: refresh lockfile for Agentic v1.9"
           git push origin HEAD:${GITHUB_REF_NAME}
       - run: npm ci
       - run: npm run modules:sync
@@ -79,6 +81,8 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v15.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v16.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v17.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v19.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT provider,models_json,api_key_ciphertext,config_json FROM ae_ai_provider_settings LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT pdf_page_count FROM ae_generated_documents LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT ocr_text,vision_summary FROM ae_image_attachments LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT memory_type,visibility,priority,due_at,use_count FROM ae_memories LIMIT 0"
