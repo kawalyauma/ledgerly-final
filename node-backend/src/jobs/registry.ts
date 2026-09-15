@@ -1,7 +1,10 @@
 import type { Runtime } from "../runtime.js";
 import type { ClaimedJob } from "../queue/postgres-queue.js";
 
-export type JobHandler = (job: ClaimedJob, runtime: Runtime) => Promise<void>;
+// Workers acknowledge jobs after the returned promise settles; handler return values
+// are intentionally ignored. Allow handlers to return diagnostics without weakening
+// queue success/failure semantics.
+export type JobHandler = (job: ClaimedJob, runtime: Runtime) => Promise<unknown>;
 
 export class JobRegistry {
   private readonly handlers = new Map<string, JobHandler>();
