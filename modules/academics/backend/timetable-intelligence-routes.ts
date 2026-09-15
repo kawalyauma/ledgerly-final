@@ -7,6 +7,7 @@ import {schoolPermission} from "../../school/backend/common";
 import {AppError} from "../../../src/lib/errors";
 import * as T from "./timetable-intelligence-service";
 import {syncCurriculumLoadRules} from "./timetable-load-rules";
+import {reviewGeneratedDraft} from "./timetable-draft-review";
 import {recoveryOptions,substituteCandidates} from "./timetable-recovery-service";
 
 export const academicsTimetableIntelligenceRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
@@ -28,7 +29,7 @@ academicsTimetableIntelligenceRoutes.delete("/timetables/:id/rules/:ruleId",...w
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/matrix",read,async c=>c.json({data:await T.matrix(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"))}));
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/validation",read,async c=>c.json({data:await T.validateTimetable(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("id"))}));
 
-academicsTimetableIntelligenceRoutes.post("/timetables/:id/drafts",...write,async c=>{const p=principal(c),d=await body(c),id=c.req.param("id");const curriculumLoad=await syncCurriculumLoadRules(c.env.FINANCE_DB,p.organizationId,p.userId,id);const draft=await T.generateDraft(c.env.FINANCE_DB,p.organizationId,p.userId,id,d);return c.json({data:{...draft,curriculumLoad}},201);});
+academicsTimetableIntelligenceRoutes.post("/timetables/:id/drafts",...write,async c=>{const p=principal(c),d=await body(c),id=c.req.param("id");const curriculumLoad=await syncCurriculumLoadRules(c.env.FINANCE_DB,p.organizationId,p.userId,id);const baseDraft=await T.generateDraft(c.env.FINANCE_DB,p.organizationId,p.userId,id,d),draft=await reviewGeneratedDraft(c.env.FINANCE_DB,p.organizationId,id,baseDraft);return c.json({data:{...draft,curriculumLoad}},201);});
 academicsTimetableIntelligenceRoutes.get("/timetables/:id/drafts/:draftId",read,async c=>c.json({data:await T.getDraft(c.env.FINANCE_DB,principal(c).organizationId,c.req.param("draftId"))}));
 academicsTimetableIntelligenceRoutes.post("/timetables/:id/drafts/:draftId/apply",...approve,async c=>{const p=principal(c);return c.json({data:await T.applyDraft(c.env.FINANCE_DB,p.organizationId,p.userId,c.req.param("id"),c.req.param("draftId"))});});
 
