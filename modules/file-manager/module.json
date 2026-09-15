@@ -1,0 +1,27 @@
+{
+  "key": "file-manager",
+  "name": "Documents & Files",
+  "version": "1.0.0",
+  "description": "Unified organization document library for uploaded, scanned and Ledgerly-generated files with folders, versions and record links.",
+  "category": "operations",
+  "core": true,
+  "active": true,
+  "manifest": {
+    "standalone": true,
+    "sharedCore": ["organizations", "users", "files"],
+    "requiresDataFrom": ["agentic-employees", "school-management", "printerly"],
+    "features": [
+      "folders",
+      "multi-file-upload",
+      "generated-document-catalog",
+      "scanner-document-catalog",
+      "school-file-catalog",
+      "version-history",
+      "entity-links",
+      "pdf-image-preview",
+      "download",
+      "archive-trash",
+      "source-traceability"
+    ]
+  }
+}
