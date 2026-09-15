@@ -5,6 +5,11 @@ import {
   ShieldCheck, Sparkles, Users, Wallet, Zap,
 } from "lucide-react";
 import { errorText, get, patch, post } from "../../../web/api";
+import {
+  ActionConfirmationCard,
+  type InlineConfirmation,
+} from "./ActionConfirmationCard";
+import { RichMessage } from "./RichMessage";
 
 type Agent = {
   key: string;
@@ -21,7 +26,7 @@ type Task = { id: string; agentKey: string; title: string; status: string; resul
 type Approval = { id: string; agentKey: string; actionType: string; requiredScope: string; status: string; payload: Record<string, unknown>; createdAt: string };
 type Settings = { provider: string; configured: boolean; models: Record<string, string> };
 type Activity = { toolCalls: Array<{ id: string; agentKey: string; toolName: string; status: string; createdAt: string; errorText?: string }>; approvals: Array<{ id: string; agentKey: string; actionType: string; status: string; createdAt: string }> };
-type Tab = "employees" | "workspace" | "tasks" | "approvals" | "activity" | "settings";
+type Tab = "employees" | "workspace" | "tasks" | "activity" | "settings";
 type Profile = { icon: ReactNode; accent: string; short: string; bestFor: string[]; prompts: string[]; domain: string };
 
 const PROFILES: Record<string, Profile> = {
@@ -54,7 +59,7 @@ export function AgenticEmployeesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  const [confirmations, setConfirmations] = useState<InlineConfirmation[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [taskTitle, setTaskTitle] = useState("");
@@ -73,20 +78,31 @@ export function AgenticEmployeesPage() {
     return domainMatch && (!q || haystack.includes(q));
   }), [agents, search, domain]);
 
+  const visibleConfirmations = useMemo(
+    () => confirmations.filter(item =>
+      item.conversationId === conversation?.id ||
+      (
+        !item.conversationId &&
+        item.agentKey === selected
+      )
+    ),
+    [confirmations, conversation?.id, selected],
+  );
+
+
   async function refresh() {
     try {
-      const [nextAgents, nextTasks, nextConversations, pendingApprovals, approvedApprovals, nextSettings] = await Promise.all([
+      const [nextAgents, nextTasks, nextConversations, nextConfirmations, nextSettings] = await Promise.all([
         get<Agent[]>("/agentic-employees/agents"),
         get<Task[]>("/agentic-employees/tasks"),
         get<Conversation[]>("/agentic-employees/conversations"),
-        get<Approval[]>("/agentic-employees/approvals?status=pending"),
-        get<Approval[]>("/agentic-employees/approvals?status=approved"),
+        get<InlineConfirmation[]>("/agentic-employees/confirmations"),
         get<Settings>("/agentic-employees/settings"),
       ]);
       setAgents(nextAgents);
       setTasks(nextTasks);
       setConversations(nextConversations);
-      setApprovals([...pendingApprovals, ...approvedApprovals]);
+      setConfirmations(nextConfirmations);
       setSettings(nextSettings);
       if (nextAgents.length && !nextAgents.some(item => item.key === selected)) setSelected(nextAgents[0].key);
     } catch (err) {
@@ -101,7 +117,7 @@ export function AgenticEmployeesPage() {
   }
   function workload(agentKey: string) {
     const openTasks = tasks.filter(item => item.agentKey === agentKey && !["completed", "failed", "cancelled"].includes(item.status)).length;
-    const waiting = approvals.filter(item => item.agentKey === agentKey && ["pending", "approved"].includes(item.status)).length;
+    const waiting = confirmations.filter(item => item.agentKey === agentKey).length;
     return { openTasks, waiting };
   }
   async function loadConversation(next: Conversation) {
@@ -150,6 +166,47 @@ export function AgenticEmployeesPage() {
     try { await post(`/agentic-employees/approvals/${id}/execute`, {}); await refresh(); await openActivity(); }
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
+  async function resolveConfirmation(
+    item: InlineConfirmation,
+    operation: "confirm" | "cancel",
+  ) {
+    setBusy(true);
+    setError("");
+
+    try {
+      await post(
+        `/agentic-employees/confirmations/${item.source}/${item.id}/${operation}`,
+        { conversationId: conversation?.id || null },
+      );
+
+      await refresh();
+
+      if (conversation) {
+        const history = await get<Message[]>(
+          `/agentic-employees/conversations/${conversation.id}/messages`,
+        );
+        setMessages(history);
+      }
+    } catch (err) {
+      setError(errorText(err));
+
+      await refresh();
+
+      if (conversation) {
+        try {
+          const history = await get<Message[]>(
+            `/agentic-employees/conversations/${conversation.id}/messages`,
+          );
+          setMessages(history);
+        } catch {
+          // Preserve the primary action error.
+        }
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function setTier(nextAgent: Agent, modelTier: Agent["modelTier"]) {
     setError("");
     try { await patch(`/agentic-employees/agents/${nextAgent.key}`, { modelTier }); await refresh(); }
@@ -170,7 +227,6 @@ export function AgenticEmployeesPage() {
     ["employees", "Workforce", <Users size={17}/>],
     ["workspace", "Workspace", <MessageSquare size={17}/>],
     ["tasks", "Tasks", <Play size={17}/>],
-    ["approvals", "Approvals", <ShieldCheck size={17}/>],
     ["activity", "Activity", <Clock3 size={17}/>],
     ["settings", "Settings", <Settings2 size={17}/>],
   ];
@@ -190,11 +246,11 @@ export function AgenticEmployeesPage() {
     <div className="ae-command-stats">
       <div><span className="ae-stat-icon"><Users size={18}/></span><b>{agents.filter(a => a.enabled).length}</b><small>active employees</small></div>
       <div><span className="ae-stat-icon"><Play size={18}/></span><b>{tasks.filter(t => !["completed", "failed", "cancelled"].includes(t.status)).length}</b><small>open tasks</small></div>
-      <div className={approvals.length ? "attention" : ""}><span className="ae-stat-icon"><ShieldCheck size={18}/></span><b>{approvals.length}</b><small>awaiting review</small></div>
+      <div className={confirmations.length ? "attention" : ""}><span className="ae-stat-icon"><ShieldCheck size={18}/></span><b>{confirmations.length}</b><small>awaiting confirmation</small></div>
       <div><span className="ae-stat-icon"><History size={18}/></span><b>{conversations.length}</b><small>saved conversations</small></div>
     </div>
 
-    <div className="ae-tabs">{tabs.map(([key, label, icon]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => key === "activity" ? void openActivity() : setTab(key)}>{icon}{label}{key === "approvals" && approvals.length > 0 ? <em>{approvals.length}</em> : null}</button>)}</div>
+    <div className="ae-tabs">{tabs.map(([key, label, icon]) => <button key={key} className={tab === key ? "active" : ""} onClick={() => key === "activity" ? void openActivity() : setTab(key)}>{icon}{label}</button>)}</div>
 
     {tab === "employees" && <div className="ae-workforce-home">
       <section className="ae-intent-panel">
@@ -235,25 +291,37 @@ export function AgenticEmployeesPage() {
         <div className="ae-thread-list"><span>RECENT THREADS</span>{conversations.slice(0, 8).map(item => <button key={item.id} className={conversation?.id === item.id ? "active" : ""} onClick={() => void loadConversation(item)}><MessageSquare size={14}/><span><b>{item.title}</b><small>{item.agentKey} · {formatWhen(item.lastMessageAt || item.createdAt)}</small></span></button>)}</div>
       </aside>
       <section className="ae-cockpit-main">
-        <header className="ae-cockpit-head"><div className={`ae-cockpit-agent ae-accent-${profile.accent}`}><div className="ae-pro-avatar">{profile.icon}</div><div><span>{profile.domain.toUpperCase()} SPECIALIST</span><h2>{agent?.name || "AI Workspace"}</h2><p>{agent?.title} · {agent?.modelTier.toUpperCase()} · {agent?.configuredTools.length || 0} permitted tools</p></div></div><div className="ae-head-actions"><button className="secondary" onClick={() => go("agentic-employees-vision")}><Camera size={16}/> Vision</button><button className="secondary" onClick={() => go("agentic-employees-memory")}><Brain size={16}/> Memory</button><button className="secondary" onClick={() => go("agentic-employees-documents")}><FileText size={16}/> Files</button><button className={approvals.length ? "attention-button" : "secondary"} onClick={() => go("agentic-employees-actions")}><ShieldCheck size={16}/> Actions{approvals.length ? <em>{approvals.length}</em> : null}</button></div></header>
+        <header className="ae-cockpit-head"><div className={`ae-cockpit-agent ae-accent-${profile.accent}`}><div className="ae-pro-avatar">{profile.icon}</div><div><span>{profile.domain.toUpperCase()} SPECIALIST</span><h2>{agent?.name || "AI Workspace"}</h2><p>{agent?.title} · {agent?.modelTier.toUpperCase()} · {agent?.configuredTools.length || 0} permitted tools</p></div></div><div className="ae-head-actions"><button className="secondary" onClick={() => go("agentic-employees-vision")}><Camera size={16}/> Vision</button><button className="secondary" onClick={() => go("agentic-employees-memory")}><Brain size={16}/> Memory</button><button className="secondary" onClick={() => go("agentic-employees-documents")}><FileText size={16}/> Files</button></div></header>
         <div className="ae-context-strip"><div><ShieldCheck size={15}/><span>Role-scoped Ledgerly access</span></div><div><Brain size={15}/><span>Conversation + working + institutional memory</span></div><div><Camera size={15}/><span>AI Vision ready</span></div></div>
         <div className="ae-chat ae-chat-pro">
           {!conversation && <div className="ae-empty"><MessageSquare/><h3>Choose an employee to start</h3><p>Your conversations are saved and can be resumed later.</p></div>}
           {conversation && !messages.length && <div className="ae-chat-welcome"><div className={`ae-welcome-icon ae-accent-${profile.accent}`}>{profile.icon}</div><h3>What should {agent?.name} do?</h3><p>{profile.short}. Start with one of these, or describe the work naturally.</p><div className="ae-starter-grid">{profile.prompts.map(prompt => <button key={prompt} onClick={() => setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
-          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}><div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div><p>{message.content}</p>{message.model && <small>{message.model}</small>}</div>)}
+          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}><div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div><RichMessage content={message.content}/>{message.model && <small>{message.model}</small>}</div>)}
+          {visibleConfirmations.map(item =>
+            <ActionConfirmationCard
+              key={`${item.source}:${item.id}`}
+              item={item}
+              busy={busy}
+              onConfirm={() =>
+                void resolveConfirmation(item, "confirm")
+              }
+              onCancel={() =>
+                void resolveConfirmation(item, "cancel")
+              }
+            />
+          )}
           {busy && <div className="ae-message assistant ae-working"><b>{agent?.name}</b><p><Sparkles size={14}/> Working with Ledgerly…</p></div>}
         </div>
-        {conversation && <><div className="ae-quick-tools"><button onClick={() => go("agentic-employees-vision")}><Camera size={15}/> Use a photo</button><button onClick={() => setText(`Create a ${agent?.key === "bursar" ? "spreadsheet" : "document"} for `)}><FileText size={15}/> Create document</button><button onClick={() => setText("What do you remember about ")}><Brain size={15}/> Ask memory</button><button onClick={() => go("agentic-employees-actions")}><ShieldCheck size={15}/> Review actions</button></div><footer className="ae-composer-pro"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder={`Message ${agent?.name || "this employee"}… You can speak naturally.`}/><button disabled={busy || !text.trim()} onClick={() => void send()}><Send size={17}/> Send</button></footer></>}
+        {conversation && <><div className="ae-quick-tools"><button onClick={() => go("agentic-employees-vision")}><Camera size={15}/> Use a photo</button><button onClick={() => setText(`Create a ${agent?.key === "bursar" ? "spreadsheet" : "document"} for `)}><FileText size={15}/> Create document</button><button onClick={() => setText("What do you remember about ")}><Brain size={15}/> Ask memory</button></div><footer className="ae-composer-pro"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder={`Message ${agent?.name || "this employee"}… You can speak naturally.`}/><button disabled={busy || !text.trim()} onClick={() => void send()}><Send size={17}/> Send</button></footer></>}
       </section>
     </div>}
 
     {tab === "tasks" && <div className="ae-panel"><div className="ae-section-heading"><div><span>WORK QUEUE</span><h2>Agent tasks</h2></div><p>Track assignments across your AI workforce.</p></div><div className="ae-list">{tasks.map(task => <div key={task.id}><span className={`ae-dot ${task.status}`}/><div><b>{task.title}</b><small>{agents.find(a => a.key === task.agentKey)?.name || task.agentKey} · {task.status} · {formatWhen(task.createdAt)}</small>{task.resultText && <p>{task.resultText}</p>}{task.errorText && <p className="bad">{task.errorText}</p>}</div></div>)}{!tasks.length && <p>No tasks yet.</p>}</div></div>}
 
-    {tab === "approvals" && <div className="ae-panel"><div className="ae-section-heading"><div><span>HUMAN CONTROL</span><h2>Approval & execution queue</h2></div><p>Review exactly what an employee wants Ledgerly to change before execution.</p></div><div className="ae-list">{approvals.map(approval => <div key={approval.id}><ShieldCheck/><div><b>{friendly(approval.actionType)}</b><small>{agents.find(a => a.key === approval.agentKey)?.name || approval.agentKey} · {approval.status} · requires {approval.requiredScope}</small><pre>{JSON.stringify(approval.payload, null, 2)}</pre><div className="ae-actions">{approval.status === "pending" && <><button disabled={busy} onClick={() => void decide(approval.id, "approve")}><CheckCircle2 size={15}/> Approve</button><button className="secondary" disabled={busy} onClick={() => void decide(approval.id, "reject")}>Reject</button></>}{approval.status === "approved" && <button disabled={busy} onClick={() => void execute(approval.id)}><Send size={15}/> Execute approved action</button>}</div></div></div>)}{!approvals.length && <div className="ae-empty-card"><ShieldCheck/><h3>Queue is clear</h3><p>No sensitive AI actions are waiting for review.</p></div>}</div></div>}
 
     {tab === "activity" && <div className="ae-panel"><h2>Audit & tool activity</h2><div className="ae-list">{activity?.toolCalls.map(call => <div key={call.id}><Clock3/><div><b>{call.toolName}</b><small>{call.agentKey} · {call.status} · {call.createdAt}</small>{call.errorText && <p className="bad">{call.errorText}</p>}</div></div>)}{activity && !activity.toolCalls.length && <p>No tool calls yet.</p>}{!activity && <p>Activity requires school write/admin permission.</p>}</div></div>}
 
-    {tab === "settings" && <div className="ae-panel"><h2>AI provider</h2><div className="ae-settings"><div><span>Provider</span><b>{settings?.provider}</b></div><div><span>Luna</span><b>{settings?.models?.luna}</b></div><div><span>Terra</span><b>{settings?.models?.terra}</b></div><div><span>Sol</span><b>{settings?.models?.sol}</b></div></div><p>Provider secrets stay on the backend server. Employee authority still comes from Ledgerly roles/scopes and governed Action Center execution.</p></div>}
+    {tab === "settings" && <div className="ae-panel"><h2>AI provider</h2><div className="ae-settings"><div><span>Provider</span><b>{settings?.provider}</b></div><div><span>Luna</span><b>{settings?.models?.luna}</b></div><div><span>Terra</span><b>{settings?.models?.terra}</b></div><div><span>Sol</span><b>{settings?.models?.sol}</b></div></div><p>Provider secrets stay on the backend server. Employee authority still comes from Ledgerly roles/scopes and inline human confirmation in the employee chat.</p></div>}
   </div>;
 }
 

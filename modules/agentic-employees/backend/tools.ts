@@ -73,7 +73,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
   communications_summary: { name: "communications_summary", description: "Get communication campaign and delivery health for this organization.", parameters: objectSchema({}) },
   prepare_communication: {
     name: "prepare_communication",
-    description: "Prepare a Ledgerly SMS/WhatsApp communication campaign for human approval. It does not send anything by itself.",
+    description: "Prepare a Ledgerly SMS/WhatsApp communication campaign for inline human confirmation in the current chat. It does not send anything by itself.",
     parameters: objectSchema({
       audienceKind: { type: "string", enum: ["students", "staff", "fee_balances"] },
       channels: { type: "array", items: { type: "string", enum: ["sms", "whatsapp"] }, minItems: 1, maxItems: 2 },
@@ -122,15 +122,21 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
   const organizationId = ctx.principal.organizationId;
 
   switch (name) {
+
     case "school_snapshot": {
       need(ctx, "school:read");
       const [students, staff, guardians, classes] = await Promise.all([
         ctx.db.prepare("SELECT COUNT(*) AS n FROM school_students WHERE organization_id=? AND deleted_at IS NULL AND status='active'").bind(organizationId).first<{ n: number }>(),
         ctx.db.prepare("SELECT COUNT(*) AS n FROM school_staff_profiles WHERE organization_id=? AND deleted_at IS NULL AND employment_status='active'").bind(organizationId).first<{ n: number }>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_guardians WHERE organization_id=? AND active=1").bind(organizationId).first<{ n: number }>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_classes WHERE organization_id=? AND active=1").bind(organizationId).first<{ n: number }>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_guardians WHERE organization_id=? AND active=TRUE").bind(organizationId).first<{ n: number }>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_classes WHERE organization_id=? AND active=TRUE").bind(organizationId).first<{ n: number }>(),
       ]);
-      return { activeStudents: Number(students?.n || 0), activeStaff: Number(staff?.n || 0), activeGuardians: Number(guardians?.n || 0), activeClasses: Number(classes?.n || 0) };
+      return {
+        activeStudents: Number(students?.n || 0),
+        activeStaff: Number(staff?.n || 0),
+        activeGuardians: Number(guardians?.n || 0),
+        activeClasses: Number(classes?.n || 0)
+      };
     }
 
     case "search_students": {
@@ -160,139 +166,365 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
       return { staff: rows.results };
     }
 
+
     case "academics_overview": {
       need(ctx, "school:read");
       const [timetables, schemes, plans, deliveries, observations, inspections, coverage] = await Promise.all([
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_timetables WHERE organization_id=? AND status IN ('draft','submitted','approved','published')").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_schemes WHERE organization_id=? AND status<>'archived'").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_lesson_plans WHERE organization_id=? AND status<>'delivered'").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_lesson_deliveries WHERE organization_id=? AND scheduled_date=date('now')").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_observations WHERE organization_id=? AND status<>'closed'").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM acad_inspections WHERE organization_id=? AND status<>'closed'").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT ROUND(AVG(coverage_percent),1) AS pct FROM acad_schemes WHERE organization_id=? AND status<>'archived'").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_academic_timetables WHERE organization_id=? AND status IN ('draft','submitted','approved','published')").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_schemes_of_work WHERE organization_id=? AND status<>'archived'").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_lesson_plans WHERE organization_id=? AND status NOT IN ('delivered','cancelled')").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_academic_delivery_logs WHERE organization_id=? AND delivered_on=CURRENT_DATE").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_academic_observations WHERE organization_id=? AND status<>'closed'").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_academic_record_inspections WHERE organization_id=? AND status<>'closed'").bind(organizationId).first<any>(),
+        ctx.db.prepare(`
+          SELECT COALESCE(
+            ROUND(
+              100.0 * SUM(CASE WHEN i.completion_status='completed' THEN 1 ELSE 0 END)
+              / NULLIF(COUNT(i.id),0),
+              1
+            ),
+            0
+          ) AS pct
+          FROM school_schemes_of_work s
+          LEFT JOIN school_scheme_items i
+            ON i.scheme_id=s.id AND i.organization_id=s.organization_id
+          WHERE s.organization_id=? AND s.status<>'archived'
+        `).bind(organizationId).first<any>(),
       ]);
-      return { timetables: Number(timetables?.n || 0), schemes: Number(schemes?.n || 0), lessonPlans: Number(plans?.n || 0), todaysLessons: Number(deliveries?.n || 0), openObservations: Number(observations?.n || 0), openInspections: Number(inspections?.n || 0), averageCoverage: Number(coverage?.pct || 0) };
+
+      return {
+        timetables: Number(timetables?.n || 0),
+        schemes: Number(schemes?.n || 0),
+        lessonPlans: Number(plans?.n || 0),
+        todaysLessons: Number(deliveries?.n || 0),
+        openObservations: Number(observations?.n || 0),
+        openInspections: Number(inspections?.n || 0),
+        averageCoverage: Number(coverage?.pct || 0)
+      };
     }
+
 
     case "lesson_plan_queue": {
       need(ctx, "school:read");
-      const status = String(args.status || "").trim() || null, limit = clampLimit(args.limit, 20, 50);
+      const status = String(args.status || "").trim() || null;
+      const limit = clampLimit(args.limit, 20, 50);
+
       const rows = await ctx.db.prepare(`
-        SELECT p.id,p.lesson_date AS lessonDate,p.topic,p.subtopic,p.status,c.name AS className,s.name AS subjectName,
-               TRIM(sp.first_name||' '||sp.last_name) AS teacherName,p.hod_feedback AS hodFeedback,p.updated_at AS updatedAt
-        FROM acad_lesson_plans p JOIN school_classes c ON c.id=p.class_id JOIN school_subjects s ON s.id=p.subject_id
-        LEFT JOIN school_staff_profiles sp ON sp.organization_id=p.organization_id AND sp.user_id=p.teacher_user_id
-        WHERE p.organization_id=? AND (? IS NULL OR p.status=?) ORDER BY p.updated_at DESC LIMIT ?
+        SELECT p.id,
+               p.lesson_date AS lessonDate,
+               p.topic,
+               p.subtopic,
+               p.status,
+               c.name AS className,
+               s.name AS subjectName,
+               TRIM(sp.first_name||' '||sp.last_name) AS teacherName,
+               p.review_notes AS hodFeedback,
+               p.updated_at AS updatedAt
+        FROM school_lesson_plans p
+        JOIN school_classes c ON c.id=p.class_id
+        JOIN school_subjects s ON s.id=p.subject_id
+        LEFT JOIN school_staff_profiles sp
+          ON sp.id=p.teacher_staff_id AND sp.organization_id=p.organization_id
+        WHERE p.organization_id=?
+          AND (? IS NULL OR p.status=?)
+        ORDER BY p.updated_at DESC
+        LIMIT ?
       `).bind(organizationId, status, status, limit).all();
+
       return { lessonPlans: rows.results };
     }
 
+
     case "scheme_coverage": {
       need(ctx, "school:read");
-      const max = Math.max(0, Math.min(100, Number(args.maximumCoveragePercent ?? 80))), limit = clampLimit(args.limit, 20, 50);
+      const max = Math.max(0, Math.min(100, Number(args.maximumCoveragePercent ?? 80)));
+      const limit = clampLimit(args.limit, 20, 50);
+
       const rows = await ctx.db.prepare(`
-        SELECT s.id,s.title,s.status,s.coverage_percent AS coveragePercent,c.name AS className,su.name AS subjectName,
-               TRIM(sp.first_name||' '||sp.last_name) AS teacherName,t.name AS termName,ay.name AS academicYearName
-        FROM acad_schemes s JOIN school_classes c ON c.id=s.class_id JOIN school_subjects su ON su.id=s.subject_id
-        JOIN school_terms t ON t.id=s.term_id JOIN school_academic_years ay ON ay.id=s.academic_year_id
-        LEFT JOIN school_staff_profiles sp ON sp.organization_id=s.organization_id AND sp.user_id=s.teacher_user_id
-        WHERE s.organization_id=? AND s.status<>'archived' AND COALESCE(s.coverage_percent,0)<=?
-        ORDER BY COALESCE(s.coverage_percent,0),s.updated_at DESC LIMIT ?
+        WITH scheme_rows AS (
+          SELECT s.id,
+                 s.title,
+                 s.status,
+                 s.class_id,
+                 s.subject_id,
+                 s.term_id,
+                 s.academic_year_id,
+                 s.teacher_staff_id,
+                 s.updated_at,
+                 COALESCE(
+                   ROUND(
+                     100.0 * SUM(CASE WHEN i.completion_status='completed' THEN 1 ELSE 0 END)
+                     / NULLIF(COUNT(i.id),0),
+                     1
+                   ),
+                   0
+                 ) AS coverage_percent
+          FROM school_schemes_of_work s
+          LEFT JOIN school_scheme_items i
+            ON i.scheme_id=s.id AND i.organization_id=s.organization_id
+          WHERE s.organization_id=? AND s.status<>'archived'
+          GROUP BY s.id,s.title,s.status,s.class_id,s.subject_id,s.term_id,
+                   s.academic_year_id,s.teacher_staff_id,s.updated_at
+        )
+        SELECT r.id,
+               r.title,
+               r.status,
+               r.coverage_percent AS coveragePercent,
+               c.name AS className,
+               su.name AS subjectName,
+               TRIM(sp.first_name||' '||sp.last_name) AS teacherName,
+               t.name AS termName,
+               ay.name AS academicYearName
+        FROM scheme_rows r
+        JOIN school_classes c ON c.id=r.class_id
+        JOIN school_subjects su ON su.id=r.subject_id
+        JOIN school_terms t ON t.id=r.term_id
+        JOIN school_academic_years ay ON ay.id=r.academic_year_id
+        LEFT JOIN school_staff_profiles sp ON sp.id=r.teacher_staff_id
+        WHERE r.coverage_percent<=?
+        ORDER BY r.coverage_percent,r.updated_at DESC
+        LIMIT ?
       `).bind(organizationId, max, limit).all();
+
       return { maximumCoveragePercent: max, schemes: rows.results };
     }
 
+
     case "fee_balance_lookup": {
       need(ctx, "school:read");
-      const value = String(args.query || "").trim(), student = await findStudent(ctx.db, organizationId, value);
+      const value = String(args.query || "").trim();
+      const student = await findStudent(ctx.db, organizationId, value);
       if (!student) return { found: false };
+
       const balance = await ctx.db.prepare(`
-        SELECT COALESCE(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0)),0) AS balanceMinor,COUNT(*) AS chargeCount
-        FROM school_student_fee_charges c JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.student_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid')
+        WITH fee_docs AS (
+          SELECT document_id,
+                 SUM(amount_minor) AS billed_minor,
+                 COUNT(*) AS charge_count
+          FROM school_student_fee_charges
+          WHERE organization_id=? AND student_id=?
+          GROUP BY document_id
+        )
+        SELECT COALESCE(SUM(
+                 CASE
+                   WHEN fd.billed_minor > COALESCE(d.paid_minor,0)
+                   THEN fd.billed_minor-COALESCE(d.paid_minor,0)
+                   ELSE 0
+                 END
+               ),0) AS balanceMinor,
+               COALESCE(SUM(fd.charge_count),0) AS chargeCount
+        FROM fee_docs fd
+        JOIN documents d ON d.id=fd.document_id
+        WHERE d.status IN ('open','partially_paid','paid')
       `).bind(organizationId, String(student.id)).first<any>();
-      return { found: true, student, balanceMinor: Number(balance?.balanceMinor || 0), chargeCount: Number(balance?.chargeCount || 0) };
+
+      return {
+        found: true,
+        student,
+        balanceMinor: Number(balance?.balanceMinor || 0),
+        chargeCount: Number(balance?.chargeCount || 0)
+      };
     }
+
 
     case "fee_arrears_summary": {
       need(ctx, "school:read");
       const limit = clampLimit(args.limit, 10, 30);
+
       const rows = await ctx.db.prepare(`
-        SELECT s.id,s.admission_number AS admissionNumber,s.first_name||' '||s.last_name AS studentName,
-               ROUND(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0))) AS balanceMinor
-        FROM school_student_fee_charges c JOIN school_students s ON s.id=c.student_id AND s.organization_id=c.organization_id
-        JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid') GROUP BY s.id
-        HAVING SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0))>0 ORDER BY balanceMinor DESC LIMIT ?
+        WITH fee_docs AS (
+          SELECT student_id,
+                 document_id,
+                 SUM(amount_minor) AS billed_minor
+          FROM school_student_fee_charges
+          WHERE organization_id=?
+          GROUP BY student_id,document_id
+        ),
+        student_balances AS (
+          SELECT fd.student_id,
+                 SUM(
+                   CASE
+                     WHEN fd.billed_minor > COALESCE(d.paid_minor,0)
+                     THEN fd.billed_minor-COALESCE(d.paid_minor,0)
+                     ELSE 0
+                   END
+                 ) AS balance_minor
+          FROM fee_docs fd
+          JOIN documents d ON d.id=fd.document_id
+          WHERE d.status IN ('open','partially_paid','paid')
+          GROUP BY fd.student_id
+        )
+        SELECT s.id,
+               s.admission_number AS admissionNumber,
+               s.first_name||' '||s.last_name AS studentName,
+               ROUND(b.balance_minor) AS balanceMinor
+        FROM student_balances b
+        JOIN school_students s ON s.id=b.student_id
+        WHERE b.balance_minor>0
+        ORDER BY b.balance_minor DESC
+        LIMIT ?
       `).bind(organizationId, limit).all();
+
       return { arrears: rows.results };
     }
 
+
     case "fee_collection_summary": {
       need(ctx, "school:read");
+
       const row = await ctx.db.prepare(`
-        SELECT COALESCE(SUM(c.total_minor),0) AS billedMinor,COALESCE(SUM(c.credited_minor),0) AS creditedMinor,
-               COALESCE(SUM(c.written_off_minor),0) AS writtenOffMinor,COALESCE(SUM(COALESCE(p.paid_minor,0)),0) AS paidMinor,
-               COALESCE(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0)),0) AS outstandingMinor
-        FROM school_student_fee_charges c JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid')
+        WITH fee_docs AS (
+          SELECT document_id,
+                 SUM(amount_minor) AS billed_minor
+          FROM school_student_fee_charges
+          WHERE organization_id=?
+          GROUP BY document_id
+        )
+        SELECT COALESCE(SUM(fd.billed_minor),0) AS billedMinor,
+               0 AS creditedMinor,
+               0 AS writtenOffMinor,
+               COALESCE(SUM(
+                 CASE
+                   WHEN COALESCE(d.paid_minor,0) < fd.billed_minor
+                   THEN COALESCE(d.paid_minor,0)
+                   ELSE fd.billed_minor
+                 END
+               ),0) AS paidMinor,
+               COALESCE(SUM(
+                 CASE
+                   WHEN fd.billed_minor > COALESCE(d.paid_minor,0)
+                   THEN fd.billed_minor-COALESCE(d.paid_minor,0)
+                   ELSE 0
+                 END
+               ),0) AS outstandingMinor
+        FROM fee_docs fd
+        JOIN documents d ON d.id=fd.document_id
+        WHERE d.status IN ('open','partially_paid','paid')
       `).bind(organizationId).first<any>();
-      return { billedMinor: Number(row?.billedMinor || 0), paidMinor: Number(row?.paidMinor || 0), creditedMinor: Number(row?.creditedMinor || 0), writtenOffMinor: Number(row?.writtenOffMinor || 0), outstandingMinor: Number(row?.outstandingMinor || 0) };
+
+      return {
+        billedMinor: Number(row?.billedMinor || 0),
+        paidMinor: Number(row?.paidMinor || 0),
+        creditedMinor: Number(row?.creditedMinor || 0),
+        writtenOffMinor: Number(row?.writtenOffMinor || 0),
+        outstandingMinor: Number(row?.outstandingMinor || 0)
+      };
     }
+
 
     case "hr_overview": {
       need(ctx, "hr:read");
+
       const [employees, departments, leave, onboarding] = await Promise.all([
         ctx.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN employment_status='active' THEN 1 ELSE 0 END) AS active FROM hr_employees WHERE organization_id=?").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_departments WHERE organization_id=? AND active=1").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_departments WHERE organization_id=? AND active=TRUE").bind(organizationId).first<any>(),
         ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_leave_requests WHERE organization_id=? AND status='pending'").bind(organizationId).first<any>(),
         ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_onboarding_tasks WHERE organization_id=? AND status='pending'").bind(organizationId).first<any>(),
       ]);
-      return { employees: Number(employees?.total || 0), activeEmployees: Number(employees?.active || 0), departments: Number(departments?.total || 0), pendingLeave: Number(leave?.total || 0), pendingOnboarding: Number(onboarding?.total || 0) };
+
+      return {
+        employees: Number(employees?.total || 0),
+        activeEmployees: Number(employees?.active || 0),
+        departments: Number(departments?.total || 0),
+        pendingLeave: Number(leave?.total || 0),
+        pendingOnboarding: Number(onboarding?.total || 0)
+      };
     }
+
 
     case "hr_leave_queue": {
       need(ctx, "hr:read");
-      const status = String(args.status || "").trim() || null, limit = clampLimit(args.limit, 20, 50);
+      const status = String(args.status || "").trim() || null;
+      const limit = clampLimit(args.limit, 20, 50);
+
       const rows = await ctx.db.prepare(`
-        SELECT r.id,e.employee_number AS employeeNumber,COALESCE(c.name,u.display_name,sp.first_name||' '||sp.last_name) AS employeeName,
-               t.name AS leaveType,r.starts_on AS startsOn,r.ends_on AS endsOn,r.days_micros/1000000.0 AS days,r.reason,r.status,r.created_at AS createdAt
-        FROM hr_leave_requests r JOIN hr_employees e ON e.id=r.employee_id JOIN hr_leave_types t ON t.id=r.leave_type_id
-        LEFT JOIN contacts c ON c.id=e.contact_id LEFT JOIN users u ON u.id=e.user_id LEFT JOIN school_staff_profiles sp ON sp.id=e.school_staff_id
-        WHERE r.organization_id=? AND (? IS NULL OR r.status=?) ORDER BY r.created_at DESC LIMIT ?
+        SELECT r.id,
+               e.employee_number AS employeeNumber,
+               COALESCE(c.name,u.display_name,sp.first_name||' '||sp.last_name) AS employeeName,
+               t.name AS leaveType,
+               r.starts_on AS startsOn,
+               r.ends_on AS endsOn,
+               r.days AS days,
+               r.reason,
+               r.status,
+               r.created_at AS createdAt
+        FROM hr_leave_requests r
+        JOIN hr_employees e ON e.id=r.employee_id
+        JOIN hr_leave_types t ON t.id=r.leave_type_id
+        LEFT JOIN contacts c ON c.id=e.contact_id
+        LEFT JOIN users u ON u.id=e.user_id
+        LEFT JOIN school_staff_profiles sp ON sp.id=e.school_staff_id
+        WHERE r.organization_id=?
+          AND (? IS NULL OR r.status=?)
+        ORDER BY r.created_at DESC
+        LIMIT ?
       `).bind(organizationId, status, status, limit).all();
+
       return { leaveRequests: rows.results };
     }
 
+
     case "books_overview": {
       need(ctx, "school:read");
+
       const rows = await ctx.db.prepare(`
-        WITH types AS (SELECT book_type FROM bks_stock_movements WHERE organization_id=? UNION SELECT book_type FROM bks_distributions WHERE organization_id=?),
-        stock AS (SELECT book_type,SUM(quantity_delta) qty FROM bks_stock_movements WHERE organization_id=? AND reversed_at IS NULL GROUP BY book_type),
-        issued AS (SELECT book_type,SUM(quantity) qty FROM bks_distributions WHERE organization_id=? AND reversed_at IS NULL GROUP BY book_type)
-        SELECT t.book_type AS bookType,COALESCE(stock.qty,0) AS receivedAdjusted,COALESCE(issued.qty,0) AS distributed,
+        WITH types AS (
+          SELECT book_type FROM book_stock_movements WHERE organization_id=?
+          UNION
+          SELECT book_type FROM book_distributions WHERE organization_id=?
+        ),
+        stock AS (
+          SELECT book_type,SUM(quantity_delta) AS qty
+          FROM book_stock_movements
+          WHERE organization_id=? AND reversed_at IS NULL
+          GROUP BY book_type
+        ),
+        issued AS (
+          SELECT book_type,SUM(quantity) AS qty
+          FROM book_distributions
+          WHERE organization_id=? AND reversed_at IS NULL
+          GROUP BY book_type
+        )
+        SELECT t.book_type AS bookType,
+               COALESCE(stock.qty,0) AS receivedAdjusted,
+               COALESCE(issued.qty,0) AS distributed,
                COALESCE(stock.qty,0)-COALESCE(issued.qty,0) AS available
-        FROM types t LEFT JOIN stock ON stock.book_type=t.book_type LEFT JOIN issued ON issued.book_type=t.book_type ORDER BY t.book_type
+        FROM types t
+        LEFT JOIN stock ON stock.book_type=t.book_type
+        LEFT JOIN issued ON issued.book_type=t.book_type
+        ORDER BY t.book_type
       `).bind(organizationId, organizationId, organizationId, organizationId).all();
+
       return { stock: rows.results };
     }
 
+
     case "learner_book_history": {
       need(ctx, "school:read");
-      const value = String(args.query || "").trim(), student = await findStudent(ctx.db, organizationId, value), limit = clampLimit(args.limit, 20, 50);
+      const value = String(args.query || "").trim();
+      const student = await findStudent(ctx.db, organizationId, value);
+      const limit = clampLimit(args.limit, 20, 50);
+
       if (!student) return { found: false };
+
       const rows = await ctx.db.prepare(`
-        SELECT d.id,d.book_type AS bookType,d.quantity,d.distributed_on AS distributedOn,d.source,d.notes,
-               d.reversed_at AS reversedAt,y.name AS academicYearName,t.name AS termName
-        FROM bks_distributions d LEFT JOIN school_academic_years y ON y.id=d.academic_year_id LEFT JOIN school_terms t ON t.id=d.term_id
-        WHERE d.organization_id=? AND d.student_id=? ORDER BY d.distributed_on DESC,d.created_at DESC LIMIT ?
+        SELECT d.id,
+               d.book_type AS bookType,
+               d.quantity,
+               d.distributed_on AS distributedOn,
+               d.source,
+               d.notes,
+               d.reversed_at AS reversedAt,
+               y.name AS academicYearName,
+               t.name AS termName
+        FROM book_distributions d
+        LEFT JOIN school_academic_years y ON y.id=d.academic_year_id
+        LEFT JOIN school_terms t ON t.id=d.term_id
+        WHERE d.organization_id=? AND d.student_id=?
+        ORDER BY d.distributed_on DESC,d.created_at DESC
+        LIMIT ?
       `).bind(organizationId, String(student.id), limit).all();
+
       return { found: true, student, distributions: rows.results };
     }
 
@@ -307,27 +539,111 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
 
     case "prepare_communication": {
       need(ctx, "school:read");
-      const approvalId = createId("aap");
-      const channels = Array.isArray(args.channels) ? [...new Set(args.channels.map(String).filter(x => x === "sms" || x === "whatsapp"))] : [];
-      if (!channels.length) throw new Error("At least one supported communication channel is required");
-      const audienceKind = String(args.audienceKind || "students");
+
+      const channels = Array.isArray(args.channels)
+        ? [...new Set(
+            args.channels
+              .map(String)
+              .filter(x => x === "sms" || x === "whatsapp")
+          )]
+        : [];
+
+      if (!channels.length) {
+        throw new Error(
+          "At least one supported communication channel is required"
+        );
+      }
+
+      const audienceKind = String(
+        args.audienceKind || "students"
+      );
+
+      const subject = String(
+        args.subject || "School update"
+      ).slice(0, 200);
+
       const payload = {
         audience: {
           kind: audienceKind,
-          studentIds: Array.isArray(args.studentIds) ? args.studentIds.map(String).slice(0, 200) : [],
-          staffIds: Array.isArray(args.staffIds) ? args.staffIds.map(String).slice(0, 200) : [],
-          recipientMode: args.recipientMode ? String(args.recipientMode) : undefined,
-          minimumBalanceMinor: args.minimumBalanceMinor == null ? undefined : Math.max(0, Number(args.minimumBalanceMinor)),
+          studentIds: Array.isArray(args.studentIds)
+            ? args.studentIds.map(String).slice(0, 200)
+            : [],
+          staffIds: Array.isArray(args.staffIds)
+            ? args.staffIds.map(String).slice(0, 200)
+            : [],
+          recipientMode: args.recipientMode
+            ? String(args.recipientMode)
+            : undefined,
+          minimumBalanceMinor:
+            args.minimumBalanceMinor == null
+              ? undefined
+              : Math.max(
+                  0,
+                  Number(args.minimumBalanceMinor),
+                ),
         },
         channels,
-        subject: String(args.subject || "School update").slice(0, 200),
-        message: String(args.message || "").slice(0, 2000),
+        subject,
+        message: String(
+          args.message || ""
+        ).slice(0, 2000),
       };
+
+      const id = createId("aea");
+      const idempotencyKey =
+        `conversation:${ctx.conversationId}:communication:${id}`;
+
+      const studentCount =
+        payload.audience.studentIds.length;
+
+      const staffCount =
+        payload.audience.staffIds.length;
+
+      const targetText =
+        studentCount
+          ? `${studentCount} selected student(s)`
+          : staffCount
+            ? `${staffCount} selected staff member(s)`
+            : audienceKind;
+
       await ctx.db.prepare(`
-        INSERT INTO ae_approvals(id,organization_id,conversation_id,agent_key,requested_by,action_type,required_scope,payload_json,status)
-        VALUES (?,?,?,?,?,?,?,?,'pending')
-      `).bind(approvalId, organizationId, ctx.conversationId, ctx.agent.key, ctx.principal.userId, "communication.campaign.send", "communications:write", JSON.stringify(payload)).run();
-      return { approvalId, status: "pending", action: "communication.campaign.send", message: "Campaign prepared. A human with communications:write must approve it before the executor can send it." };
+        INSERT INTO ae_actions
+          (
+            id,
+            organization_id,
+            agent_key,
+            action_type,
+            title,
+            summary,
+            required_scope,
+            payload_json,
+            idempotency_key,
+            status
+          )
+        VALUES (?,?,?,?,?,?,?,?,?,'suggested')
+      `).bind(
+        id,
+        organizationId,
+        ctx.agent.key,
+        "communication.campaign.send",
+        `Send communication: ${subject}`,
+        `Send ${channels.join(" + ")} communication to ${targetText}.`,
+        "communications:write",
+        JSON.stringify(payload),
+        idempotencyKey,
+      ).run();
+
+      return {
+        prepared: true,
+        executed: false,
+        requiresHumanConfirmation: true,
+        action: {
+          id,
+          status: "suggested",
+          actionType: "communication.campaign.send",
+          title: `Send communication: ${subject}`,
+        },
+      };
     }
 
     default:

@@ -64,7 +64,31 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
 }
 
 function instructions(agent: AgentDefinition, memories: string) {
-  return `${agent.systemPrompt}\n\nMEMORY RULES:\nConversation memory is the message history provided with this run. Working memory contains active assignments, promises, follow-ups and unresolved matters. Institutional memory contains durable preferences, procedures, decisions and outcomes. Use saved memory as context, not as permission to bypass current Ledgerly records or authorization. When the user gives a durable instruction or future follow-up, save it with the appropriate memory tool. Mark working items done/cancelled when resolved.\n\n${memories}`;
+  const identity = `IDENTITY:
+Your name is ${agent.name}.
+Your Ledgerly job title is ${agent.title}.
+Your employee key is ${agent.key}.
+Always know your own name and role. If the user asks who you are, identify yourself as ${agent.name}, ${agent.title}. Do not say that your name is unknown. Do not invent a different personal name.`;
+
+  const responseStyle = `RESPONSE FORMAT:
+Use clean Markdown for user-facing replies because the Ledgerly interface renders Markdown as formatted content.
+Use short headings, normal paragraphs, bullet or numbered lists, and Markdown tables when tables genuinely improve clarity.
+Use **bold** sparingly for important figures and labels.
+Do not output raw HTML, CSS, JSON wrappers, escaped Markdown, or strings such as "\\n" when ordinary formatting will work.
+For management briefs, prefer clearly separated sections and compact tables.
+Do not describe missing data as a migration problem unless a tool actually returned a database/schema error in the current run.
+If a valid tool returns zero records, report it as zero/no recorded data rather than a system failure.`;
+
+  return `${identity}
+
+${agent.systemPrompt}
+
+${responseStyle}
+
+MEMORY RULES:
+Conversation memory is the message history provided with this run. Working memory contains active assignments, promises, follow-ups and unresolved matters. Institutional memory contains durable preferences, procedures, decisions and outcomes. Use saved memory as context, not as permission to bypass current Ledgerly records or authorization. When the user gives a durable instruction or future follow-up, save it with the appropriate memory tool. Mark working items done/cancelled when resolved.
+
+${memories}`;
 }
 
 function defaultReasoning(tier: ModelTier) {

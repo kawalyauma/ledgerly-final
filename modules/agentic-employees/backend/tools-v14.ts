@@ -4,7 +4,7 @@ import { executeTool as executeBaseTool, openAiTools as baseOpenAiTools, type To
 
 const SPEC={
   type:"function",name:"prepare_work_task",strict:false,
-  description:"Prepare a Tasks & Work follow-up in the AI Action Center. This does not create the task; a human must prepare, approve and execute the action.",
+  description:"Prepare a Tasks & Work follow-up for inline human confirmation in the current chat. This does not create the task; a human must prepare, approve and execute the action.",
   parameters:{type:"object",properties:{
     title:{type:"string"},description:{type:"string"},priority:{type:"string",enum:["low","medium","high","urgent"]},
     assigneeUserId:{type:"string"},dueAt:{type:"string"}

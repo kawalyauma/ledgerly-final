@@ -6,7 +6,6 @@ import { VisionWorkspacePage } from "./VisionWorkspacePage";
 import { MemoryPage } from "./MemoryPage";
 import { ProactiveEmployeesPage } from "./ProactiveEmployeesPage";
 import { EventReactionsPage } from "./EventReactionsPage";
-import { ActionCenterPage } from "./ActionCenterPage";
 import { AgentDocumentsPage } from "./AgentDocumentsPage";
 import "./agentic-employees.css";
 
@@ -22,7 +21,6 @@ const moduleDefinition: FrontendModuleDefinition = {
     "agentic-employees-memory": { scope: "school:read", view: MemoryPage },
     "agentic-employees-proactive": { scope: "school:read", view: ProactiveEmployeesPage },
     "agentic-employees-events": { scope: "school:read", view: EventReactionsPage },
-    "agentic-employees-actions": { scope: "school:read", view: ActionCenterPage },
     "agentic-employees-documents": { scope: "documents:read", view: AgentDocumentsPage },
   },
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
@@ -32,7 +30,6 @@ const moduleDefinition: FrontendModuleDefinition = {
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },
     { label: "Proactive Workforce", path: "agentic-employees-proactive", scope: "school:read" },
     { label: "Event Reactions", path: "agentic-employees-events", scope: "school:read" },
-    { label: "Action Center", path: "agentic-employees-actions", scope: "school:read" },
     { label: "Agent Documents", path: "agentic-employees-documents", scope: "documents:read" },
   ]}],
 };
