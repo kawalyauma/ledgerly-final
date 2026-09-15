@@ -1,6 +1,7 @@
 import { createId } from "../../../src/lib/ids";
 import type { AgentDefinition } from "./policy";
 import { executeTool as executeBaseTool, openAiTools as baseOpenAiTools, type ToolContext } from "./tools-v125b";
+export type { ToolContext } from "./tools-v125b";
 
 const SPEC={
   type:"function",name:"prepare_work_task",strict:false,
