@@ -1,0 +1,49 @@
+name: Frontend lock repair
+
+on:
+  push:
+    branches:
+      - fix/frontend-lockfile-node22-workflow
+
+permissions:
+  contents: read
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Show versions
+        run: |
+          node -v
+          npm -v
+
+      - name: Regenerate package lock
+        run: npm install --package-lock-only --legacy-peer-deps --ignore-scripts
+
+      - name: Clean install
+        run: npm ci --legacy-peer-deps
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build web
+        run: npm run build:web
+
+      - name: Upload repaired lockfile
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-lockfile
+          path: package-lock.json
+          if-no-files-found: error
