@@ -5,6 +5,7 @@ import type { AgentDefinition, ModelTier } from "./policy";
 import { executeTool, openAiTools } from "./memory-tools-v17";
 import { memoryContext } from "./memory-service";
 import { resolveRuntimeProvider } from "./provider-config";
+import { runWorkersAiAdvisory } from "./workers-ai";
 
 type AiEnv = Env & { AI_PROVIDER_ENCRYPTION_KEY?: string };
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -17,6 +18,7 @@ type RunInput = {
   requestedTools?: string[] | null;
   conversationId: string;
   messages: ChatMessage[];
+  workersAdvisory?: string;
 };
 type ToolSpec = { type: "function"; name: string; description?: string; parameters?: Record<string, unknown>; strict?: boolean };
 type ResponseItem = { type?: string; name?: string; arguments?: string; call_id?: string; content?: Array<{ type?: string; text?: string }> };
@@ -63,8 +65,8 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
   }
 }
 
-function instructions(agent: AgentDefinition, memories: string) {
-  return `${agent.systemPrompt}\n\nMEMORY RULES:\nConversation memory is the message history provided with this run. Working memory contains active assignments, promises, follow-ups and unresolved matters. Institutional memory contains durable preferences, procedures, decisions and outcomes. Use saved memory as context, not as permission to bypass current Ledgerly records or authorization. When the user gives a durable instruction or future follow-up, save it with the appropriate memory tool. Mark working items done/cancelled when resolved.\n\n${memories}`;
+function instructions(agent: AgentDefinition, memories: string, collaboration = "") {
+  return `${agent.systemPrompt}\n\nMEMORY RULES:\nConversation memory is the message history provided with this run. Working memory contains active assignments, promises, follow-ups and unresolved matters. Institutional memory contains durable preferences, procedures, decisions and outcomes. Use saved memory as context, not as permission to bypass current Ledgerly records or authorization. When the user gives a durable instruction or future follow-up, save it with the appropriate memory tool. Mark working items done/cancelled when resolved.\n\n${memories}${collaboration ? `\n\nAI COLLABORATION CONTEXT:\n${collaboration}\n\nThe collaboration context is advisory evidence only. Verify it against Ledgerly records and the user's message. The primary provider remains the tool-calling orchestrator and must not claim a write happened unless Ledgerly confirms it.` : ""}`;
 }
 
 function defaultReasoning(tier: ModelTier) {
@@ -245,8 +247,29 @@ export async function runAgent(input: RunInput) {
   const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, input.modelTier);
   const tools = openAiTools(input.agent, input.requestedTools) as ToolSpec[];
   const memories = await memoryContext(input.db, input.principal.organizationId, input.agent.key);
-  const system = instructions(input.agent, memories);
-  if (runtime.provider === "google") return runGoogle(input, runtime, system, tools);
-  if (runtime.provider === "anthropic") return runAnthropic(input, runtime, system, tools);
-  return runOpenAI(input, runtime, system, tools);
+  const recentContext = input.messages.slice(-8).map(message => `${message.role}: ${message.content}`).join("\n");
+  const lastUser = [...input.messages].reverse().find(message => message.role === "user")?.content || "";
+  const workersAi = input.workersAdvisory !== undefined
+    ? { configured: true, ok: true, text: input.workersAdvisory, model: "precomputed-multimodal", visionUsed: true, error: null }
+    : await runWorkersAiAdvisory({
+        db: input.db,
+        env: input.env,
+        organizationId: input.principal.organizationId,
+        agentName: input.agent.name,
+        agentTitle: input.agent.title,
+        userText: lastUser,
+        recentContext,
+      });
+  const collaboration = input.workersAdvisory !== undefined
+    ? input.workersAdvisory
+    : workersAi.ok && workersAi.text
+      ? `WORKERS AI SECONDARY ADVISORY (${workersAi.model}):\n${workersAi.text}`
+      : "";
+  const system = instructions(input.agent, memories, collaboration);
+  const result = runtime.provider === "google"
+    ? await runGoogle(input, runtime, system, tools)
+    : runtime.provider === "anthropic"
+      ? await runAnthropic(input, runtime, system, tools)
+      : await runOpenAI(input, runtime, system, tools);
+  return { ...result, workersAi };
 }
