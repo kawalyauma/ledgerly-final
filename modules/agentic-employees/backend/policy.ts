@@ -18,7 +18,15 @@ export const AGENTS:Record<AgentKey,AgentDefinition>={
 };
 export function isAgentKey(value:string):value is AgentKey{return value in AGENTS;}
 export function hasScope(principal:AuthPrincipal,scope:string){return principal.role==="owner"||principal.role==="admin"||principal.scopes.includes(scope);}
-export function allowedTools(agent:AgentDefinition,requested?:string[]|null){if(!requested)return[...agent.tools];const base=new Set<string>(agent.tools);return[...new Set(requested)].filter(tool=>base.has(tool));}
+export function allowedTools(agent:AgentDefinition,requested?:string[]|null){
+ if(!requested)return[...agent.tools];
+ const base=new Set<string>(agent.tools),selected=[...new Set(requested)].filter(tool=>base.has(tool));
+ // Timetable intelligence is a core Academics capability for DOS/Head Teacher.
+ // Existing schools may have saved an older allowlist before these tools existed;
+ // inherit the new read/draft capabilities without requiring settings migration.
+ if(agent.key==="dos"||agent.key==="headteacher")for(const tool of timetableTools)if(base.has(tool)&&!selected.includes(tool))selected.push(tool);
+ return selected;
+}
 export function isToolAllowed(agent:AgentDefinition,tool:string,requested?:string[]|null){return allowedTools(agent,requested).includes(tool);}
 export function actionNeedsApproval(actionType:string){return["communication.campaign.send","work.task.create","document.generate","printerly.document.print","system.api.request","finance.write","student.write","staff.write","academic.write"].includes(actionType);}
 export function resolveModel(tier:ModelTier,env:Record<string,unknown>){const defaults:Record<ModelTier,string>={luna:"gpt-5.6-luna",terra:"gpt-5.6-terra",sol:"gpt-5.6-sol"},key=`OPENAI_MODEL_${tier.toUpperCase()}`,configured=env[key];return typeof configured==="string"&&configured.trim()?configured.trim():defaults[tier];}
