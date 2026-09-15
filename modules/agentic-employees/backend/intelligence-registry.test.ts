@@ -33,4 +33,12 @@ describe("AI intelligence registry",()=>{
     expect(q.limit).toBe(100);
     expect(q.bindings.at(-1)).toBe(100);
   });
+
+  it("counts only live fee charges and deduplicates document allocations",()=>{
+    const q=compileSafeQuery("bursar","org",{entity:"fee_balances",metrics:["billedTotalMinor","paidTotalMinor","outstandingTotalMinor"],limit:1});
+    expect(q.sql).toContain("status NOT IN ('draft','cancelled')");
+    expect(q.sql).toContain("SELECT DISTINCT organization_id,student_id,document_id");
+    expect(q.sql).toContain("pa.reversed_at IS NULL");
+    expect(q.sql).not.toContain("status<>'void'");
+  });
 });
