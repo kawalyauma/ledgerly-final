@@ -2,26 +2,28 @@ import {useState} from "react";
 import {SafeAreaView,ScrollView,StatusBar,StyleSheet,Text,TouchableOpacity,View} from "react-native";
 import type {MobileSession} from "../auth";
 import type {SessionUpdater} from "../apiClient";
+import {LearningCycleTab} from "./LearningCycleTab";
 import {OverviewTab} from "./OverviewTab";
 import {TimetableTab} from "./TimetableTab";
 import {PlanningTab} from "./PlanningTab";
 import {DeliveryTab} from "./DeliveryTab";
 import {SupervisionTab} from "./SupervisionTab";
 
-type Tab="overview"|"timetable"|"planning"|"delivery"|"supervision";
+type Tab="learning"|"overview"|"timetable"|"planning"|"delivery"|"supervision";
 const tabs:{id:Tab;label:string;icon:string;hint:string}[]=[
+  {id:"learning",label:"Learning",icon:"◎",hint:"Scheme → lessons → marks"},
   {id:"overview",label:"Overview",icon:"⌂",hint:"Academic pulse"},
   {id:"timetable",label:"Timetable",icon:"▦",hint:"Classes & periods"},
-  {id:"planning",label:"Planning",icon:"≡",hint:"Schemes & lesson plans"},
+  {id:"planning",label:"Legacy",icon:"≡",hint:"Previous planning tools"},
   {id:"delivery",label:"Delivery",icon:"✓",hint:"Teaching progress"},
-  {id:"supervision",label:"Supervise",icon:"◎",hint:"Quality & follow-up"},
+  {id:"supervision",label:"Supervise",icon:"◉",hint:"Quality & follow-up"},
 ];
 
 export function AcademicsWorkspaceScreen({session,onSession,onBack}:{session:MobileSession;onSession:SessionUpdater;onBack:()=>void}){
-  const[tab,setTab]=useState<Tab>("overview");
+  const[tab,setTab]=useState<Tab>("learning");
   const common={session,onSession};
   const active=tabs.find(x=>x.id===tab)??tabs[0];
-  const content=tab==="overview"?<OverviewTab {...common}/>:tab==="timetable"?<TimetableTab {...common}/>:tab==="planning"?<PlanningTab {...common}/>:tab==="delivery"?<DeliveryTab {...common}/>:<SupervisionTab {...common}/>;
+  const content=tab==="learning"?<LearningCycleTab {...common}/>:tab==="overview"?<OverviewTab {...common}/>:tab==="timetable"?<TimetableTab {...common}/>:tab==="planning"?<PlanningTab {...common}/>:tab==="delivery"?<DeliveryTab {...common}/>:<SupervisionTab {...common}/>;
   return <SafeAreaView style={s.root}>
     <StatusBar barStyle="light-content" backgroundColor="#081c16"/>
     <View style={s.header}>
