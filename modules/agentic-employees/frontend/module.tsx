@@ -9,11 +9,12 @@ import { EventReactionsPage } from "./EventReactionsPage";
 import { ActionCenterPage } from "./ActionCenterPage";
 import { AgentDocumentsPage } from "./AgentDocumentsPage";
 import "./agentic-employees.css";
+import "./action-center-v20.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "1.9.0",
+  version: "2.0.0",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
