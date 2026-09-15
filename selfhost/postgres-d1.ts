@@ -19,7 +19,19 @@ function sqliteFunctions(sql:string){return sql
  .replace(/IFNULL\(/gi,"COALESCE(")
  .replace(/\s+COLLATE\s+NOCASE/gi,"");}
 function normalizeInsertIgnore(sql:string){if(!/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(sql))return sql;let next=sql.replace(/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i,"INSERT INTO");if(/\bON\s+CONFLICT\b/i.test(next))return next;const returning=next.match(/\s+RETURNING\s+[\s\S]+$/i);if(returning){next=next.slice(0,returning.index)+" ON CONFLICT DO NOTHING"+returning[0];}else next=next.replace(/;?\s*$/," ON CONFLICT DO NOTHING");return next;}
-function translate(sql:string){return normalizeInsertIgnore(sqliteFunctions(placeholders(sql)));}
+
+// PostgreSQL folds every unquoted identifier to lower-case while SQLite/D1
+// preserves aliases exactly. The modular backend intentionally uses camelCase
+// aliases throughout its D1-flavoured SQL (for example `parent_id parentId`
+// and `COUNT(*) totalFiles`). Quote those aliases before sending SQL to pg so
+// the self-hosted runtime returns the same row shape as D1.
+function quoteCamelAliases(sql:string){
+  const camel=/^[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*$/;
+  let next=sql.replace(/\bAS\s+([a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*)\b/g,(_m,alias)=>`AS "${alias}"`);
+  next=next.replace(/(\b[A-Za-z_][A-Za-z0-9_$.]*\b|\))\s+([a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*)\b(?=\s*(?:,|\bFROM\b|\bWHERE\b|\bGROUP\b|\bHAVING\b|\bORDER\b|\bLIMIT\b|\bOFFSET\b|\bRETURNING\b|$))/g,(match,expr,alias)=>camel.test(alias)?`${expr} "${alias}"`:match);
+  return next;
+}
+function translate(sql:string){return normalizeInsertIgnore(sqliteFunctions(quoteCamelAliases(placeholders(sql))));}
 
 class PgD1Statement{
   constructor(private db:PostgresD1Database,public sql:string,public values:unknown[]=[]){ }
