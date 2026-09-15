@@ -8,7 +8,8 @@
     "dev": "tsx watch src/server.ts",
     "dev:queue": "tsx watch src/queue/worker.ts",
     "dev:scheduler": "tsx watch src/scheduler/scheduler.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json --noCheck",
+    "build:strict": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -16,7 +17,7 @@
     "start": "node dist/server.js",
     "start:queue": "node dist/queue/worker.js",
     "start:scheduler": "node dist/scheduler/scheduler.js",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test && npm run build:strict"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",
