@@ -138,7 +138,7 @@ agenticChatImageRoutes.post("/conversations/:id/messages", requireScope("school:
   await c.env.FINANCE_DB.batch([
     c.env.FINANCE_DB.prepare(`INSERT INTO ae_messages
       (id,organization_id,conversation_id,role,content,user_id,model,provider_response_id,metadata_json)
-      VALUES(?,?,?,'assistant',?,?,?,?,?,?)`).bind(
+      VALUES(?,?,?,'assistant',?,?,?,?,?)`).bind(
         assistantMessageId, p.organizationId, conv.id, result.text, p.userId, result.model, result.providerResponseId,
         JSON.stringify({ usage: result.usage, toolEvents: result.toolEvents, workersAi: result.workersAi || imageAdvisory?.workers || null,
           imageAnalysis: imageAdvisory ? { primary: imageAdvisory.primary, workers: imageAdvisory.workers } : null }),
