@@ -4,6 +4,7 @@ import { resolveGuardianFamily } from "./family-resolver";
 import { delegateToEmployee } from "./delegation";
 import { isAgentKey, type AgentDefinition } from "./policy";
 import { executeTool as executeBaseTool, openAiTools as baseOpenAiTools, type ToolContext } from "./tools";
+export type { ToolContext } from "./tools";
 
 type ExtraToolName = "resolve_guardian_family" | "family_comprehensive_report" | "delegate_to_employee";
 
