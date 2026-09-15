@@ -2,12 +2,12 @@ import { SignJWT } from "jose";
 import type { AuthPrincipal,AgentSystemGateway } from "../src/types";
 
 const profiles:Record<string,string[]>={
- secretary:["/api/v1/school","/api/v1/contacts","/api/v1/communications","/api/v1/documents","/api/v1/printerly","/api/v1/tasks"],
- dos:["/api/v1/school","/api/v1/academics","/api/v1/attendance","/api/v1/reports","/api/v1/documents","/api/v1/communications","/api/v1/tasks"],
- bursar:["/api/v1/accounts","/api/v1/journals","/api/v1/reports","/api/v1/documents","/api/v1/payments","/api/v1/banking","/api/v1/budgets","/api/v1/finance","/api/v1/school","/api/v1/payroll-payments","/api/v1/printerly"],
+ secretary:["/api/v1/school","/api/v1/contacts","/api/v1/communications","/api/v1/documents","/api/v1/files","/api/v1/printerly","/api/v1/tasks"],
+ dos:["/api/v1/school","/api/v1/academics","/api/v1/attendance","/api/v1/reports","/api/v1/documents","/api/v1/files","/api/v1/communications","/api/v1/tasks"],
+ bursar:["/api/v1/accounts","/api/v1/journals","/api/v1/reports","/api/v1/documents","/api/v1/files","/api/v1/payments","/api/v1/banking","/api/v1/budgets","/api/v1/finance","/api/v1/school","/api/v1/payroll-payments","/api/v1/printerly"],
  headteacher:["/api/v1/"],
- hr:["/api/v1/human-resources","/api/v1/payroll","/api/v1/school","/api/v1/contacts","/api/v1/communications","/api/v1/documents","/api/v1/attendance","/api/v1/reports","/api/v1/tasks","/api/v1/printerly"],
- librarian:["/api/v1/books","/api/v1/inventory","/api/v1/school","/api/v1/documents","/api/v1/reports","/api/v1/tasks","/api/v1/printerly"]
+ hr:["/api/v1/human-resources","/api/v1/payroll","/api/v1/school","/api/v1/contacts","/api/v1/communications","/api/v1/documents","/api/v1/files","/api/v1/attendance","/api/v1/reports","/api/v1/tasks","/api/v1/printerly"],
+ librarian:["/api/v1/books","/api/v1/inventory","/api/v1/school","/api/v1/documents","/api/v1/files","/api/v1/reports","/api/v1/tasks","/api/v1/printerly"]
 };
 const blocked=["/api/v1/agentic-employees","/api/v1/admin","/api/v1/integrations","/api/v1/modules"];
 function cleanPath(path:string){if(!path.startsWith("/api/v1/")||path.includes("..")||path.includes("://")||/[\r\n]/.test(path))throw new Error("Only internal /api/v1 Ledgerly paths are allowed");return path;}
