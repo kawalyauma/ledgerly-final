@@ -24,7 +24,10 @@ try {
     const checksum = createHash("sha256").update(sql).digest("hex");
     const applied = await pool.query<{ checksum: string }>("SELECT checksum FROM backend_migrations WHERE name=$1", [name]);
     if (applied.rowCount) {
-      if (applied.rows[0]?.checksum !== checksum) throw new Error(`Migration ${name} changed after it was applied`);
+      const appliedChecksum = applied.rows[0]?.checksum;
+      if (appliedChecksum !== checksum) {
+        throw new Error(`Migration ${name} changed after it was applied (database=${appliedChecksum ?? "missing"}, file=${checksum}). Restore the exact applied migration; do not overwrite the recorded checksum.`);
+      }
       continue;
     }
     const client = await pool.connect();
