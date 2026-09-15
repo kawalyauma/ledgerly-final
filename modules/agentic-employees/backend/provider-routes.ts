@@ -67,7 +67,14 @@ agenticProviderRoutes.patch("/provider-settings", requireScope("school:write"), 
   }).safeParse(await c.req.json());
   if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid AI provider configuration", parsed.error.flatten());
   const principal = c.get("principal");
-  const data = await saveProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId, principal.userId, parsed.data);
+  const current = await getProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId);
+  const providerChanged = current.source === "school" && current.provider !== parsed.data.provider;
+  const hasReplacementKey = typeof parsed.data.apiKey === "string" && parsed.data.apiKey.trim().length > 0;
+  const input = {
+    ...parsed.data,
+    clearApiKey: Boolean(parsed.data.clearApiKey || (providerChanged && !hasReplacementKey)),
+  };
+  const data = await saveProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId, principal.userId, input);
   return c.json({ data });
 });
 
