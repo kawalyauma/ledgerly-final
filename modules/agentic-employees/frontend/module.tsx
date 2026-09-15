@@ -1,4 +1,4 @@
-import { Bot, Settings2 } from "lucide-react";
+import { Bot } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AgenticEmployeesPage } from "./AgenticEmployeesPage";
 import { ProviderConfigurationPage } from "./ProviderConfigurationPage";
@@ -27,7 +27,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   },
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
     { label: "AI Workforce", path: "agentic-employees", scope: "school:read" },
-    { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read", icon: Settings2 },
+    { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read" },
     { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },
     { label: "Proactive Workforce", path: "agentic-employees-proactive", scope: "school:read" },
