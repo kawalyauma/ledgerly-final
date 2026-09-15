@@ -100,7 +100,6 @@ export function AgenticEmployeesPage() {
     } catch (err) { setError(errorText(err)); }
   }
   useEffect(() => { void refresh(); }, []);
-  useEffect(() => () => { for (const image of pendingImages) URL.revokeObjectURL(image.preview); }, [pendingImages]);
 
   function latestConversation(agentKey: string) { return conversations.filter(item => item.agentKey === agentKey).sort((a, b) => String(b.lastMessageAt || b.createdAt || "").localeCompare(String(a.lastMessageAt || a.createdAt || "")))[0]; }
   function workload(agentKey: string) { const openTasks = tasks.filter(item => item.agentKey === agentKey && !["completed", "failed", "cancelled"].includes(item.status)).length; const waiting = approvals.filter(item => item.agentKey === agentKey && ["pending", "approved"].includes(item.status)).length; return { openTasks, waiting }; }
