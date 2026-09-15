@@ -17,6 +17,7 @@ export type SchoolPayConfigRow = {
   webhookKey: string;
   bankAccountId: string;
   controlAccountId: string;
+  importStartDate: string;
   enabled: boolean;
   autoAllocate: boolean;
   lastWebhookAt: string | null;
@@ -101,7 +102,8 @@ async function configByWebhookKey(runtime: Runtime, webhookKey: string): Promise
     `SELECT organization_id AS "organizationId",school_code AS "schoolCode",
       api_password_ciphertext AS "apiPasswordCiphertext",api_password_iv AS "apiPasswordIv",api_password_tag AS "apiPasswordTag",
       webhook_key AS "webhookKey",bank_account_id AS "bankAccountId",control_account_id AS "controlAccountId",
-      enabled,auto_allocate AS "autoAllocate",last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
+      import_start_date::text AS "importStartDate",enabled,auto_allocate AS "autoAllocate",
+      last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
      FROM schoolpay_configurations WHERE webhook_key=$1 AND enabled=true`, [webhookKey])).rows[0];
 }
 
@@ -110,7 +112,8 @@ export async function schoolPayConfigByOrganization(runtime: Runtime, organizati
     `SELECT organization_id AS "organizationId",school_code AS "schoolCode",
       api_password_ciphertext AS "apiPasswordCiphertext",api_password_iv AS "apiPasswordIv",api_password_tag AS "apiPasswordTag",
       webhook_key AS "webhookKey",bank_account_id AS "bankAccountId",control_account_id AS "controlAccountId",
-      enabled,auto_allocate AS "autoAllocate",last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
+      import_start_date::text AS "importStartDate",enabled,auto_allocate AS "autoAllocate",
+      last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
      FROM schoolpay_configurations WHERE organization_id=$1${enabledOnly ? " AND enabled=true" : ""}`, [organizationId])).rows[0];
 }
 
@@ -122,12 +125,12 @@ export async function schoolPayConfigSummary(runtime: Runtime, organizationId: s
   const row = await schoolPayConfigByOrganization(runtime, organizationId, false);
   if (!row) return { configured: false } as const;
   return { configured: true, schoolCode: row.schoolCode, bankAccountId: row.bankAccountId, controlAccountId: row.controlAccountId,
-    enabled: row.enabled, autoAllocate: row.autoAllocate, webhookPath: `/webhooks/schoolpay/${row.webhookKey}`,
-    lastWebhookAt: row.lastWebhookAt, lastReconciledAt: row.lastReconciledAt } as const;
+    importStartDate: row.importStartDate, enabled: row.enabled, autoAllocate: row.autoAllocate,
+    webhookPath: `/webhooks/schoolpay/${row.webhookKey}`, lastWebhookAt: row.lastWebhookAt, lastReconciledAt: row.lastReconciledAt } as const;
 }
 
 export async function configureSchoolPay(runtime: Runtime, organizationId: string, actorId: string, input: {
-  schoolCode: string; apiPassword: string; bankAccountId: string; controlAccountId: string; enabled: boolean; autoAllocate: boolean;
+  schoolCode: string; apiPassword: string; bankAccountId: string; controlAccountId: string; importStartDate: string; enabled: boolean; autoAllocate: boolean;
 }) {
   const accountIds = [...new Set([input.bankAccountId, input.controlAccountId])];
   const accounts = await runtime.db.query<{ id: string; subtype: string | null }>(
@@ -143,13 +146,14 @@ export async function configureSchoolPay(runtime: Runtime, organizationId: strin
   const webhookKey = existing?.webhookKey ?? `spwh_${randomBytes(24).toString("base64url")}`;
   await runtime.db.query(
     `INSERT INTO schoolpay_configurations(organization_id,school_code,api_password_ciphertext,api_password_iv,api_password_tag,webhook_key,
-       bank_account_id,control_account_id,enabled,auto_allocate,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       bank_account_id,control_account_id,import_start_date,enabled,auto_allocate,created_by)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT(organization_id) DO UPDATE SET school_code=EXCLUDED.school_code,api_password_ciphertext=EXCLUDED.api_password_ciphertext,
        api_password_iv=EXCLUDED.api_password_iv,api_password_tag=EXCLUDED.api_password_tag,bank_account_id=EXCLUDED.bank_account_id,
-       control_account_id=EXCLUDED.control_account_id,enabled=EXCLUDED.enabled,auto_allocate=EXCLUDED.auto_allocate,updated_at=CURRENT_TIMESTAMP`,
+       control_account_id=EXCLUDED.control_account_id,import_start_date=EXCLUDED.import_start_date,enabled=EXCLUDED.enabled,
+       auto_allocate=EXCLUDED.auto_allocate,updated_at=CURRENT_TIMESTAMP`,
     [organizationId, input.schoolCode.trim(), encrypted.ciphertext, encrypted.iv, encrypted.tag, webhookKey,
-      input.bankAccountId, input.controlAccountId, input.enabled, input.autoAllocate, actorId]);
+      input.bankAccountId, input.controlAccountId, input.importStartDate, input.enabled, input.autoAllocate, actorId]);
   return schoolPayConfigSummary(runtime, organizationId);
 }
 
@@ -187,6 +191,12 @@ async function postCapturedEvent(runtime: Runtime, config: SchoolPayConfigRow, e
      FROM schoolpay_events WHERE id=$1 AND organization_id=$2`, [eventId, config.organizationId])).rows[0];
   if (!event) throw new AppError(404, "SCHOOLPAY_EVENT_NOT_FOUND", "SchoolPay event was not found");
   if (event.status === "posted") return { status: "posted" as const, duplicate: true };
+  if (event.paymentDate < config.importStartDate) {
+    await markEvent(runtime, config.organizationId, event.id, "ignored", {
+      error: `SchoolPay payment date ${event.paymentDate} is before configured import start date ${config.importStartDate}`,
+    });
+    return { status: "ignored" as const };
+  }
   if (event.status === "ignored") return { status: "ignored" as const };
 
   const student = (await runtime.db.query<{ id: string; contactId: string | null }>(
@@ -232,6 +242,11 @@ export async function captureSchoolPayProviderPayment(runtime: Runtime, config: 
   const amountMinor = paymentAmountMinor(payment.amount);
   const date = paymentDate(payment.paymentDateAndTime);
   const completed = completedStatus(payment.transactionCompletionStatus);
+  const beforeImportStart = date < config.importStartDate;
+  const eligible = completed && !beforeImportStart;
+  const ignoredReason = beforeImportStart
+    ? `SchoolPay payment date ${date} is before configured import start date ${config.importStartDate}`
+    : "SchoolPay transaction is not completed";
   const eventId = createId("spe");
   const inserted = await runtime.db.query<{ id: string }>(
     `INSERT INTO schoolpay_events(id,organization_id,schoolpay_receipt_number,source_transaction_id,source_payment_channel,
@@ -239,7 +254,7 @@ export async function captureSchoolPayProviderPayment(runtime: Runtime, config: 
      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
      ON CONFLICT(organization_id,schoolpay_receipt_number) DO NOTHING RETURNING id`,
     [eventId, config.organizationId, receiptNumber, payment.sourceChannelTransactionId ?? null, payment.sourcePaymentChannel ?? null,
-      studentPaymentCode, amountMinor, date, payment.paymentDateAndTime, eventType, completed ? "received" : "ignored",
+      studentPaymentCode, amountMinor, date, payment.paymentDateAndTime, eventType, eligible ? "received" : "ignored",
       JSON.stringify(rawPayload), source, reconciliationRunId ?? null]);
   const duplicate = !inserted.rowCount;
   const resolvedEventId = inserted.rows[0]?.id ?? (await runtime.db.query<{ id: string }>(
@@ -251,14 +266,14 @@ export async function captureSchoolPayProviderPayment(runtime: Runtime, config: 
       `UPDATE schoolpay_events SET source_transaction_id=COALESCE($1,source_transaction_id),source_payment_channel=COALESCE($2,source_payment_channel),
        payment_timestamp=$3,payload=$4::jsonb,last_seen_at=CURRENT_TIMESTAMP,reconciliation_run_id=COALESCE($5,reconciliation_run_id),
        status=CASE WHEN status='posted' THEN 'posted' WHEN $6 THEN 'received' ELSE 'ignored' END,
-       error=CASE WHEN status='posted' THEN error WHEN $6 THEN NULL ELSE 'SchoolPay transaction is not completed' END,updated_at=CURRENT_TIMESTAMP
-       WHERE id=$7 AND organization_id=$8`,
+       error=CASE WHEN status='posted' THEN error WHEN $6 THEN NULL ELSE $7 END,updated_at=CURRENT_TIMESTAMP
+       WHERE id=$8 AND organization_id=$9`,
       [payment.sourceChannelTransactionId ?? null, payment.sourcePaymentChannel ?? null, payment.paymentDateAndTime,
-        JSON.stringify(rawPayload), reconciliationRunId ?? null, completed, resolvedEventId, config.organizationId]);
-  } else if (!completed) {
-    await markEvent(runtime, config.organizationId, resolvedEventId, "ignored", { error: "SchoolPay transaction is not completed" });
+        JSON.stringify(rawPayload), reconciliationRunId ?? null, eligible, ignoredReason, resolvedEventId, config.organizationId]);
+  } else if (!eligible) {
+    await markEvent(runtime, config.organizationId, resolvedEventId, "ignored", { error: ignoredReason });
   }
-  if (!completed) return { accepted: true, duplicate, eventId: resolvedEventId, status: "ignored" as const };
+  if (!eligible) return { accepted: true, duplicate, eventId: resolvedEventId, status: "ignored" as const };
 
   const lock = await runtime.db.connect();
   const lockKey = `schoolpay:${config.organizationId}:${receiptNumber}`;

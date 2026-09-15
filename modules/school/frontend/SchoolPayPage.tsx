@@ -37,6 +37,7 @@ type SchoolPayConfig =
       schoolCode: string;
       bankAccountId: string;
       controlAccountId: string;
+      importStartDate: string;
       enabled: boolean;
       autoAllocate: boolean;
       webhookPath: string;
@@ -47,6 +48,7 @@ type Tab = "configuration" | "collect" | "payments" | "events" | "reconciliation
 
 const fmt = (value: unknown) => Number(value || 0).toLocaleString("en-UG", { maximumFractionDigits: 0 });
 const when = (value: unknown) => value ? new Date(String(value)).toLocaleString("en-UG") : "—";
+const today = () => new Date().toISOString().slice(0, 10);
 const nameOf = (student: Student) => [student.firstName, student.middleName, student.lastName].filter(Boolean).join(" ") || "Student";
 const statusTone = (status: unknown): "success" | "warning" | "danger" | "neutral" => {
   const value = String(status || "").toLowerCase();
@@ -66,6 +68,7 @@ export function SchoolPayPage() {
   const [configApiPassword, setConfigApiPassword] = useState("");
   const [configBankAccountId, setConfigBankAccountId] = useState("");
   const [configControlAccountId, setConfigControlAccountId] = useState("");
+  const [configImportStartDate, setConfigImportStartDate] = useState(today);
   const [configEnabled, setConfigEnabled] = useState(true);
   const [configAutoAllocate, setConfigAutoAllocate] = useState(true);
   const [students, setStudents] = useState<Student[]>([]);
@@ -84,7 +87,7 @@ export function SchoolPayPage() {
   const [eventType, setEventType] = useState<"SCHOOL_FEES" | "OTHER_FEES">("SCHOOL_FEES");
   const [method, setMethod] = useState<"request" | "register">("request");
   const [attemptReference, setAttemptReference] = useState("");
-  const [reconcileDate, setReconcileDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [reconcileDate, setReconcileDate] = useState(today);
 
   const studentOptions = useMemo(() => students.map(student => ({
     value: student.id,
@@ -117,12 +120,15 @@ export function SchoolPayPage() {
         setConfigSchoolCode(configRow.schoolCode);
         setConfigBankAccountId(configRow.bankAccountId);
         setConfigControlAccountId(configRow.controlAccountId);
+        setConfigImportStartDate(configRow.importStartDate);
         setConfigEnabled(configRow.enabled);
         setConfigAutoAllocate(configRow.autoAllocate);
+        setReconcileDate(current => current < configRow.importStartDate ? configRow.importStartDate : current);
       } else {
         setConfigSchoolCode("");
         setConfigBankAccountId("");
         setConfigControlAccountId("");
+        setConfigImportStartDate(today());
         setConfigEnabled(true);
         setConfigAutoAllocate(true);
       }
@@ -140,6 +146,7 @@ export function SchoolPayPage() {
     if (!configApiPassword.trim()) return setError("Enter the SchoolPay API password / token. The saved secret is never returned to the web app.");
     if (!configBankAccountId.trim()) return setError("Enter the Ledgerly cash/bank posting account ID.");
     if (!configControlAccountId.trim()) return setError("Enter the Ledgerly fees receivable control account ID.");
+    if (!configImportStartDate) return setError("Choose the SchoolPay Go-Live / Import Start Date.");
     setBusy(true); setError(""); setMessage("");
     try {
       const configured = await put<SchoolPayConfig>("/schoolpay/config", {
@@ -147,12 +154,14 @@ export function SchoolPayPage() {
         apiPassword: configApiPassword.trim(),
         bankAccountId: configBankAccountId.trim(),
         controlAccountId: configControlAccountId.trim(),
+        importStartDate: configImportStartDate,
         enabled: configEnabled,
         autoAllocate: configAutoAllocate,
       });
       setConfig(configured);
       setConfigApiPassword("");
-      setMessage("SchoolPay configuration saved for this school. The API secret was encrypted by the backend and cleared from this form.");
+      setReconcileDate(current => configured.configured && current < configured.importStartDate ? configured.importStartDate : current);
+      setMessage("SchoolPay configuration saved. Transactions before the import start date are protected from posting, and the API secret was encrypted and cleared from this form.");
       setDiagnostics(await get<R>("/schoolpay/health"));
     } catch (e) { setError(errorText(e)); }
     finally { setBusy(false); }
@@ -219,6 +228,9 @@ export function SchoolPayPage() {
 
   async function reconcile() {
     if (!write) return;
+    if (config?.configured && reconcileDate < config.importStartDate) {
+      return setError(`Reconciliation cannot run before the SchoolPay import start date ${config.importStartDate}.`);
+    }
     setBusy(true); setError(""); setMessage("");
     try {
       await post<R>("/schoolpay/reconcile", { fromDate: reconcileDate, toDate: reconcileDate });
@@ -245,21 +257,24 @@ export function SchoolPayPage() {
 
     {loading ? <Spinner label="Loading SchoolPay"/> : tab === "configuration" ? <Card>
       <form onSubmit={saveConfiguration}>
-        <div className="school-page-head" style={{marginBottom:16}}><div><h2>SchoolPay configuration</h2><p>Each school keeps its own SchoolPay code, encrypted API secret, Ledgerly posting accounts and unique webhook.</p></div><Badge tone={config?.configured && config.enabled ? "success" : "warning"}>{config?.configured ? (config.enabled ? "enabled" : "configured · disabled") : "not configured"}</Badge></div>
+        <div className="school-page-head" style={{marginBottom:16}}><div><h2>SchoolPay configuration</h2><p>Each school keeps its own SchoolPay code, encrypted API secret, Ledgerly posting accounts, import boundary and unique webhook.</p></div><Badge tone={config?.configured && config.enabled ? "success" : "warning"}>{config?.configured ? (config.enabled ? "enabled" : "configured · disabled") : "not configured"}</Badge></div>
         {!write && <Notice tone="warning">You can view the SchoolPay configuration, but school:write permission is required to change it.</Notice>}
         <div className="form-grid">
           <Field label="SchoolPay school code" hint="Use the school code issued by SchoolPay."><input value={configSchoolCode} onChange={e => setConfigSchoolCode(e.target.value)} placeholder="SchoolPay school code" disabled={!write}/></Field>
           <Field label="API password / token" hint={config?.configured ? "For security the stored secret is never returned. Re-enter it whenever you save configuration changes." : "The backend encrypts this secret before storing it."}><input type="password" autoComplete="new-password" value={configApiPassword} onChange={e => setConfigApiPassword(e.target.value)} placeholder={config?.configured ? "Re-enter secret to save changes" : "SchoolPay API password / token"} disabled={!write}/></Field>
           <Field label="Ledgerly cash / bank account ID" hint="Must be an active cash posting account belonging to this school."><input value={configBankAccountId} onChange={e => setConfigBankAccountId(e.target.value)} placeholder="Account receiving SchoolPay collections" disabled={!write}/></Field>
           <Field label="Fees receivable control account ID" hint="Must be an active receivable posting account belonging to this school."><input value={configControlAccountId} onChange={e => setConfigControlAccountId(e.target.value)} placeholder="School fees receivable account" disabled={!write}/></Field>
+          <Field label="SchoolPay Go-Live / Import Start Date" hint="Choose the first date Ledgerly should accept SchoolPay transactions. Earlier dates are treated as historical and will not be posted."><input type="date" value={configImportStartDate} onChange={e => setConfigImportStartDate(e.target.value)} disabled={!write}/></Field>
           <Field label="Integration status"><select value={configEnabled ? "enabled" : "disabled"} onChange={e => setConfigEnabled(e.target.value === "enabled")} disabled={!write}><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></Field>
           <Field label="Matched payment allocation"><select value={configAutoAllocate ? "automatic" : "manual"} onChange={e => setConfigAutoAllocate(e.target.value === "automatic")} disabled={!write}><option value="automatic">Automatically allocate to student fees</option><option value="manual">Keep matched payments for manual allocation</option></select></Field>
         </div>
 
+        <Notice tone="warning">Historical transaction protection: set the import start date to the first SchoolPay transaction date that was not already covered by your migrated Ledgerly transactions. Reconciliation, callbacks and retries dated before it are blocked from posting.</Notice>
+
         <div style={{marginTop:16,padding:16,border:"1px solid var(--border)",borderRadius:16}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}><div><strong>School-specific webhook</strong><p style={{margin:"4px 0 0"}}>Save the configuration first, then copy this exact URL into SchoolPay's webhook/callback settings.</p></div>{config?.configured && <Badge tone="success">generated</Badge>}</div>
           {webhookUrl ? <div style={{display:"flex",gap:8,alignItems:"center",marginTop:12,flexWrap:"wrap"}}><input readOnly value={webhookUrl} style={{flex:"1 1 440px"}}/><Button type="button" variant="secondary" onClick={() => void copyWebhook()}><Copy size={16}/> Copy webhook</Button></div> : <p style={{margin:"12px 0 0"}}>No webhook yet. Save this school's SchoolPay configuration to generate one.</p>}
-          {config?.configured && <p style={{margin:"10px 0 0"}}><small>Last webhook: {when(config.lastWebhookAt)} · Last reconciliation: {when(config.lastReconciledAt)}</small></p>}
+          {config?.configured && <p style={{margin:"10px 0 0"}}><small>Import starts: {config.importStartDate} · Last webhook: {when(config.lastWebhookAt)} · Last reconciliation: {when(config.lastReconciledAt)}</small></p>}
         </div>
 
         <p style={{margin:"14px 0 0"}}><small>The SchoolPay API password/token is write-only in the web interface. Ledgerly encrypts it server-side and never returns the stored value to the browser.</small></p>
@@ -287,7 +302,8 @@ export function SchoolPayPage() {
       {!events.length ? <EmptyState title="No SchoolPay events" description="Verified SchoolPay callbacks will appear here."/> : <div className="table-scroll"><table><thead><tr><th>Receipt / reference</th><th>Student</th><th>Amount</th><th>Status</th><th>Received</th></tr></thead><tbody>{events.map((row, index) => <tr key={row.id || index}><td>{row.schoolpayReceiptNumber || row.receiptNumber || row.paymentReference || row.id || "—"}</td><td>{row.studentName || row.studentPaymentCode || "—"}</td><td>{row.amountMinor != null ? `UGX ${fmt(row.amountMinor)}` : row.amount != null ? `UGX ${fmt(row.amount)}` : "—"}</td><td><Badge tone={statusTone(row.status || row.postingStatus)}>{String(row.status || row.postingStatus || "received").replaceAll("_", " ")}</Badge></td><td>{when(row.createdAt || row.receivedAt || row.paymentDateAndTime)}</td></tr>)}</tbody></table></div>}
     </Card> : <Card>
       <div className="school-page-head"><div><h2>Reconciliation</h2><p>Ask the Node server to compare SchoolPay transactions for a date and recover any payment missed by realtime callbacks.</p></div></div>
-      <div className="form-grid"><Field label="Transaction date"><input type="date" value={reconcileDate} onChange={e => setReconcileDate(e.target.value)}/></Field></div>
+      {config?.configured && <Notice tone="warning">Historical protection is active. Ledgerly will not reconcile or post SchoolPay transactions before {config.importStartDate}.</Notice>}
+      <div className="form-grid"><Field label="Transaction date" hint={config?.configured ? `Import starts ${config.importStartDate}. Earlier dates are blocked.` : undefined}><input type="date" min={config?.configured ? config.importStartDate : undefined} value={reconcileDate} onChange={e => setReconcileDate(e.target.value)}/></Field></div>
       <div className="heading-actions" style={{margin:"12px 0",justifyContent:"flex-start"}}><Button onClick={() => void reconcile()} disabled={!write || busy}><RotateCcw size={16}/> {busy ? "Reconciling…" : "Reconcile date"}</Button></div>
       {!write && <Notice tone="warning">Reconciliation requires school:write permission.</Notice>}
       {!reconciliations.length ? <EmptyState title="No reconciliation runs" description="Completed SchoolPay reconciliation runs will appear here."/> : <div className="table-scroll"><table><thead><tr><th>Date / range</th><th>Status</th><th>Checked</th><th>Recovered</th><th>Created</th></tr></thead><tbody>{reconciliations.map((row,index) => <tr key={row.id || index}><td>{row.fromDate ? `${row.fromDate}${row.toDate && row.toDate !== row.fromDate ? ` → ${row.toDate}` : ""}` : row.date || "—"}</td><td><Badge tone={statusTone(row.status)}>{String(row.status || "completed").replaceAll("_", " ")}</Badge></td><td>{row.checked ?? row.transactionCount ?? "—"}</td><td>{row.recovered ?? row.imported ?? row.posted ?? "—"}</td><td>{when(row.createdAt || row.completedAt)}</td></tr>)}</tbody></table></div>}

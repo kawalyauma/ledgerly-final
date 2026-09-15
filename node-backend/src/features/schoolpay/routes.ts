@@ -32,6 +32,7 @@ const configInput = z.object({
   apiPassword: z.string().min(1).max(500),
   bankAccountId: z.string().min(1),
   controlAccountId: z.string().min(1),
+  importStartDate: date,
   enabled: z.boolean().default(true),
   autoAllocate: z.boolean().default(true),
 });

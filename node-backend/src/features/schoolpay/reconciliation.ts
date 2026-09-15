@@ -48,6 +48,14 @@ export async function reconcileSchoolPayTransactions(runtime: Runtime, organizat
   validateSchoolPayDateRange(fromDate, toDate);
   const config = await schoolPayConfigByOrganization(runtime, organizationId);
   if (!config) throw new AppError(409, "SCHOOLPAY_NOT_CONFIGURED", "SchoolPay is not enabled for this school");
+  if (fromDate < config.importStartDate) {
+    throw new AppError(
+      422,
+      "SCHOOLPAY_BEFORE_IMPORT_START_DATE",
+      `SchoolPay reconciliation cannot start before the configured import start date ${config.importStartDate}`,
+      { importStartDate: config.importStartDate, requestedFromDate: fromDate },
+    );
+  }
   const runId = createId("spr");
   await runtime.db.query(
     `INSERT INTO schoolpay_reconciliation_runs(id,organization_id,from_date,to_date,status,created_by)
