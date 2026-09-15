@@ -1,5 +1,5 @@
 import type { ToolContext } from "./tools-v14";
-import { executeTool as baseExecute,openAiTools as baseTools } from "./system-tools-v16";
+import { executeTool as baseExecute,openAiTools as baseTools } from "./intelligence-tools-v20";
 import { listRelevantMemories,saveMemory } from "./memory-service";
 
 const TOOLS:any[]=[
