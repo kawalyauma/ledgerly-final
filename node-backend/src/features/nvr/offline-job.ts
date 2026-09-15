@@ -1,7 +1,7 @@
-import type { JobHandler } from '../../jobs/types.js';
+import type { JobHandler } from '../../jobs/registry.js';
 import { createId } from '../core-identity/security.js';
 
-export const sweepNvrOffline:JobHandler=async({runtime})=>{
+export const sweepNvrOffline:JobHandler=async(_job,runtime)=>{
   const stale=await runtime.db.query(`UPDATE nvr_cameras SET status='offline',last_error='Heartbeat timeout',updated_at=CURRENT_TIMESTAMP WHERE enabled=true AND status IN ('online','recording') AND last_seen_at<CURRENT_TIMESTAMP-INTERVAL '90 seconds' RETURNING id,organization_id,name`);
   for(const row of stale.rows as any[]){
     await runtime.db.query(`INSERT INTO nvr_events(id,organization_id,camera_id,event_type,severity,title,details) VALUES($1,$2,$3,'camera_offline','warning',$4,$5::jsonb)`,[createId('nvrEvt'),row.organization_id,row.id,`${row.name} is offline`,JSON.stringify({reason:'heartbeat_timeout'})]);
