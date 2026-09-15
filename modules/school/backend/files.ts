@@ -29,6 +29,15 @@ async function ownedFile(db:D1Database,organizationId:string,fileId:string){
   if(!row)throw new AppError(404,"FILE_NOT_FOUND","School file not found");
   return row as {id:string;objectKey:string;originalName:string;mimeType:string;sizeBytes:number;checksum:string;purpose:string;createdAt:string};
 }
+async function registerInDocumentLibrary(db:D1Database,input:{organizationId:string;userId:string;fileId:string;objectKey:string;originalName:string;mimeType:string;sizeBytes:number;checksum:string;purpose:string}){
+  const catalogId=`fil_school_${input.fileId}`,versionId=`fver_school_${input.fileId}`,title=input.originalName.replace(/\.[^.]+$/," ").trim()||input.originalName;
+  try{await db.batch([
+    db.prepare(`INSERT OR IGNORE INTO file_items(id,organization_id,title,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,source_type,source_module,source_entity_type,source_entity_id,status,current_version,metadata_json,created_by,updated_by)
+      VALUES(?,?,?,?,?,?,?,'reports',?,'school_file','school-management','school_file',?,'active',1,?,?,?)`).bind(catalogId,input.organizationId,title,input.originalName,input.mimeType,input.sizeBytes,input.checksum,input.objectKey,input.fileId,JSON.stringify({purpose:input.purpose}),input.userId,input.userId),
+    db.prepare(`INSERT OR IGNORE INTO file_versions(id,organization_id,file_item_id,version_number,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,created_by)
+      VALUES(?,?,?,?,?,?,?,?,'reports',?,?)`).bind(versionId,input.organizationId,catalogId,1,input.originalName,input.mimeType,input.sizeBytes,input.checksum,input.objectKey,input.userId)
+  ])}catch{/* Older staged databases may not have File Manager tables yet; /files/sync-system backfills later. */}
+}
 
 schoolFileRoutes.get("/",schoolPermission("school.files:read"),async c=>{
   const p=c.get("principal"),limit=Math.max(1,Math.min(Number(c.req.query("limit")||100),500));
@@ -52,6 +61,7 @@ schoolFileRoutes.post("/",requireScope("school:write"),schoolPermission("school.
     await c.env.FINANCE_DB.prepare(`INSERT INTO school_files(id,organization_id,object_key,original_name,mime_type,size_bytes,checksum_sha256,purpose,uploaded_by) VALUES(?,?,?,?,?,?,?,?,?)`)
       .bind(fileId,p.organizationId,objectKey,part.name,mime,part.size,checksum,purpose,p.userId).run();
   }catch(error){await c.env.REPORTS_BUCKET.delete(objectKey);throw error}
+  await registerInDocumentLibrary(c.env.FINANCE_DB,{organizationId:p.organizationId,userId:p.userId,fileId,objectKey,originalName:part.name,mimeType:mime,sizeBytes:part.size,checksum,purpose});
   await audit(c.env.FINANCE_DB,c,"school.file.uploaded","school_file",fileId,{originalName:part.name,mimeType:mime,sizeBytes:part.size,purpose});
   return c.json({data:{id:fileId,originalName:part.name,mimeType:mime,sizeBytes:part.size,checksum,purpose,contentUrl:`/api/v1/school/files/${fileId}/content`}},201);
 });
@@ -99,6 +109,7 @@ schoolFileRoutes.delete("/:id",requireScope("school:write"),schoolPermission("sc
   if(usedBy)throw new AppError(409,"FILE_IN_USE",`This file is currently used as a ${usedBy}. Remove or replace that reference before deleting the file.`);
   await c.env.REPORTS_BUCKET.delete(file.objectKey);
   await c.env.FINANCE_DB.prepare("UPDATE school_files SET deleted_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(file.id,p.organizationId).run();
+  try{await c.env.FINANCE_DB.prepare("UPDATE file_items SET status='trashed',object_key=NULL,updated_by=?,updated_at=CURRENT_TIMESTAMP WHERE organization_id=? AND source_module='school-management' AND source_entity_type='school_file' AND source_entity_id=?").bind(p.userId,p.organizationId,file.id).run()}catch{/* File Manager migration may not yet be present. */}
   await audit(c.env.FINANCE_DB,c,"school.file.deleted","school_file",file.id,{originalName:file.originalName});
   return c.body(null,204);
 });
