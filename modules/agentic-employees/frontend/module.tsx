@@ -1,6 +1,7 @@
-import { Bot } from "lucide-react";
+import { Bot, Settings2 } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AgenticEmployeesPage } from "./AgenticEmployeesPage";
+import { ProviderConfigurationPage } from "./ProviderConfigurationPage";
 import { VisionWorkspacePage } from "./VisionWorkspacePage";
 import { MemoryPage } from "./MemoryPage";
 import { ProactiveEmployeesPage } from "./ProactiveEmployeesPage";
@@ -12,10 +13,11 @@ import "./agentic-employees.css";
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "1.8.0",
+  version: "1.9.0",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
+    "agentic-employees-provider": { scope: "school:read", view: ProviderConfigurationPage },
     "agentic-employees-vision": { scope: "school:read", view: VisionWorkspacePage },
     "agentic-employees-memory": { scope: "school:read", view: MemoryPage },
     "agentic-employees-proactive": { scope: "school:read", view: ProactiveEmployeesPage },
@@ -25,6 +27,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   },
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
     { label: "AI Workforce", path: "agentic-employees", scope: "school:read" },
+    { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read", icon: Settings2 },
     { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },
     { label: "Proactive Workforce", path: "agentic-employees-proactive", scope: "school:read" },
