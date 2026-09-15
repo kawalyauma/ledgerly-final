@@ -5,6 +5,7 @@ import type { AgentDefinition, ModelTier } from "./policy";
 import { executeTool, openAiTools } from "./memory-tools-v17";
 import { memoryContext } from "./memory-service";
 import { resolveRuntimeProvider } from "./provider-config";
+import { runWorkersAiAdvisory } from "./workers-ai";
 
 type AiEnv = Env & { AI_PROVIDER_ENCRYPTION_KEY?: string };
 type ChatMessage = { role: "user" | "assistant"; content: string };
@@ -17,6 +18,7 @@ type RunInput = {
   requestedTools?: string[] | null;
   conversationId: string;
   messages: ChatMessage[];
+  workersAdvisory?: string;
 };
 type ToolSpec = { type: "function"; name: string; description?: string; parameters?: Record<string, unknown>; strict?: boolean };
 type ResponseItem = { type?: string; name?: string; arguments?: string; call_id?: string; content?: Array<{ type?: string; text?: string }> };
@@ -63,21 +65,30 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
   }
 }
 
-function instructions(agent: AgentDefinition, memories: string) {
+function instructions(
+  agent: AgentDefinition,
+  memories: string,
+  collaboration = "",
+) {
   const identity = `IDENTITY:
 Your name is ${agent.name}.
 Your Ledgerly job title is ${agent.title}.
 Your employee key is ${agent.key}.
-Always know your own name and role. If the user asks who you are, identify yourself as ${agent.name}, ${agent.title}. Do not say that your name is unknown. Do not invent a different personal name.`;
+Always know your own name and role.
+If the user asks who you are, identify yourself as ${agent.name}, ${agent.title}.
+Do not say your name is unknown.
+Do not invent a different personal name.`;
 
   const responseStyle = `RESPONSE FORMAT:
-Use clean Markdown for user-facing replies because the Ledgerly interface renders Markdown as formatted content.
-Use short headings, normal paragraphs, bullet or numbered lists, and Markdown tables when tables genuinely improve clarity.
-Use **bold** sparingly for important figures and labels.
-Do not output raw HTML, CSS, JSON wrappers, escaped Markdown, or strings such as "\\n" when ordinary formatting will work.
-For management briefs, prefer clearly separated sections and compact tables.
-Do not describe missing data as a migration problem unless a tool actually returned a database/schema error in the current run.
-If a valid tool returns zero records, report it as zero/no recorded data rather than a system failure.`;
+Use clean Markdown for user-facing responses.
+Ledgerly renders Markdown as formatted content.
+Use short headings, paragraphs, lists and Markdown tables when useful.
+Use **bold** sparingly for important values and labels.
+Do not output raw HTML, CSS, JSON wrappers or escaped Markdown.
+Do not output literal "\\n" when normal line breaks should be used.
+For management briefs, use clearly separated sections.
+Do not call empty valid data a migration problem unless a tool returned an actual schema/database error.
+If a valid tool returns zero records, report zero/no recorded data.`;
 
   return `${identity}
 
@@ -86,9 +97,22 @@ ${agent.systemPrompt}
 ${responseStyle}
 
 MEMORY RULES:
-Conversation memory is the message history provided with this run. Working memory contains active assignments, promises, follow-ups and unresolved matters. Institutional memory contains durable preferences, procedures, decisions and outcomes. Use saved memory as context, not as permission to bypass current Ledgerly records or authorization. When the user gives a durable instruction or future follow-up, save it with the appropriate memory tool. Mark working items done/cancelled when resolved.
+Conversation memory is the message history provided with this run.
+Working memory contains active assignments, promises, follow-ups and unresolved matters.
+Institutional memory contains durable preferences, procedures, decisions and outcomes.
+Use saved memory as context, not permission to bypass current Ledgerly records or authorization.
+Save durable instructions with the appropriate memory tool.
+Mark working items done or cancelled when resolved.
 
-${memories}`;
+${memories}${collaboration ? `
+
+AI COLLABORATION CONTEXT:
+${collaboration}
+
+Workers AI is advisory.
+Verify its conclusions against Ledgerly records and the user's request.
+The configured primary provider remains the tool-calling orchestrator.
+Never claim a Ledgerly write happened until Ledgerly confirms it.` : ""}`;
 }
 
 function defaultReasoning(tier: ModelTier) {
@@ -269,8 +293,29 @@ export async function runAgent(input: RunInput) {
   const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, input.modelTier);
   const tools = openAiTools(input.agent, input.requestedTools) as ToolSpec[];
   const memories = await memoryContext(input.db, input.principal.organizationId, input.agent.key);
-  const system = instructions(input.agent, memories);
-  if (runtime.provider === "google") return runGoogle(input, runtime, system, tools);
-  if (runtime.provider === "anthropic") return runAnthropic(input, runtime, system, tools);
-  return runOpenAI(input, runtime, system, tools);
+  const recentContext = input.messages.slice(-8).map(message => `${message.role}: ${message.content}`).join("\n");
+  const lastUser = [...input.messages].reverse().find(message => message.role === "user")?.content || "";
+  const workersAi = input.workersAdvisory !== undefined
+    ? { configured: true, ok: true, text: input.workersAdvisory, model: "precomputed-multimodal", visionUsed: true, error: null }
+    : await runWorkersAiAdvisory({
+        db: input.db,
+        env: input.env,
+        organizationId: input.principal.organizationId,
+        agentName: input.agent.name,
+        agentTitle: input.agent.title,
+        userText: lastUser,
+        recentContext,
+      });
+  const collaboration = input.workersAdvisory !== undefined
+    ? input.workersAdvisory
+    : workersAi.ok && workersAi.text
+      ? `WORKERS AI SECONDARY ADVISORY (${workersAi.model}):\n${workersAi.text}`
+      : "";
+  const system = instructions(input.agent, memories, collaboration);
+  const result = runtime.provider === "google"
+    ? await runGoogle(input, runtime, system, tools)
+    : runtime.provider === "anthropic"
+      ? await runAnthropic(input, runtime, system, tools)
+      : await runOpenAI(input, runtime, system, tools);
+  return { ...result, workersAi };
 }

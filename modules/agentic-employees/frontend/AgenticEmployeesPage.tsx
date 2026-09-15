@@ -4,7 +4,7 @@ import {
   FileText, GraduationCap, History, MessageSquare, Play, Search, Send, Settings2,
   ShieldCheck, Sparkles, Users, Wallet, Zap,
 } from "lucide-react";
-import { errorText, get, patch, post } from "../../../web/api";
+import { authStore, errorText, get, patch, post, uploadFile } from "../../../web/api";
 import {
   ActionConfirmationCard,
   type InlineConfirmation,
@@ -21,13 +21,15 @@ type Agent = {
   configuredTools: string[];
 };
 type Conversation = { id: string; agentKey: string; title: string; status: string; lastMessageAt?: string; createdAt?: string };
-type Message = { id: string; role: "user" | "assistant"; content: string; model?: string; createdAt?: string };
+type ImageAttachment = { id: string; originalName: string; mimeType: string; sizeBytes: number; previewUrl: string };
+type Message = { id: string; role: "user" | "assistant"; content: string; model?: string; createdAt?: string; attachments?: ImageAttachment[] };
 type Task = { id: string; agentKey: string; title: string; status: string; resultText?: string; errorText?: string; createdAt?: string };
 type Approval = { id: string; agentKey: string; actionType: string; requiredScope: string; status: string; payload: Record<string, unknown>; createdAt: string };
 type Settings = { provider: string; configured: boolean; models: Record<string, string> };
 type Activity = { toolCalls: Array<{ id: string; agentKey: string; toolName: string; status: string; createdAt: string; errorText?: string }>; approvals: Array<{ id: string; agentKey: string; actionType: string; status: string; createdAt: string }> };
 type Tab = "employees" | "workspace" | "tasks" | "activity" | "settings";
 type Profile = { icon: ReactNode; accent: string; short: string; bestFor: string[]; prompts: string[]; domain: string };
+type PendingImage = { file: File; preview: string };
 
 const PROFILES: Record<string, Profile> = {
   secretary: { icon: <Briefcase size={21}/>, accent: "mint", short: "Front office & communications", domain: "Office", bestFor: ["Admissions", "Parents", "Letters", "Communications"], prompts: ["Draft a parent communication for…", "Use this admission information to prepare the student records", "Show me front-office work that needs attention"] },
@@ -48,6 +50,53 @@ const INTENTS = [
   { label: "Executive brief", agent: "headteacher", icon: <Crown size={17}/>, prompt: "Give me an executive school briefing" },
 ];
 
+
+function ProtectedChatImage({
+  attachment,
+}: {
+  attachment: ImageAttachment;
+}) {
+  const [src, setSrc] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    let objectUrl = "";
+
+    void fetch(
+      attachment.previewUrl,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${authStore.getAccess() || ""}`,
+        },
+      },
+    )
+      .then(response => {
+        if (!response.ok) throw new Error("preview failed");
+        return response.blob();
+      })
+      .then(blob => {
+        if (!live) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => undefined);
+
+    return () => {
+      live = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.previewUrl]);
+
+  return (
+    <div className="ae-chat-image">
+      {src
+        ? <img src={src} alt={attachment.originalName}/>
+        : <span><Camera size={18}/> {attachment.originalName}</span>}
+    </div>
+  );
+}
+
 export function AgenticEmployeesPage() {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selected, setSelected] = useState("secretary");
@@ -56,6 +105,7 @@ export function AgenticEmployeesPage() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [text, setText] = useState("");
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -138,16 +188,96 @@ export function AgenticEmployeesPage() {
       setConversations(current => [nextConversation, ...current]);
     } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
-  async function send() {
-    if (!conversation || !text.trim() || busy) return;
-    const content = text.trim(); setText("");
-    setMessages(current => [...current, { id: `local-${Date.now()}`, role: "user", content }]);
-    setBusy(true); setError("");
-    try {
-      const message = await post<Message>(`/agentic-employees/conversations/${conversation.id}/messages`, { content });
-      setMessages(current => [...current, message]); await refresh();
-    } catch (err) { setError(errorText(err)); } finally { setBusy(false); }
+  function chooseImages(files: FileList | null) {
+    if (!files) return;
+
+    const incoming = Array.from(files);
+    const accepted = incoming.filter(file =>
+      ["image/jpeg", "image/png", "image/webp"].includes(file.type) &&
+      file.size <= 8 * 1024 * 1024
+    );
+
+    if (accepted.length != incoming.length) {
+      setError(
+        "Images must be JPEG, PNG or WebP and no larger than 8 MB each.",
+      );
+    }
+
+    const remaining = Math.max(0, 4 - pendingImages.length);
+
+    if (accepted.length > remaining) {
+      setError("A message can contain up to 4 images.");
+    }
+
+    const additions = accepted.slice(0, remaining).map(file => ({
+      file,
+      preview: URL.createObjectURL(file),
+    }));
+
+    setPendingImages(current => [...current, ...additions]);
   }
+
+  function removePending(index: number) {
+    setPendingImages(current => {
+      const target = current[index];
+      if (target) URL.revokeObjectURL(target.preview);
+      return current.filter((_, i) => i !== index);
+    });
+  }
+
+  async function send() {
+    if (
+      !conversation ||
+      busy ||
+      (!text.trim() && !pendingImages.length)
+    ) return;
+
+    const content = text.trim();
+
+    setBusy(true);
+    setError("");
+
+    try {
+      const uploaded: ImageAttachment[] = [];
+
+      for (const image of pendingImages) {
+        uploaded.push(
+          await uploadFile<ImageAttachment>(
+            `/agentic-employees/conversations/${conversation.id}/images`,
+            image.file,
+            "agent-chat-image",
+          ),
+        );
+      }
+
+      await post<Message>(
+        `/agentic-employees/conversations/${conversation.id}/messages`,
+        {
+          content,
+          attachmentIds: uploaded.map(item => item.id),
+        },
+      );
+
+      const history = await get<Message[]>(
+        `/agentic-employees/conversations/${conversation.id}/messages`,
+      );
+
+      pendingImages.forEach(image =>
+        URL.revokeObjectURL(image.preview)
+      );
+
+      setPendingImages([]);
+      setText("");
+      setMessages(history);
+
+      await refresh();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createTask() {
     if (!agent || !taskTitle.trim() || !taskInstructions.trim()) return;
     setBusy(true); setError("");
@@ -238,7 +368,7 @@ export function AgenticEmployeesPage() {
         <h1>Your digital school team</h1>
         <p>Choose the right employee by the work you need done. They can see permitted Ledgerly data, remember context, understand images, prepare documents and execute governed system work.</p>
       </div>
-      <div className={`ae-provider ${settings?.configured ? "ok" : "warn"}`}><Bot size={19}/><div><b>{settings?.configured ? "AI workforce online" : "OpenAI key required"}</b><span>{settings?.provider || "openai-responses"}</span></div></div>
+      <div className={`ae-provider ${settings?.configured ? "ok" : "warn"}`}><Bot size={19}/><div><b>{settings?.configured ? "AI workforce online" : "Primary AI key required"}</b><span>{settings?.provider || "provider not configured"}</span></div></div>
     </div>
 
     {error && <div className="ae-error">{error}</div>}
@@ -292,11 +422,11 @@ export function AgenticEmployeesPage() {
       </aside>
       <section className="ae-cockpit-main">
         <header className="ae-cockpit-head"><div className={`ae-cockpit-agent ae-accent-${profile.accent}`}><div className="ae-pro-avatar">{profile.icon}</div><div><span>{profile.domain.toUpperCase()} SPECIALIST</span><h2>{agent?.name || "AI Workspace"}</h2><p>{agent?.title} · {agent?.modelTier.toUpperCase()} · {agent?.configuredTools.length || 0} permitted tools</p></div></div><div className="ae-head-actions"><button className="secondary" onClick={() => go("agentic-employees-vision")}><Camera size={16}/> Vision</button><button className="secondary" onClick={() => go("agentic-employees-memory")}><Brain size={16}/> Memory</button><button className="secondary" onClick={() => go("agentic-employees-documents")}><FileText size={16}/> Files</button></div></header>
-        <div className="ae-context-strip"><div><ShieldCheck size={15}/><span>Role-scoped Ledgerly access</span></div><div><Brain size={15}/><span>Conversation + working + institutional memory</span></div><div><Camera size={15}/><span>AI Vision ready</span></div></div>
+        <div className="ae-context-strip"><div><ShieldCheck size={15}/><span>Role-scoped Ledgerly access</span></div><div><Brain size={15}/><span>Conversation + working + institutional memory</span></div><div><Camera size={15}/><span>Images attach directly to chat AI</span></div></div>
         <div className="ae-chat ae-chat-pro">
           {!conversation && <div className="ae-empty"><MessageSquare/><h3>Choose an employee to start</h3><p>Your conversations are saved and can be resumed later.</p></div>}
           {conversation && !messages.length && <div className="ae-chat-welcome"><div className={`ae-welcome-icon ae-accent-${profile.accent}`}>{profile.icon}</div><h3>What should {agent?.name} do?</h3><p>{profile.short}. Start with one of these, or describe the work naturally.</p><div className="ae-starter-grid">{profile.prompts.map(prompt => <button key={prompt} onClick={() => setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
-          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}><div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div><RichMessage content={message.content}/>{message.model && <small>{message.model}</small>}</div>)}
+          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}><div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div>{message.attachments?.length ? <div className="ae-message-images">{message.attachments.map(attachment => <ProtectedChatImage key={attachment.id} attachment={attachment}/>)}</div> : null}{message.content && <RichMessage content={message.content}/>} {message.model && <small>{message.model}</small>}</div>)}
           {visibleConfirmations.map(item =>
             <ActionConfirmationCard
               key={`${item.source}:${item.id}`}
@@ -312,7 +442,105 @@ export function AgenticEmployeesPage() {
           )}
           {busy && <div className="ae-message assistant ae-working"><b>{agent?.name}</b><p><Sparkles size={14}/> Working with Ledgerly…</p></div>}
         </div>
-        {conversation && <><div className="ae-quick-tools"><button onClick={() => go("agentic-employees-vision")}><Camera size={15}/> Use a photo</button><button onClick={() => setText(`Create a ${agent?.key === "bursar" ? "spreadsheet" : "document"} for `)}><FileText size={15}/> Create document</button><button onClick={() => setText("What do you remember about ")}><Brain size={15}/> Ask memory</button></div><footer className="ae-composer-pro"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder={`Message ${agent?.name || "this employee"}… You can speak naturally.`}/><button disabled={busy || !text.trim()} onClick={() => void send()}><Send size={17}/> Send</button></footer></>}
+        {conversation && <>
+          <input
+            id="ae-chat-image-input"
+            className="ae-hidden-input"
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            onChange={e => {
+              chooseImages(e.target.files);
+              e.currentTarget.value = "";
+            }}
+          />
+
+          <div className="ae-quick-tools">
+            <label
+              htmlFor="ae-chat-image-input"
+              className="ae-chat-attach"
+            >
+              <Camera size={15}/>
+              Attach image
+            </label>
+
+            <button
+              onClick={() =>
+                setText(
+                  `Create a ${
+                    agent?.key === "bursar"
+                      ? "spreadsheet"
+                      : "document"
+                  } for `,
+                )
+              }
+            >
+              <FileText size={15}/>
+              Create document
+            </button>
+
+            <button
+              onClick={() =>
+                setText("What do you remember about ")
+              }
+            >
+              <Brain size={15}/>
+              Ask memory
+            </button>
+          </div>
+
+          {pendingImages.length > 0 && (
+            <div className="ae-pending-images">
+              {pendingImages.map((image, index) =>
+                <div key={`${image.file.name}-${index}`}>
+                  <img src={image.preview} alt={image.file.name}/>
+                  <button
+                    type="button"
+                    onClick={() => removePending(index)}
+                  >
+                    ×
+                  </button>
+                  <small>{image.file.name}</small>
+                </div>
+              )}
+            </div>
+          )}
+
+          <footer className="ae-composer-pro">
+            <label
+              htmlFor="ae-chat-image-input"
+              className="ae-composer-camera"
+              title="Attach image"
+            >
+              <Camera size={18}/>
+            </label>
+
+            <textarea
+              value={text}
+              onChange={e => setText(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              placeholder={`Message ${
+                agent?.name || "this employee"
+              }… attach an image if useful.`}
+            />
+
+            <button
+              disabled={
+                busy ||
+                (!text.trim() && !pendingImages.length)
+              }
+              onClick={() => void send()}
+            >
+              <Send size={17}/>
+              Send
+            </button>
+          </footer>
+        </>}
       </section>
     </div>}
 

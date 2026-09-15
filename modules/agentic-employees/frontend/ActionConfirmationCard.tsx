@@ -127,6 +127,32 @@ function icon(kind: Kind) {
 }
 
 function confirmLabel(kind: Kind, item: InlineConfirmation) {
+  if (item.actionType === "system.api.workflow") {
+    const context =
+      `${item.title} ${item.summary}`.toLowerCase();
+
+    if (
+      context.includes("staff") ||
+      context.includes("teacher") ||
+      context.includes("onboard") ||
+      context.includes("scheme") ||
+      context.includes("subject")
+    ) return "Confirm & Complete Setup";
+
+    if (
+      context.includes("fee") ||
+      context.includes("charge") ||
+      context.includes("billing")
+    ) return "Confirm & Apply Charges";
+
+    if (
+      context.includes("timetable") ||
+      context.includes("schedule")
+    ) return "Confirm & Apply Timetable";
+
+    return "Confirm & Execute Workflow";
+  }
+
   const method = String(item.payload?.method || "").toUpperCase();
   const create = method === "POST";
 
