@@ -94,3 +94,62 @@ ON CONFLICT (module_key) DO UPDATE SET name=EXCLUDED.name,version=EXCLUDED.versi
 INSERT INTO organization_modules(organization_id,module_key,enabled,configuration_json,enabled_at)
 SELECT id,'file-manager',1,'{}',CURRENT_TIMESTAMP FROM organizations
 ON CONFLICT (organization_id,module_key) DO NOTHING;
+
+-- Backfill already-existing objects into the unified catalog without copying bytes.
+INSERT INTO file_items(
+  id,organization_id,title,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,
+  preview_object_key,preview_mime_type,preview_size_bytes,source_type,source_module,source_entity_type,source_entity_id,
+  status,current_version,metadata_json,created_by,updated_by,created_at,updated_at
+)
+SELECT
+  'fil_ai_'||d.id,d.organization_id,d.title,d.title||'.'||d.format,d.source_mime_type,d.source_size_bytes,d.checksum_sha256,'work',d.source_object_key,
+  d.pdf_object_key,'application/pdf',d.pdf_size_bytes,'ai_generated','agentic-employees','generated_document',d.id,
+  CASE WHEN d.status='archived' THEN 'archived' ELSE 'active' END,1,'{"backfilled":true}',d.created_by,d.created_by,d.created_at,d.updated_at
+FROM ae_generated_documents d WHERE d.status<>'deleted'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO file_versions(
+  id,organization_id,file_item_id,version_number,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,
+  preview_object_key,preview_mime_type,preview_size_bytes,created_by,created_at
+)
+SELECT
+  'fver_ai_'||d.id,d.organization_id,'fil_ai_'||d.id,1,d.title||'.'||d.format,d.source_mime_type,d.source_size_bytes,d.checksum_sha256,'work',d.source_object_key,
+  d.pdf_object_key,'application/pdf',d.pdf_size_bytes,d.created_by,d.created_at
+FROM ae_generated_documents d WHERE d.status<>'deleted'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO file_items(
+  id,organization_id,title,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,
+  source_type,source_module,source_entity_type,source_entity_id,status,current_version,metadata_json,created_by,updated_by,created_at,updated_at
+)
+SELECT
+  'fil_school_'||f.id,f.organization_id,f.original_name,f.original_name,f.mime_type,f.size_bytes,f.checksum_sha256,'reports',f.object_key,
+  'school_file','school-management','school_file',f.id,'active',1,'{"backfilled":true}',f.uploaded_by,f.uploaded_by,f.created_at,f.updated_at
+FROM school_files f WHERE f.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO file_versions(
+  id,organization_id,file_item_id,version_number,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,created_by,created_at
+)
+SELECT
+  'fver_school_'||f.id,f.organization_id,'fil_school_'||f.id,1,f.original_name,f.mime_type,f.size_bytes,f.checksum_sha256,'reports',f.object_key,f.uploaded_by,f.created_at
+FROM school_files f WHERE f.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO file_items(
+  id,organization_id,title,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,
+  source_type,source_module,source_entity_type,source_entity_id,status,current_version,metadata_json,created_by,updated_by,created_at,updated_at
+)
+SELECT
+  'fil_scan_'||d.id,d.organization_id,COALESCE(j.title,d.original_name),d.original_name,d.mime_type,d.size_bytes,d.checksum_sha256,'work',d.object_key,
+  'scannerly','printerly','scan_document',d.id,'active',1,'{"backfilled":true}',j.created_by,j.created_by,d.created_at,COALESCE(j.completed_at,d.created_at)
+FROM prn_scan_documents d JOIN prn_scan_jobs j ON j.id=d.scan_job_id AND j.organization_id=d.organization_id
+ON CONFLICT DO NOTHING;
+
+INSERT INTO file_versions(
+  id,organization_id,file_item_id,version_number,filename,mime_type,size_bytes,checksum_sha256,storage_bucket,object_key,created_by,created_at
+)
+SELECT
+  'fver_scan_'||d.id,d.organization_id,'fil_scan_'||d.id,1,d.original_name,d.mime_type,d.size_bytes,d.checksum_sha256,'work',d.object_key,j.created_by,d.created_at
+FROM prn_scan_documents d JOIN prn_scan_jobs j ON j.id=d.scan_job_id AND j.organization_id=d.organization_id
+ON CONFLICT DO NOTHING;
