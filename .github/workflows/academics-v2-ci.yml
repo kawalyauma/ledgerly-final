@@ -1,0 +1,61 @@
+name: Academics v2 learning cycle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "modules/academics/**"
+      - "migrations/0113_academics_learning_cycle.sql"
+      - "selfhost/postgres/academics-learning-cycle-v2.sql"
+      - "attendance-mobile/src/mobile/academics/**"
+      - ".github/workflows/academics-v2-ci.yml"
+  pull_request:
+    paths:
+      - "modules/academics/**"
+      - "migrations/0113_academics_learning_cycle.sql"
+      - "selfhost/postgres/academics-learning-cycle-v2.sql"
+      - "attendance-mobile/src/mobile/academics/**"
+      - ".github/workflows/academics-v2-ci.yml"
+
+jobs:
+  web-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run modules:sync
+      - run: npm run typecheck
+      - run: npm run build:web
+      - name: Apply D1 migrations from a clean local database
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/ledgerly-academics-ci
+          npx wrangler d1 migrations apply FINANCE_DB --local --persist-to /tmp/ledgerly-academics-ci
+      - name: Confirm Academics v2 registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'academics' modules/backend-registry.generated.ts
+          grep -q 'academics' modules/frontend-registry.generated.tsx
+          grep -q 'LearningCycleWorkspace' modules/academics/frontend/module.tsx
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: attendance-mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.11.0
+          cache: npm
+          cache-dependency-path: attendance-mobile/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test -- --runInBand --passWithNoTests
