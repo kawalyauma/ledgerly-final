@@ -9,6 +9,11 @@ function sqliteFunctions(sql:string){return sql
  .replace(/datetime\('now'\)/gi,"CURRENT_TIMESTAMP")
  .replace(/date\('now'\)/gi,"CURRENT_DATE")
  .replace(/datetime\(CURRENT_TIMESTAMP\s*,\s*(\$\d+)\)/gi,(_m,p)=>`(CURRENT_TIMESTAMP + ${p}::interval)`)
+ // PostgreSQL cannot infer the type of a parameter used only by `IS NULL`.
+ // D1-style optional filters often use `(? IS NULL OR text_column=?)`; typing
+ // the null-check parameter as text preserves the null predicate and lets the
+ // second parameter keep the column's native comparison type.
+ .replace(/(\$\d+)\s+IS\s+NULL/gi,"$1::text IS NULL")
  .replace(/IFNULL\(/gi,"COALESCE(")
  .replace(/\s+COLLATE\s+NOCASE/gi,"");}
 function normalizeInsertIgnore(sql:string){if(!/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(sql))return sql;let next=sql.replace(/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i,"INSERT INTO");if(/\bON\s+CONFLICT\b/i.test(next))return next;const returning=next.match(/\s+RETURNING\s+[\s\S]+$/i);if(returning){next=next.slice(0,returning.index)+" ON CONFLICT DO NOTHING"+returning[0];}else next=next.replace(/;?\s*$/," ON CONFLICT DO NOTHING");return next;}
