@@ -9,11 +9,12 @@ import { EventReactionsPage } from "./EventReactionsPage";
 import { ActionCenterPage } from "./ActionCenterPage";
 import { AgentDocumentsPage } from "./AgentDocumentsPage";
 import "./agentic-employees.css";
+import "./chat-images.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "1.9.0",
+  version: "2.0.0",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
@@ -27,8 +28,8 @@ const moduleDefinition: FrontendModuleDefinition = {
   },
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
     { label: "AI Workforce", path: "agentic-employees", scope: "school:read" },
-    { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read" },
-    { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
+    { label: "Primary + Workers AI", path: "agentic-employees-provider", scope: "school:read" },
+    { label: "Image & OCR Workspace", path: "agentic-employees-vision", scope: "school:read" },
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },
     { label: "Proactive Workforce", path: "agentic-employees-proactive", scope: "school:read" },
     { label: "Event Reactions", path: "agentic-employees-events", scope: "school:read" },
