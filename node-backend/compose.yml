@@ -27,16 +27,20 @@ services:
       retries: 20
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z
+    build:
+      context: ./minio-community
+      args:
+        MINIO_SOURCE_REF: ${MINIO_SOURCE_REF:-7aac2a2c5b7c882e68c1ce017d8256be2feea27f}
+    image: ledgerly-minio-community:7aac2a2c
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ledgerly}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ledgerly-minio-change-me}
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 20
