@@ -1,24 +1,29 @@
 import { Bot } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
+import { AIWorkspacePage } from "./AIWorkspacePage";
 import { AgenticEmployeesPage } from "./AgenticEmployeesPage";
 import { ProviderConfigurationPage } from "./ProviderConfigurationPage";
-import { VisionWorkspacePage } from "./VisionWorkspacePage";
+import { VisionWorkspaceV21 } from "./VisionWorkspaceV21";
 import { MemoryPage } from "./MemoryPage";
 import { ProactiveEmployeesPage } from "./ProactiveEmployeesPage";
 import { EventReactionsPage } from "./EventReactionsPage";
 import { ActionCenterPage } from "./ActionCenterPage";
 import { AgentDocumentsPage } from "./AgentDocumentsPage";
 import "./agentic-employees.css";
+import "./action-center-v20.css";
+import "./workspace-v21.css";
+import "./vision-v21.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "1.9.0",
+  version: "2.1.0",
   order: 75,
   routes: {
-    "agentic-employees": { scope: "school:read", view: AgenticEmployeesPage },
+    "agentic-employees": { scope: "school:read", view: AIWorkspacePage },
+    "agentic-employees-workforce": { scope: "school:read", view: AgenticEmployeesPage },
     "agentic-employees-provider": { scope: "school:read", view: ProviderConfigurationPage },
-    "agentic-employees-vision": { scope: "school:read", view: VisionWorkspacePage },
+    "agentic-employees-vision": { scope: "school:read", view: VisionWorkspaceV21 },
     "agentic-employees-memory": { scope: "school:read", view: MemoryPage },
     "agentic-employees-proactive": { scope: "school:read", view: ProactiveEmployeesPage },
     "agentic-employees-events": { scope: "school:read", view: EventReactionsPage },
@@ -26,7 +31,8 @@ const moduleDefinition: FrontendModuleDefinition = {
     "agentic-employees-documents": { scope: "documents:read", view: AgentDocumentsPage },
   },
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
-    { label: "AI Workforce", path: "agentic-employees", scope: "school:read" },
+    { label: "AI Workspace", path: "agentic-employees", scope: "school:read" },
+    { label: "AI Workforce", path: "agentic-employees-workforce", scope: "school:read" },
     { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read" },
     { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },

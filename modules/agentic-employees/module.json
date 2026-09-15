@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "1.9.0",
-  "description": "Tenant-safe agentic school employees with per-school OpenAI, Google Gemini or Anthropic Claude configuration, PostgreSQL self-hosting, AI Vision OCR, durable employee memory, governed tools and an advanced workforce command center.",
+  "version": "2.1.0",
+  "description": "Tenant-safe multimodal school AI employees with per-school OpenAI, Google Gemini or Anthropic Claude configuration, multi-image OCR, semantic data intelligence, safe dynamic querying, governed writes, generated file replies, PostgreSQL self-hosting, durable memory and a human-controlled Action Center.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -17,6 +17,10 @@
     "agents": ["secretary", "dos", "bursar", "headteacher", "hr", "librarian"],
     "features": [
       "per-school-ai-provider", "encrypted-school-api-keys", "provider-model-catalog", "custom-model-ids", "provider-connection-test", "advanced-generation-controls",
+      "multimodal-ai-workspace", "chat-image-attachments", "multi-image-chat-scanning", "drag-drop-image-batches", "camera-capture-in-chat", "provider-aware-vision-openai-gemini-claude", "conversation-image-evidence", "assistant-image-replies", "inline-image-previews", "inline-generated-file-cards", "pdf-reply-preview", "editable-doc-reply-downloads",
+      "semantic-data-registry", "live-registered-schema-inspection", "safe-dynamic-query-planner", "tenant-injected-read-queries", "parameter-bound-ai-queries", "query-plan-audit",
+      "server-calculated-intelligence-snapshots", "fees-attendance-finance-hr-academics-intelligence", "pending-clarification-intents", "ambiguous-identity-resolution", "all-missing-fields-at-once",
+      "specialized-fee-payment-preflight", "mandatory-change-preview", "human-approval-before-write", "explicit-human-execution", "sensitive-preview-redaction",
       "agent-workspaces", "advanced-workforce-command-center", "job-first-employee-routing", "capability-search", "employee-workload-status", "resumable-conversations", "role-specific-starter-prompts", "mobile-workforce-command-center",
       "conversation-memory", "working-memory", "institutional-memory", "memory-search", "memory-management-ui", "memory-provenance", "memory-due-dates",
       "bounded-tool-calling", "tenant-isolation", "human-approval-gates", "tool-audit-log", "task-execution", "model-tier-routing", "custom-agent-prompts",

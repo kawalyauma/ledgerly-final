@@ -12,12 +12,13 @@ function sqliteFunctions(sql:string){return sql
  .replace(/IFNULL\(/gi,"COALESCE(")
  .replace(/\s+COLLATE\s+NOCASE/gi,"");}
 function normalizeInsertIgnore(sql:string){if(!/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(sql))return sql;let next=sql.replace(/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i,"INSERT INTO");if(/\bON\s+CONFLICT\b/i.test(next))return next;const returning=next.match(/\s+RETURNING\s+[\s\S]+$/i);if(returning){next=next.slice(0,returning.index)+" ON CONFLICT DO NOTHING"+returning[0];}else next=next.replace(/;?\s*$/," ON CONFLICT DO NOTHING");return next;}
+function pragmaTableInfo(sql:string):BoundStatement|null{const match=sql.match(/^\s*PRAGMA\s+table_info\(\s*(?:'([^']+)'|"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))\s*\)\s*;?\s*$/i);const table=match&&(match[1]||match[2]||match[3]);if(!table)return null;return{sql:`SELECT ordinal_position-1 AS cid,column_name AS name,data_type AS type,CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END AS notnull,column_default AS dflt_value,0 AS pk FROM information_schema.columns WHERE table_schema=current_schema() AND table_name=$1 ORDER BY ordinal_position`,values:[table]};}
 function translate(sql:string){return normalizeInsertIgnore(sqliteFunctions(placeholders(sql)));}
 
 class PgD1Statement{
   constructor(private db:PostgresD1Database,public sql:string,public values:unknown[]=[]){ }
   bind(...values:unknown[]){return new PgD1Statement(this.db,this.sql,values);}
-  bound():BoundStatement{return{sql:translate(this.sql),values:this.values};}
+  bound():BoundStatement{const pragma=pragmaTableInfo(this.sql);return pragma??{sql:translate(this.sql),values:this.values};}
   async first<T=Record<string,unknown>>(column?:string):Promise<T|null>{const q=this.bound(),r=await this.db.pool.query(q.sql,q.values);const row=r.rows[0]??null;if(row==null)return null;return (column?row[column]:row) as T;}
   async all<T=Record<string,unknown>>(){const q=this.bound(),r=await this.db.pool.query(q.sql,q.values);return{success:true,results:r.rows as T[],meta:{changes:r.rowCount??0}};}
   async run(){const q=this.bound(),r=await this.db.pool.query(q.sql,q.values);return{success:true,meta:{changes:r.rowCount??0,duration:0,last_row_id:null}};}

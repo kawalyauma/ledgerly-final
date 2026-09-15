@@ -1,0 +1,95 @@
+import { AppError } from "../../../src/lib/errors";
+
+export type QueryOperator="eq"|"neq"|"contains"|"starts_with"|"gt"|"gte"|"lt"|"lte"|"in"|"between"|"is_null";
+export type QueryFilter={field:string;operator:QueryOperator;value?:unknown};
+export type SafeQueryPlan={entity:string;fields?:string[];filters?:QueryFilter[];metrics?:string[];groupBy?:string[];orderBy?:Array<{field:string;direction?:"asc"|"desc"}>;limit?:number};
+type FieldDef={expr:string;type:string;description:string;filterable?:boolean;groupable?:boolean;sortable?:boolean};
+type MetricDef={expr:string;type:string;description:string};
+type EntityDef={key:string;source:string;description:string;from:string;tenantExpr:string;baseWhere?:string;agents?:string[];defaultFields:string[];maxRows:number;fields:Record<string,FieldDef>;metrics:Record<string,MetricDef>};
+
+const fullName=(alias:string)=>`TRIM(COALESCE(${alias}.first_name,'')||' '||COALESCE(${alias}.middle_name||' ','')||COALESCE(${alias}.last_name,''))`;
+
+export const INTELLIGENCE_ENTITIES:Record<string,EntityDef>={
+ students:{
+  key:"students",source:"school_students",description:"Learners, admission identities, current class/stream and status.",
+  from:"school_students s LEFT JOIN school_classes c ON c.id=s.current_class_id AND c.organization_id=s.organization_id LEFT JOIN school_streams st ON st.id=s.current_stream_id AND st.organization_id=s.organization_id",
+  tenantExpr:"s.organization_id",baseWhere:"s.deleted_at IS NULL",agents:["secretary","dos","bursar","headteacher"],defaultFields:["studentId","admissionNumber","studentName","status","className","streamName"],maxRows:100,
+  fields:{studentId:{expr:"s.id",type:"string",description:"Internal learner ID",filterable:true,sortable:true},admissionNumber:{expr:"s.admission_number",type:"string",description:"Admission number",filterable:true,sortable:true},studentNumber:{expr:"s.student_number",type:"string",description:"School student number",filterable:true,sortable:true},studentName:{expr:fullName("s"),type:"string",description:"Learner full name",filterable:true,sortable:true},status:{expr:"s.status",type:"string",description:"Learner status",filterable:true,groupable:true,sortable:true},className:{expr:"c.name",type:"string",description:"Current class",filterable:true,groupable:true,sortable:true},streamName:{expr:"st.name",type:"string",description:"Current stream",filterable:true,groupable:true,sortable:true}},
+  metrics:{count:{expr:"COUNT(*)",type:"integer",description:"Number of learners"}}
+ },
+ staff:{
+  key:"staff",source:"school_staff_profiles",description:"School employees, staff numbers, employment state and departments.",
+  from:"school_staff_profiles sp LEFT JOIN school_departments d ON d.id=sp.department_id AND d.organization_id=sp.organization_id",
+  tenantExpr:"sp.organization_id",baseWhere:"sp.deleted_at IS NULL",agents:["secretary","dos","headteacher","hr"],defaultFields:["staffId","staffNumber","staffName","employmentStatus","departmentName"],maxRows:100,
+  fields:{staffId:{expr:"sp.id",type:"string",description:"Internal staff ID",filterable:true,sortable:true},staffNumber:{expr:"sp.staff_number",type:"string",description:"Staff number",filterable:true,sortable:true},staffName:{expr:fullName("sp"),type:"string",description:"Employee full name",filterable:true,sortable:true},employmentStatus:{expr:"sp.employment_status",type:"string",description:"Employment status",filterable:true,groupable:true,sortable:true},departmentName:{expr:"d.name",type:"string",description:"Department",filterable:true,groupable:true,sortable:true}},
+  metrics:{count:{expr:"COUNT(*)",type:"integer",description:"Number of employees"}}
+ },
+ lesson_plans:{
+  key:"lesson_plans",source:"acad_lesson_plans",description:"Teacher lesson plans with topic, lesson date, class, subject and workflow status.",
+  from:`acad_lesson_plans p LEFT JOIN school_classes c ON c.id=p.class_id AND c.organization_id=p.organization_id LEFT JOIN school_subjects su ON su.id=p.subject_id AND su.organization_id=p.organization_id LEFT JOIN school_staff_profiles sp ON sp.user_id=p.teacher_user_id AND sp.organization_id=p.organization_id AND sp.deleted_at IS NULL`,
+  tenantExpr:"p.organization_id",agents:["dos","headteacher"],defaultFields:["lessonPlanId","lessonDate","topic","subtopic","status","className","subjectName","teacherName"],maxRows:100,
+  fields:{lessonPlanId:{expr:"p.id",type:"string",description:"Lesson plan ID",filterable:true,sortable:true},lessonDate:{expr:"p.lesson_date",type:"date",description:"Lesson date",filterable:true,groupable:true,sortable:true},topic:{expr:"p.topic",type:"string",description:"Lesson topic",filterable:true,groupable:true,sortable:true},subtopic:{expr:"p.subtopic",type:"string",description:"Lesson subtopic",filterable:true,groupable:true,sortable:true},status:{expr:"p.status",type:"string",description:"Plan workflow status",filterable:true,groupable:true,sortable:true},className:{expr:"c.name",type:"string",description:"Class",filterable:true,groupable:true,sortable:true},subjectName:{expr:"su.name",type:"string",description:"Subject",filterable:true,groupable:true,sortable:true},teacherName:{expr:fullName("sp"),type:"string",description:"Teacher",filterable:true,groupable:true,sortable:true},updatedAt:{expr:"p.updated_at",type:"datetime",description:"Last update",filterable:true,sortable:true}},
+  metrics:{count:{expr:"COUNT(*)",type:"integer",description:"Number of lesson plans"}}
+ },
+ student_attendance:{
+  key:"student_attendance",source:"school_student_attendance_records + school_student_attendance_sessions",description:"Student attendance marks and lateness tied to dated attendance sessions.",
+  from:`school_student_attendance_records ar JOIN school_student_attendance_sessions se ON se.id=ar.session_id AND se.organization_id=ar.organization_id JOIN school_students s ON s.id=ar.student_id AND s.organization_id=ar.organization_id LEFT JOIN school_classes c ON c.id=se.class_id AND c.organization_id=ar.organization_id LEFT JOIN school_streams st ON st.id=se.stream_id AND st.organization_id=ar.organization_id`,
+  tenantExpr:"ar.organization_id",agents:["secretary","dos","headteacher"],defaultFields:["attendanceDate","studentName","admissionNumber","className","streamName","status","minutesLate"],maxRows:150,
+  fields:{attendanceDate:{expr:"se.attendance_date",type:"date",description:"Attendance date",filterable:true,groupable:true,sortable:true},studentId:{expr:"s.id",type:"string",description:"Learner ID",filterable:true,sortable:true},studentName:{expr:fullName("s"),type:"string",description:"Learner full name",filterable:true,groupable:true,sortable:true},admissionNumber:{expr:"s.admission_number",type:"string",description:"Admission number",filterable:true,groupable:true,sortable:true},className:{expr:"c.name",type:"string",description:"Class",filterable:true,groupable:true,sortable:true},streamName:{expr:"st.name",type:"string",description:"Stream",filterable:true,groupable:true,sortable:true},status:{expr:"ar.status",type:"string",description:"present, absent, late, excused, sick or permission",filterable:true,groupable:true,sortable:true},minutesLate:{expr:"ar.minutes_late",type:"integer",description:"Minutes late",filterable:true,sortable:true},sessionType:{expr:"se.session_type",type:"string",description:"Attendance session type",filterable:true,groupable:true,sortable:true}},
+  metrics:{count:{expr:"COUNT(*)",type:"integer",description:"Attendance marks"},presentCount:{expr:"SUM(CASE WHEN ar.status='present' THEN 1 ELSE 0 END)",type:"integer",description:"Present marks"},absentCount:{expr:"SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END)",type:"integer",description:"Absent marks"},lateCount:{expr:"SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END)",type:"integer",description:"Late marks"},attendanceRate:{expr:"ROUND(100.0*SUM(CASE WHEN ar.status IN ('present','late') THEN 1 ELSE 0 END)/NULLIF(COUNT(*),0),2)",type:"number",description:"Present plus late percentage"}}
+ },
+ staff_attendance:{
+  key:"staff_attendance",source:"school_staff_attendance_records",description:"Daily staff attendance, lateness and worked minutes.",
+  from:"school_staff_attendance_records ar JOIN school_staff_profiles sp ON sp.id=ar.staff_id AND sp.organization_id=ar.organization_id",
+  tenantExpr:"ar.organization_id",agents:["headteacher","hr"],defaultFields:["attendanceDate","staffName","staffNumber","status","minutesLate","workedMinutes"],maxRows:150,
+  fields:{attendanceDate:{expr:"ar.attendance_date",type:"date",description:"Attendance date",filterable:true,groupable:true,sortable:true},staffId:{expr:"sp.id",type:"string",description:"Staff ID",filterable:true,sortable:true},staffName:{expr:fullName("sp"),type:"string",description:"Employee name",filterable:true,groupable:true,sortable:true},staffNumber:{expr:"sp.staff_number",type:"string",description:"Staff number",filterable:true,groupable:true,sortable:true},status:{expr:"ar.status",type:"string",description:"Daily attendance state",filterable:true,groupable:true,sortable:true},minutesLate:{expr:"ar.minutes_late",type:"integer",description:"Minutes late",filterable:true,sortable:true},workedMinutes:{expr:"ar.worked_minutes",type:"integer",description:"Worked minutes",filterable:true,sortable:true}},
+  metrics:{count:{expr:"COUNT(*)",type:"integer",description:"Attendance rows"},presentCount:{expr:"SUM(CASE WHEN ar.status IN ('present','late','remote','official_duty') THEN 1 ELSE 0 END)",type:"integer",description:"Working/present rows"},absentCount:{expr:"SUM(CASE WHEN ar.status='absent' THEN 1 ELSE 0 END)",type:"integer",description:"Absent rows"},lateCount:{expr:"SUM(CASE WHEN ar.status='late' THEN 1 ELSE 0 END)",type:"integer",description:"Late rows"},avgMinutesLate:{expr:"ROUND(AVG(ar.minutes_late),2)",type:"number",description:"Average minutes late"}}
+ },
+ fee_balances:{
+  key:"fee_balances",source:"school_student_fee_charges + payment_allocations",description:"Per-student billed, paid and outstanding school-fee amounts calculated on the Ledgerly server.",
+  from:`school_students s LEFT JOIN school_classes c ON c.id=s.current_class_id AND c.organization_id=s.organization_id LEFT JOIN (SELECT organization_id,student_id,SUM(total_minor-credited_minor-written_off_minor) billed_minor FROM school_student_fee_charges WHERE status NOT IN ('draft','cancelled') GROUP BY organization_id,student_id) ch ON ch.organization_id=s.organization_id AND ch.student_id=s.id LEFT JOIN (SELECT cd.organization_id,cd.student_id,SUM(pa.amount_minor) paid_minor FROM (SELECT DISTINCT organization_id,student_id,document_id FROM school_student_fee_charges WHERE document_id IS NOT NULL AND status NOT IN ('draft','cancelled')) cd JOIN payment_allocations pa ON pa.organization_id=cd.organization_id AND pa.document_id=cd.document_id AND pa.reversed_at IS NULL GROUP BY cd.organization_id,cd.student_id) py ON py.organization_id=s.organization_id AND py.student_id=s.id`,
+  tenantExpr:"s.organization_id",baseWhere:"s.deleted_at IS NULL",agents:["bursar","headteacher"],defaultFields:["studentId","admissionNumber","studentName","className","billedMinor","paidMinor","outstandingMinor"],maxRows:100,
+  fields:{studentId:{expr:"s.id",type:"string",description:"Learner ID",filterable:true,sortable:true},admissionNumber:{expr:"s.admission_number",type:"string",description:"Admission number",filterable:true,sortable:true},studentName:{expr:fullName("s"),type:"string",description:"Learner name",filterable:true,sortable:true},className:{expr:"c.name",type:"string",description:"Class",filterable:true,groupable:true,sortable:true},billedMinor:{expr:"COALESCE(ch.billed_minor,0)",type:"money_minor",description:"Net billed fees",filterable:true,sortable:true},paidMinor:{expr:"COALESCE(py.paid_minor,0)",type:"money_minor",description:"Allocated payments",filterable:true,sortable:true},outstandingMinor:{expr:"COALESCE(ch.billed_minor,0)-COALESCE(py.paid_minor,0)",type:"money_minor",description:"Outstanding fee balance",filterable:true,sortable:true}},
+  metrics:{studentCount:{expr:"COUNT(*)",type:"integer",description:"Learners in result"},billedTotalMinor:{expr:"SUM(COALESCE(ch.billed_minor,0))",type:"money_minor",description:"Total billed"},paidTotalMinor:{expr:"SUM(COALESCE(py.paid_minor,0))",type:"money_minor",description:"Total paid"},outstandingTotalMinor:{expr:"SUM(COALESCE(ch.billed_minor,0)-COALESCE(py.paid_minor,0))",type:"money_minor",description:"Total outstanding"}}
+ },
+ finance_activity:{
+  key:"finance_activity",source:"journal_entries + journal_lines + accounts",description:"Posted Ledgerly general-ledger activity by date and account. Read-only; financial mutations must use Ledgerly services.",
+  from:"journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id",
+  tenantExpr:"l.organization_id",baseWhere:"j.status='posted'",agents:["bursar","headteacher"],defaultFields:["postingDate","entryNumber","accountCode","accountName","accountType","description","debitMinor","creditMinor"],maxRows:100,
+  fields:{postingDate:{expr:"j.posting_date",type:"date",description:"Posting date",filterable:true,groupable:true,sortable:true},entryNumber:{expr:"j.entry_number",type:"string",description:"Journal number",filterable:true,sortable:true},accountCode:{expr:"a.code",type:"string",description:"Account code",filterable:true,groupable:true,sortable:true},accountName:{expr:"a.name",type:"string",description:"Account name",filterable:true,groupable:true,sortable:true},accountType:{expr:"a.type",type:"string",description:"Account type",filterable:true,groupable:true,sortable:true},description:{expr:"COALESCE(l.description,j.description)",type:"string",description:"Journal narration",filterable:true,sortable:true},debitMinor:{expr:"l.base_debit_minor",type:"money_minor",description:"Base-currency debit",filterable:true,sortable:true},creditMinor:{expr:"l.base_credit_minor",type:"money_minor",description:"Base-currency credit",filterable:true,sortable:true}},
+  metrics:{lineCount:{expr:"COUNT(*)",type:"integer",description:"Posted journal lines"},debitTotalMinor:{expr:"SUM(l.base_debit_minor)",type:"money_minor",description:"Total debits"},creditTotalMinor:{expr:"SUM(l.base_credit_minor)",type:"money_minor",description:"Total credits"}}
+ }
+};
+
+function assertEntity(key:string,agentKey:string){const e=INTELLIGENCE_ENTITIES[key];if(!e)throw new AppError(422,"AI_QUERY_ENTITY_NOT_ALLOWED",`Unknown or unavailable intelligence entity: ${key}`);if(e.agents&&!e.agents.includes(agentKey))throw new AppError(403,"AI_QUERY_ENTITY_FORBIDDEN",`${agentKey} is not allowed to query ${key}`);return e;}
+function alias(name:string){return `"${name.replace(/[^A-Za-z0-9_]/g,"")}"`;}
+function fieldDef(e:EntityDef,key:string){const f=e.fields[key];if(!f)throw new AppError(422,"AI_QUERY_FIELD_NOT_ALLOWED",`${key} is not an allowed field for ${e.key}`);return f;}
+function metricDef(e:EntityDef,key:string){const m=e.metrics[key];if(!m)throw new AppError(422,"AI_QUERY_METRIC_NOT_ALLOWED",`${key} is not an allowed metric for ${e.key}`);return m;}
+
+export function intelligenceCatalog(agentKey:string,query=""){
+ const q=query.trim().toLowerCase();
+ return Object.values(INTELLIGENCE_ENTITIES).filter(e=>(!e.agents||e.agents.includes(agentKey))).filter(e=>!q||`${e.key} ${e.description} ${Object.keys(e.fields).join(" ")} ${Object.keys(e.metrics).join(" ")}`.toLowerCase().includes(q)).map(e=>({key:e.key,source:e.source,description:e.description,fields:Object.entries(e.fields).map(([key,v])=>({key,type:v.type,description:v.description,filterable:Boolean(v.filterable),groupable:Boolean(v.groupable),sortable:Boolean(v.sortable)})),metrics:Object.entries(e.metrics).map(([key,v])=>({key,type:v.type,description:v.description})),maxRows:e.maxRows}));
+}
+
+export function compileSafeQuery(agentKey:string,organizationId:string,plan:SafeQueryPlan){
+ const e=assertEntity(plan.entity,agentKey),metrics=(plan.metrics||[]).slice(0,8),groupBy=(plan.groupBy||[]).slice(0,8),aggregate=metrics.length>0;
+ const selected=aggregate?groupBy:(plan.fields?.length?plan.fields:e.defaultFields).slice(0,12);
+ if(!selected.length&&!metrics.length)throw new AppError(422,"AI_QUERY_EMPTY","Choose fields or metrics");
+ const selectParts:string[]=[];
+ for(const key of selected){const f=fieldDef(e,key);if(aggregate&&!f.groupable)throw new AppError(422,"AI_QUERY_GROUP_NOT_ALLOWED",`${key} cannot be grouped`);selectParts.push(`${f.expr} AS ${alias(key)}`);}
+ for(const key of metrics){const m=metricDef(e,key);selectParts.push(`${m.expr} AS ${alias(key)}`);}
+ const where=[`${e.tenantExpr}=?`],bindings:unknown[]=[organizationId];if(e.baseWhere)where.push(`(${e.baseWhere})`);
+ for(const filter of (plan.filters||[]).slice(0,20)){
+  const f=fieldDef(e,filter.field);if(!f.filterable)throw new AppError(422,"AI_QUERY_FILTER_NOT_ALLOWED",`${filter.field} cannot be filtered`);const op=filter.operator;
+  if(op==="is_null"){where.push(`${f.expr} IS ${filter.value===false?"NOT ":""}NULL`);continue;}
+  if(op==="in"){const values=Array.isArray(filter.value)?filter.value.slice(0,50):[];if(!values.length)throw new AppError(422,"AI_QUERY_FILTER_INVALID","in requires a non-empty value array");where.push(`${f.expr} IN (${values.map(()=>"?").join(",")})`);bindings.push(...values);continue;}
+  if(op==="between"){const values=Array.isArray(filter.value)?filter.value:[];if(values.length!==2)throw new AppError(422,"AI_QUERY_FILTER_INVALID","between requires exactly two values");where.push(`${f.expr} BETWEEN ? AND ?`);bindings.push(values[0],values[1]);continue;}
+  if(op==="contains"||op==="starts_with"){where.push(`LOWER(CAST(${f.expr} AS TEXT)) LIKE ?`);bindings.push(op==="contains"?`%${String(filter.value??"").toLowerCase()}%`:`${String(filter.value??"").toLowerCase()}%`);continue;}
+  const symbol:{[K in Exclude<QueryOperator,"in"|"between"|"contains"|"starts_with"|"is_null">]:string}={eq:"=",neq:"<>",gt:">",gte:">=",lt:"<",lte:"<="};where.push(`${f.expr} ${symbol[op as keyof typeof symbol]} ?`);bindings.push(filter.value);
+ }
+ const group=aggregate&&groupBy.length?` GROUP BY ${groupBy.map(k=>fieldDef(e,k).expr).join(",")}`:"";
+ const order=(plan.orderBy||[]).slice(0,3).map(o=>{const expr=e.fields[o.field]?.expr||e.metrics[o.field]?.expr;if(!expr)throw new AppError(422,"AI_QUERY_SORT_NOT_ALLOWED",`${o.field} cannot be sorted`);if(e.fields[o.field]&&!e.fields[o.field].sortable)throw new AppError(422,"AI_QUERY_SORT_NOT_ALLOWED",`${o.field} cannot be sorted`);return `${expr} ${o.direction==="desc"?"DESC":"ASC"}`;});
+ const limit=Math.max(1,Math.min(Number(plan.limit||50),e.maxRows));
+ const sql=`SELECT ${selectParts.join(",")} FROM ${e.from} WHERE ${where.join(" AND ")}${group}${order.length?` ORDER BY ${order.join(",")}`:""} LIMIT ?`;bindings.push(limit);
+ return{entity:e.key,sql,bindings,limit,selected:[...selected,...metrics]};
+}

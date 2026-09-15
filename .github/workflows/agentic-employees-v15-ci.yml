@@ -1,8 +1,8 @@
-name: Agentic Employees v1.9 CI
+name: Agentic Employees v2.0 CI
 
 on:
   push:
-    branches: [feature/agentic-employees-selfhost-documents-v1-5]
+    branches: [ai-workforce/intelligence-query-actions]
   pull_request:
     paths:
       - "selfhost/**"
@@ -12,6 +12,7 @@ on:
       - "migrations/0107_agentic_images_and_delegated_actions.sql"
       - "migrations/0108_agentic_employee_memory.sql"
       - "migrations/0111_agentic_ai_provider_settings.sql"
+      - "migrations/0112_agentic_intelligence_pending_actions.sql"
       - "src/index.ts"
       - "src/types.ts"
       - "package.json"
@@ -58,7 +59,7 @@ jobs:
       - name: Refresh dependency lock
         run: npm install --package-lock-only --ignore-scripts
       - name: Commit refreshed dependency lock on feature branch
-        if: github.event_name == 'push' && github.ref_name == 'feature/agentic-employees-selfhost-documents-v1-5'
+        if: github.event_name == 'push' && github.ref_name == 'ai-workforce/intelligence-query-actions'
         shell: bash
         run: |
           set -euo pipefail
@@ -66,7 +67,7 @@ jobs:
           git config user.name "ledgerly-ci"
           git config user.email "ledgerly-ci@users.noreply.github.com"
           git add package-lock.json
-          git commit -m "chore: refresh lockfile for Agentic v1.9"
+          git commit -m "chore: refresh lockfile for Agentic v2.0"
           git push origin HEAD:${GITHUB_REF_NAME}
       - run: npm ci
       - run: npm run modules:sync
@@ -82,10 +83,24 @@ jobs:
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v16.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v17.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v19.sql
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f selfhost/postgres/agentic-employees-v20.sql
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT provider,models_json,api_key_ciphertext,config_json FROM ae_ai_provider_settings LIMIT 0"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT entity_key,plan_json,row_count,status FROM ae_query_audit LIMIT 0"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT intent_type,status,missing_fields_json,candidates_json,action_id FROM ae_pending_intents LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT pdf_page_count FROM ae_generated_documents LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT ocr_text,vision_summary FROM ae_image_attachments LIMIT 0"
           psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT memory_type,visibility,priority,due_at,use_count FROM ae_memories LIMIT 0"
+      - name: Verify PostgreSQL schema inspection compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx <<'TS'
+          import { PostgresD1Database } from './selfhost/postgres-d1.ts';
+          const db=new PostgresD1Database(process.env.DATABASE_URL!);
+          const rows=await db.prepare("PRAGMA table_info('ae_pending_intents')").all<any>();
+          if(!rows.results.some((x:any)=>x.name==='missing_fields_json'))throw new Error('PostgreSQL PRAGMA compatibility did not return pending-intent schema');
+          await db.close();
+          TS
       - name: Generate DOCX, XLSX, PPTX and printable PDFs
         shell: bash
         run: |

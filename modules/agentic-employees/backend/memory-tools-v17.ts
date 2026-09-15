@@ -1,15 +1,19 @@
+import { createId } from "../../../src/lib/ids";
 import type { ToolContext } from "./tools-v14";
-import { executeTool as baseExecute,openAiTools as baseTools } from "./system-tools-v16";
+import { executeTool as baseExecute,openAiTools as baseTools } from "./schema-tools-v21";
 import { listRelevantMemories,saveMemory } from "./memory-service";
 
 const TOOLS:any[]=[
  {type:"function",name:"search_memory",strict:false,description:"Search this employee's saved working and institutional memory.",parameters:{type:"object",properties:{query:{type:"string"},limit:{type:"integer",minimum:1,maximum:50}},additionalProperties:false}},
  {type:"function",name:"remember_working_item",strict:false,description:"Save an ongoing assignment, follow-up or unresolved matter for later.",parameters:{type:"object",properties:{title:{type:"string"},content:{type:"string"},priority:{type:"string",enum:["low","normal","high","urgent"]},dueAt:{type:"string"},tags:{type:"array",items:{type:"string"}},visibility:{type:"string",enum:["agent","organization"]}},required:["title","content"],additionalProperties:false}},
  {type:"function",name:"remember_institutional_fact",strict:false,description:"Save a durable school preference, procedure, standing instruction, decision or outcome.",parameters:{type:"object",properties:{title:{type:"string"},content:{type:"string"},tags:{type:"array",items:{type:"string"}},visibility:{type:"string",enum:["agent","organization"]}},required:["title","content"],additionalProperties:false}},
- {type:"function",name:"update_working_memory",strict:false,description:"Update the state of an existing working-memory item.",parameters:{type:"object",properties:{memoryId:{type:"string"},status:{type:"string",enum:["open","in_progress","waiting","done","cancelled"]},note:{type:"string"}},required:["memoryId","status"],additionalProperties:false}}
+ {type:"function",name:"update_working_memory",strict:false,description:"Update the state of an existing working-memory item.",parameters:{type:"object",properties:{memoryId:{type:"string"},status:{type:"string",enum:["open","in_progress","waiting","done","cancelled"]},note:{type:"string"}},required:["memoryId","status"],additionalProperties:false}},
+ {type:"function",name:"attach_scanned_images_to_reply",strict:false,description:"Attach one or more images that the user already supplied in this conversation to your reply. Use this when the user asks you to show, return, compare or include those images. You may only attach image IDs present in this conversation; never invent an ID.",parameters:{type:"object",properties:{imageIds:{type:"array",items:{type:"string"},minItems:1,maxItems:8}},required:["imageIds"],additionalProperties:false}}
 ];
 
 export function openAiTools(agent:any,requested?:string[]|null){return[...baseTools(agent,requested),...TOOLS];}
+
+function parseImageIds(value:string|null|undefined){try{const meta=value?JSON.parse(value):{};return Array.isArray(meta?.imageIds)?meta.imageIds.map((x:unknown)=>String(x||"").trim()).filter(Boolean):[];}catch{return[];}}
 
 export async function executeTool(ctx:ToolContext,name:string,raw:unknown){
  if(!TOOLS.some(x=>x.name===name))return baseExecute(ctx,name,raw);
@@ -17,5 +21,11 @@ export async function executeTool(ctx:ToolContext,name:string,raw:unknown){
  if(name==="search_memory")return{memories:await listRelevantMemories(ctx.db,ctx.principal.organizationId,ctx.agent.key,String(args.query||""),Math.max(1,Math.min(50,Number(args.limit)||20)))};
  if(name==="remember_working_item"){const id=await saveMemory(ctx.db,ctx.principal,ctx.agent.key,{memoryType:"working",title:String(args.title||"Working item"),content:String(args.content||""),priority:args.priority||"normal",dueAt:args.dueAt||null,tags:Array.isArray(args.tags)?args.tags.map(String):[],visibility:args.visibility==="organization"?"organization":"agent",conversationId:ctx.conversationId});return{saved:true,memoryId:id};}
  if(name==="remember_institutional_fact"){const id=await saveMemory(ctx.db,ctx.principal,ctx.agent.key,{memoryType:"institutional",title:String(args.title||"Institutional memory"),content:String(args.content||""),tags:Array.isArray(args.tags)?args.tags.map(String):[],visibility:args.visibility==="organization"?"organization":"agent",conversationId:ctx.conversationId});return{saved:true,memoryId:id};}
+ if(name==="attach_scanned_images_to_reply"){
+  const requested=Array.from(new Set((Array.isArray(args.imageIds)?args.imageIds:[]).map((x:unknown)=>String(x||"").trim()).filter(Boolean))).slice(0,8);if(!requested.length)throw new Error("Choose at least one image from this conversation");
+  const messages=await ctx.db.prepare("SELECT metadata_json AS metadataJson FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='user' ORDER BY created_at DESC LIMIT 50").bind(ctx.principal.organizationId,ctx.conversationId).all<{metadataJson:string|null}>(),allowed=new Set(messages.results.flatMap(row=>parseImageIds(row.metadataJson))),chosen=requested.filter(id=>allowed.has(id));if(chosen.length!==requested.length)throw new Error("One or more image IDs are not attached to this conversation");
+  const placeholders=chosen.map(()=>"?").join(","),images=await ctx.db.prepare(`SELECT id FROM ae_image_attachments WHERE organization_id=? AND id IN (${placeholders}) AND status='ready'`).bind(ctx.principal.organizationId,...chosen).all<{id:string}>(),ready=new Set(images.results.map(row=>row.id));if(chosen.some(id=>!ready.has(id)))throw new Error("One or more requested images are unavailable");
+  const messageId=createId("aam");await ctx.db.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'assistant',?,?,?)`).bind(messageId,ctx.principal.organizationId,ctx.conversationId,chosen.length===1?"Attached image":"Attached images",ctx.principal.userId,JSON.stringify({imageIds:chosen,attachmentOnly:true})).run();return{replyImageIds:chosen,messageId};
+ }
  const id=String(args.memoryId||"");const status=String(args.status||"");const row=await ctx.db.prepare("SELECT id,content FROM ae_memories WHERE id=? AND organization_id=? AND agent_key=? AND memory_type='working'").bind(id,ctx.principal.organizationId,ctx.agent.key).first<any>();if(!row)throw new Error("Working memory item not found");const note=String(args.note||"").trim();await ctx.db.prepare("UPDATE ae_memories SET status=?,content=?,updated_by=?,updated_at=CURRENT_TIMESTAMP,completed_at=CASE WHEN ?='done' THEN CURRENT_TIMESTAMP ELSE completed_at END WHERE id=? AND organization_id=?").bind(status,note?`${row.content}\nUpdate: ${note}`:row.content,ctx.principal.userId,status,id,ctx.principal.organizationId).run();return{updated:true,memoryId:id,status};
 }
