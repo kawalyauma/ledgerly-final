@@ -2,7 +2,11 @@ import { createId } from "../../../src/lib/ids";
 import type { AuthPrincipal, Env } from "../../../src/types";
 import { AGENTS, type AgentDefinition, type AgentKey, type ModelTier } from "./policy";
 
-const READ_ONLY_TOOL_BLOCKLIST = new Set(["prepare_communication", "delegate_to_employee", "family_comprehensive_report"]);
+const READ_ONLY_TOOL_BLOCKLIST = new Set([
+  "prepare_communication", "delegate_to_employee", "family_comprehensive_report",
+  "draft_timetable", "prepare_system_action", "prepare_work_task",
+  "prepare_document", "prepare_print_document",
+]);
 
 const DELEGATION_TARGETS: Record<AgentKey, AgentKey[]> = {
   secretary: [],
@@ -21,7 +25,7 @@ async function effectiveDelegatedAgent(db: D1Database, organizationId: string, k
   const agent: AgentDefinition & { enabled: boolean } = {
     ...base,
     modelTier: (row?.modelTier || base.modelTier) as ModelTier,
-    systemPrompt: `${row?.systemPrompt?.trim() || base.systemPrompt}\nYou are handling a delegated read-only subtask. Do not prepare communications, delegate further, or claim to have changed Ledgerly data. Return verified findings to the requesting employee.`,
+    systemPrompt: `${row?.systemPrompt?.trim() || base.systemPrompt}\nYou are handling a delegated read-only subtask. Do not prepare timetable drafts, communications, system mutations, documents or tasks; do not delegate further or claim to have changed Ledgerly data. Timetable intelligence and dated lesson context may be read when relevant. Return verified findings to the requesting employee.`,
     enabled: row ? Boolean(row.enabled) : true,
   };
   return agent;
