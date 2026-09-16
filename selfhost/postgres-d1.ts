@@ -3,6 +3,36 @@ const {Pool}=pg;
 
 type BoundStatement={sql:string;values:unknown[]};
 function placeholders(sql:string){let n=0,out="",quote="";for(let i=0;i<sql.length;i++){const c=sql[i];if(quote){out+=c;if(c===quote&&sql[i-1]!=="\\")quote="";continue;}if(c==="'"||c==='"'){quote=c;out+=c;continue;}if(c==="?"){n++;out+=`$${n}`;}else out+=c;}return out;}
+
+function booleanColumn(name:string){
+ const column=name.replace(/^.*\./,"").replace(/^['"`]|['"`]$/g,"").toLowerCase();
+ return column==="active"||column==="enabled"||column==="deleted"||column==="verified"||column==="taxable"||column==="pensionable"||column==="allow_posting"||column==="auto_post"||column==="force_password_change"||column.startsWith("is_")||column.startsWith("has_")||column.startsWith("can_");
+}
+function normalizeBooleanLiterals(sql:string){
+ // D1/SQLite schemas commonly encode booleans as integer literals 0/1 while
+ // the self-hosted PostgreSQL schema uses real BOOLEAN columns. Translate the
+ // unambiguous boolean-looking comparisons/assignments before PostgreSQL sees
+ // them, while leaving ordinary numeric columns untouched.
+ let next=sql.replace(/\b((?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:active|enabled|deleted|verified|taxable|pensionable|allow_posting|auto_post|force_password_change|is_[A-Za-z0-9_]+|has_[A-Za-z0-9_]+|can_[A-Za-z0-9_]+))\s*(=|<>|!=)\s*([01])\b/gi,(_m,column,operator,value)=>`${column}${operator}${value==="1"?"TRUE":"FALSE"}`);
+ // INSERT statements can contain hard-coded 0/1 values (for example
+ // contacts.active=1) rather than bound parameters. Match the simple INSERT
+ // form used throughout the modular backend and replace only values whose
+ // target column is clearly boolean by name.
+ next=next.replace(/(INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+[A-Za-z_][A-Za-z0-9_.]*\s*\()([^()]+)(\)\s*VALUES\s*\()([^()]+)(\))/gi,(match,prefix,columnText,middle,valueText,suffix)=>{
+  const columns=String(columnText).split(",").map(x=>x.trim());
+  const values=String(valueText).split(",").map(x=>x.trim());
+  if(columns.length!==values.length)return match;
+  let changed=false;
+  for(let i=0;i<columns.length;i++){
+   if(booleanColumn(columns[i]||"")&&(values[i]==="1"||values[i]==="0")){
+    values[i]=values[i]==="1"?"TRUE":"FALSE";
+    changed=true;
+   }
+  }
+  return changed?`${prefix}${columnText}${middle}${values.join(",")}${suffix}`:match;
+ });
+ return next;
+}
 function sqliteFunctions(sql:string){return sql
  .replace(/datetime\('now'\s*,\s*'([+-])(\d+)\s+(minute|minutes|hour|hours|day|days)'\)/gi,(_,sign,n,unit)=>`(CURRENT_TIMESTAMP ${sign} INTERVAL '${n} ${unit}')`)
  .replace(/date\('now'\s*,\s*'([+-])(\d+)\s+(day|days|month|months|year|years)'\)/gi,(_,sign,n,unit)=>`(CURRENT_DATE ${sign} INTERVAL '${n} ${unit}')::date`)
@@ -31,7 +61,7 @@ function quoteCamelAliases(sql:string){
   next=next.replace(/(\b[A-Za-z_][A-Za-z0-9_$.]*\b|\))\s+([a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*)\b(?=\s*(?:,|\bFROM\b|\bWHERE\b|\bGROUP\b|\bHAVING\b|\bORDER\b|\bLIMIT\b|\bOFFSET\b|\bRETURNING\b|$))/g,(match,expr,alias)=>camel.test(alias)?`${expr} "${alias}"`:match);
   return next;
 }
-function translate(sql:string){return normalizeInsertIgnore(sqliteFunctions(quoteCamelAliases(placeholders(sql))));}
+function translate(sql:string){return normalizeInsertIgnore(sqliteFunctions(quoteCamelAliases(placeholders(normalizeBooleanLiterals(sql)))));}
 
 class PgD1Statement{
   constructor(private db:PostgresD1Database,public sql:string,public values:unknown[]=[]){ }
