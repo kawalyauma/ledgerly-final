@@ -44,6 +44,7 @@ app.onError((error, c) => {
   const foreignKey=lower.includes("foreign key constraint failed")||lower.includes("violates foreign key constraint");
   const notNull=lower.includes("not null constraint failed")||(lower.includes("null value in column")&&lower.includes("violates not-null constraint"));
   const check=lower.includes("check constraint failed")||lower.includes("violates check constraint");
+  const booleanTypeMismatch=raw.match(/column\s+"([^"]+)"\s+is of type boolean but expression is of type integer/i);
   if(duplicate){
     status=409;
     code="DUPLICATE_RECORD";
@@ -62,6 +63,8 @@ app.onError((error, c) => {
     status=422;code="REQUIRED_FIELD_MISSING";message="A required value is missing. Check the request and complete all required fields.";
   }else if(check){
     status=422;code="INVALID_VALUE";message="One of the supplied values is outside the allowed range or status options.";
+  }else if(booleanTypeMismatch){
+    status=500;code="POSTGRES_BOOLEAN_TYPE_MISMATCH";message=`The requested write reached Ledgerly, but the self-host database adapter sent an integer to PostgreSQL boolean column “${booleanTypeMismatch[1]}”. This is a server compatibility error, not a problem with the requested record.`;
   }else if(c.env.ENVIRONMENT==="development"){
     message=raw||message;
   }
