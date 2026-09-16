@@ -7,6 +7,7 @@ type DueSchedule = {
   organizationId: string;
   workflowKey: string;
   actorUserId: string;
+  enabled: number | boolean;
   cadence: ProactiveCadence;
   runHour: number;
   runMinute: number;
@@ -14,16 +15,21 @@ type DueSchedule = {
 };
 
 export async function runDueProactiveSchedules(env: Env) {
+  // Do not compare enabled to 1 in SQL here. Older self-host PostgreSQL
+  // installations can have this column as BOOLEAN while D1/current schemas use
+  // integer 0/1. Selecting the value and normalizing it in JS keeps the same
+  // scheduler source compatible with both storage representations.
   const due = await env.FINANCE_DB.prepare(`SELECT s.id,s.organization_id AS organizationId,s.workflow_key AS workflowKey,s.actor_user_id AS actorUserId,
-    s.cadence,s.run_hour AS runHour,s.run_minute AS runMinute,s.weekday
+    s.enabled,s.cadence,s.run_hour AS runHour,s.run_minute AS runMinute,s.weekday
     FROM ae_proactive_schedules s
     JOIN memberships m ON m.organization_id=s.organization_id AND m.user_id=s.actor_user_id
     JOIN users u ON u.id=m.user_id
-    WHERE s.enabled=1 AND s.next_run_at IS NOT NULL AND s.next_run_at<=CURRENT_TIMESTAMP
+    WHERE s.next_run_at IS NOT NULL AND s.next_run_at<=CURRENT_TIMESTAMP
       AND u.status='active' AND m.role IN ('owner','admin')
     ORDER BY s.next_run_at LIMIT 20`).all<DueSchedule>();
 
   for (const schedule of due.results) {
+    if (!Boolean(schedule.enabled)) continue;
     try {
       await runProactiveWorkflow(env, schedule.organizationId, schedule.actorUserId, schedule.workflowKey, "scheduled", schedule.id);
     } catch (error) {
