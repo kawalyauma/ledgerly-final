@@ -40,19 +40,27 @@ app.onError((error, c) => {
   const raw=error instanceof Error?error.message:String(error);
   const lower=raw.toLowerCase();
   let status=500,code="INTERNAL_ERROR",message="The request could not be completed.";
-  if(lower.includes("unique constraint failed")){
-    status=409;code="DUPLICATE_RECORD";
-    if(lower.includes("school_class_levels.organization_id")&&lower.includes("sequence"))message="That class-level sequence is already assigned. Choose a different sequence number.";
+  const duplicate=lower.includes("unique constraint failed")||lower.includes("duplicate key value violates unique constraint");
+  const foreignKey=lower.includes("foreign key constraint failed")||lower.includes("violates foreign key constraint");
+  const notNull=lower.includes("not null constraint failed")||(lower.includes("null value in column")&&lower.includes("violates not-null constraint"));
+  const check=lower.includes("check constraint failed")||lower.includes("violates check constraint");
+  if(duplicate){
+    status=409;
+    code="DUPLICATE_RECORD";
+    if(lower.includes("mobile_sync_changes_pkey")){
+      code="MOBILE_SYNC_CHANGE_CONFLICT";
+      message="The requested write reached Ledgerly, but the mobile sync change log generated a duplicate change identifier. This is a server-side synchronization conflict, not a problem with the requested record fields.";
+    }else if(lower.includes("school_class_levels.organization_id")&&lower.includes("sequence"))message="That class-level sequence is already assigned. Choose a different sequence number.";
     else if(lower.includes("school_class_levels.organization_id")&&lower.includes("code"))message="That class-level code is already in use. Choose a different code.";
     else if(lower.includes("school_terms.organization_id")&&lower.includes("sequence"))message="That term/semester sequence is already assigned in this academic year.";
     else if(lower.includes("school_staff_subjects"))message="This subject is already assigned to the selected staff member.";
     else if(lower.includes("school_staff_teaching_assignments"))message="This teaching assignment already exists for the selected staff member, class, stream, subject and period.";
     else message="A record with the same unique value already exists. Change the duplicated code, number, sequence or assignment and try again.";
-  }else if(lower.includes("foreign key constraint failed")){
+  }else if(foreignKey){
     status=409;code="RELATED_RECORD_CONFLICT";message="This change conflicts with related records. Select valid referenced records, or remove dependent records before deleting this item.";
-  }else if(lower.includes("not null constraint failed")){
-    status=422;code="REQUIRED_FIELD_MISSING";message="A required value is missing. Check the form and complete all required fields.";
-  }else if(lower.includes("check constraint failed")){
+  }else if(notNull){
+    status=422;code="REQUIRED_FIELD_MISSING";message="A required value is missing. Check the request and complete all required fields.";
+  }else if(check){
     status=422;code="INVALID_VALUE";message="One of the supplied values is outside the allowed range or status options.";
   }else if(c.env.ENVIRONMENT==="development"){
     message=raw||message;
