@@ -62,6 +62,8 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       S3_AUTO_CREATE_BUCKET: "true"
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
+      JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-your-finance-pro-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres: { condition: service_healthy }
@@ -93,8 +95,8 @@ services:
       LEDGERLY_STORAGE_DIR: /var/lib/ledgerly/objects
       ENVIRONMENT: production
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
-      JWT_ISSUER: ${JWT_ISSUER:-ledgerly}
-      JWT_AUDIENCE: ${JWT_AUDIENCE:-ledgerly-api}
+      JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-your-finance-pro-api}
       AI_PROVIDER_ENCRYPTION_KEY: ${AI_PROVIDER_ENCRYPTION_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
