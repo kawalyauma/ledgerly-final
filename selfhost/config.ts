@@ -7,8 +7,10 @@ const schema=z.object({
   LEDGERLY_STORAGE_DIR:z.string().default("./data/objects"),
   ENVIRONMENT:z.string().default("production"),
   JWT_SECRET:z.string().min(16),
-  JWT_ISSUER:z.string().default("ledgerly"),
-  JWT_AUDIENCE:z.string().default("ledgerly-api"),
+  // These defaults must stay aligned with node-backend/src/config/env.ts so
+  // access tokens issued by the Node API are accepted by the modular API.
+  JWT_ISSUER:z.string().default("your-finance-pro"),
+  JWT_AUDIENCE:z.string().default("your-finance-pro-api"),
   OPENAI_API_KEY:z.string().optional(),
   OPENAI_BASE_URL:z.string().url().optional(),
   OPENAI_MODEL_LUNA:z.string().optional(),OPENAI_MODEL_TERRA:z.string().optional(),OPENAI_MODEL_SOL:z.string().optional(),
