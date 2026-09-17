@@ -11,6 +11,7 @@ import { ActionCenterPage } from "./ActionCenterPage";
 import { AgentDocumentsPage } from "./AgentDocumentsPage";
 import "./agentic-employees.css";
 import "./chat-studio.css";
+import "./chat-studio-lifecycle.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
