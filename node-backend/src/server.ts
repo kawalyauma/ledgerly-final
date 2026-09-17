@@ -1,8 +1,14 @@
+import { setDefaultResultOrder } from "node:dns";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { features } from "./features/index.js";
 import { PlatformHealth } from "./health/service.js";
 import { createRuntime } from "./runtime.js";
+
+// This host's dual-stack DNS resolution is unreliable for at least
+// api.anthropic.com (intermittent getaddrinfo EAI_AGAIN with a working
+// A record but a flaky AAAA lookup). Preferring IPv4 avoids the failing leg.
+setDefaultResultOrder("ipv4first");
 
 const runtime = await createRuntime();
 const health = new PlatformHealth(runtime);

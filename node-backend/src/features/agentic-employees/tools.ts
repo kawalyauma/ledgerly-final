@@ -127,8 +127,8 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
       const [students, staff, guardians, classes] = await Promise.all([
         ctx.db.prepare("SELECT COUNT(*) AS n FROM school_students WHERE organization_id=? AND deleted_at IS NULL AND status='active'").bind(organizationId).first<{ n: number }>(),
         ctx.db.prepare("SELECT COUNT(*) AS n FROM school_staff_profiles WHERE organization_id=? AND deleted_at IS NULL AND employment_status='active'").bind(organizationId).first<{ n: number }>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_guardians WHERE organization_id=? AND active=1").bind(organizationId).first<{ n: number }>(),
-        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_classes WHERE organization_id=? AND active=1").bind(organizationId).first<{ n: number }>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_guardians WHERE organization_id=? AND active=true").bind(organizationId).first<{ n: number }>(),
+        ctx.db.prepare("SELECT COUNT(*) AS n FROM school_classes WHERE organization_id=? AND active=true").bind(organizationId).first<{ n: number }>(),
       ]);
       return { activeStudents: Number(students?.n || 0), activeStaff: Number(staff?.n || 0), activeGuardians: Number(guardians?.n || 0), activeClasses: Number(classes?.n || 0) };
     }
@@ -250,7 +250,7 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
       need(ctx, "hr:read");
       const [employees, departments, leave, onboarding] = await Promise.all([
         ctx.db.prepare("SELECT COUNT(*) AS total,SUM(CASE WHEN employment_status='active' THEN 1 ELSE 0 END) AS active FROM hr_employees WHERE organization_id=?").bind(organizationId).first<any>(),
-        ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_departments WHERE organization_id=? AND active=1").bind(organizationId).first<any>(),
+        ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_departments WHERE organization_id=? AND active=true").bind(organizationId).first<any>(),
         ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_leave_requests WHERE organization_id=? AND status='pending'").bind(organizationId).first<any>(),
         ctx.db.prepare("SELECT COUNT(*) AS total FROM hr_onboarding_tasks WHERE organization_id=? AND status='pending'").bind(organizationId).first<any>(),
       ]);

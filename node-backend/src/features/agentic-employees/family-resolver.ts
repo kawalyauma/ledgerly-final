@@ -29,7 +29,7 @@ export async function resolveGuardianFamily(
            phone_primary AS phonePrimary,phone_secondary AS phoneSecondary,email,
            relationship_default AS relationshipDefault
     FROM school_guardians
-    WHERE organization_id=? AND active=1 AND (
+    WHERE organization_id=? AND active=true AND (
       id=? OR phone_primary=? OR phone_secondary=? OR LOWER(COALESCE(email,''))=LOWER(?) OR
       LOWER(TRIM(first_name||' '||COALESCE(middle_name||' ','')||last_name)) LIKE ? OR
       LOWER(first_name) LIKE ? OR LOWER(last_name) LIKE ?
