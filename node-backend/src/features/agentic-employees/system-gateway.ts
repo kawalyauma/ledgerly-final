@@ -1,22 +1,16 @@
-// Adapted from ../../../../selfhost/system-gateway.ts for node-backend's own Hono app.
-// Lets agentic-employees tools (system_catalog/system_read/prepare_system_action)
-// re-invoke node-backend's own REST API in-process, scoped to the executing
-// principal's real tenant/role/scopes and to a per-agent-role path allowlist.
+// Adapted from ../../../../selfhost/system-gateway.ts for node-backend's Hono app.
+// Delegated requests are tenant/scopes checked again by the real Ledgerly route,
+// while this allowlist keeps each AI employee inside its business areas.
 import { SignJWT } from "jose";
 import type { AuthPrincipal } from "../../http/types.js";
 
-// Every AI employee can reach anything a real logged-in user with that same
-// role/scopes could reach — Ledgerly's own permission checks (requireScope,
-// role checks) still run for real on every delegated request underneath this,
-// so this allowlist is about which *areas* of the product an employee should
-// be poking around in, not a second, stricter permission system.
 const profiles: Record<string, string[]> = {
-  secretary: ["/api/v1/"],
-  dos: ["/api/v1/"],
-  bursar: ["/api/v1/"],
+  secretary: ["/api/v1/school", "/api/v1/contacts", "/api/v1/communications", "/api/v1/documents", "/api/v1/files", "/api/v1/printerly", "/api/v1/tasks"],
+  dos: ["/api/v1/school", "/api/v1/academics", "/api/v1/attendance", "/api/v1/reports", "/api/v1/documents", "/api/v1/files", "/api/v1/communications", "/api/v1/tasks"],
+  bursar: ["/api/v1/accounts", "/api/v1/journals", "/api/v1/reports", "/api/v1/documents", "/api/v1/files", "/api/v1/payments", "/api/v1/banking", "/api/v1/budgets", "/api/v1/finance", "/api/v1/school", "/api/v1/payroll-payments", "/api/v1/printerly"],
   headteacher: ["/api/v1/"],
-  hr: ["/api/v1/"],
-  librarian: ["/api/v1/"],
+  hr: ["/api/v1/human-resources", "/api/v1/payroll", "/api/v1/school", "/api/v1/contacts", "/api/v1/communications", "/api/v1/documents", "/api/v1/files", "/api/v1/attendance", "/api/v1/reports", "/api/v1/tasks", "/api/v1/printerly"],
+  librarian: ["/api/v1/books", "/api/v1/inventory", "/api/v1/school", "/api/v1/documents", "/api/v1/files", "/api/v1/reports", "/api/v1/tasks", "/api/v1/printerly"],
 };
 const blocked = ["/api/v1/agentic-employees", "/api/v1/admin", "/api/v1/integrations", "/api/v1/modules"];
 
@@ -47,9 +41,6 @@ export function createAgentSystemGateway(app: { fetch: (req: Request) => Promise
     async catalog(agentKey) {
       const routes = (app.routes || []).map(r => ({ method: String(r.method || "GET").toUpperCase(), path: String(r.path || "") }))
         .filter(r => ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(r.method) && r.path.startsWith("/api/v1/") && agentPathAllowed(agentKey, r.path));
-      // No cap here: system_tools' catalog handler applies the model's search
-      // query against this full allowed set before truncating for the model.
-      // Capping here first would silently hide legitimate routes from search.
       return Array.from(new Map(routes.map(r => [`${r.method} ${r.path}`, r])).values());
     },
     async request(input) {
