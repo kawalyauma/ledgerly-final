@@ -120,9 +120,14 @@ function normalizeEditablePayload(action: ActionRow & { payload: Record<string, 
 
 function phaseForTool(name: string) {
   const value = name.toLowerCase();
+  if (value === "light_route_type" || value === "light_build_registry") return "thinking";
+  if (value === "light_route_module" || value === "light_route_group" || value === "light_route_tool") return "analyzing_data";
+  if (value.startsWith("light_extract_")) return "querying_ledgerly";
+  if (value === "light_build_document") return "building_document";
+  if (value === "light_write_answer") return "writing";
   if (value.includes("document")) return "building_document";
-  if (value.includes("system_read") || value.includes("search") || value.includes("lookup") || value.includes("overview") || value.includes("summary") || value.includes("report")) return "querying_ledgerly";
-  if (value.includes("prepare_system_action") || value.includes("prepare_communication") || value.includes("prepare_work_task")) return "preparing_approval";
+  if (value.includes("system_read") || value.includes("search") || value.includes("lookup") || value.includes("overview") || value.includes("summary") || value.includes("report") || value.startsWith("get_") || value.startsWith("list_")) return "querying_ledgerly";
+  if (value.includes("prepare_system_action") || value.includes("prepare_communication") || value.includes("prepare_work_task") || value.startsWith("create_") || value.startsWith("update_") || value.startsWith("delete_") || value.startsWith("action_")) return "preparing_approval";
   if (value.includes("memory")) return "checking_memory";
   if (value.includes("timetable")) return "analyzing_data";
   return "analyzing_data";
