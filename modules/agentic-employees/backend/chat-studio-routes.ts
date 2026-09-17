@@ -24,6 +24,8 @@ type ActionRow = {
   updatedAt?: string;
 };
 
+type ConversationRow = { id: string; agentKey: string; title: string; status: string; lastMessageAt?: string | null; createdAt?: string };
+
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new AppError(422, "VALIDATION_ERROR", "Approval details must be a JSON object");
   return value as Record<string, unknown>;
@@ -39,8 +41,9 @@ function canUseScope(principal: AppVariables["principal"], scope: string) {
 }
 
 async function assertConversation(db: D1Database, organizationId: string, id: string) {
-  const row = await db.prepare("SELECT id,agent_key AS agentKey FROM ae_conversations WHERE id=? AND organization_id=?")
-    .bind(id, organizationId).first<{ id: string; agentKey: string }>();
+  const row = await db.prepare(`SELECT id,agent_key AS agentKey,title,status,last_message_at AS lastMessageAt,created_at AS createdAt
+    FROM ae_conversations WHERE id=? AND organization_id=?`)
+    .bind(id, organizationId).first<ConversationRow>();
   if (!row) throw new AppError(404, "NOT_FOUND", "AI conversation not found");
   return row;
 }
@@ -68,7 +71,6 @@ function normalizeEditablePayload(action: ActionRow & { payload: Record<string, 
       return { title, format, spec, conversationId: original.conversationId ?? null };
     }
     case "system.api.request": {
-      // Method, route and delegated employee are deliberately immutable. Editing them could change the permission boundary.
       return {
         agentKey: original.agentKey,
         method: original.method,
@@ -167,6 +169,20 @@ agenticChatStudioRoutes.get("/chat-studio/conversations/:id/status", requireScop
   const waiting = actions.some(item => ["suggested", "prepared", "awaiting_approval", "approved"].includes(String(item.status)));
   const phase = running ? phaseForTool(running.toolName) : waiting ? "waiting_for_approval" : "thinking";
   return c.json({ data: { phase, activeTool: running?.toolName || null, tools: tools.results, waitingForApproval: waiting } });
+});
+
+agenticChatStudioRoutes.post("/chat-studio/conversations/:id/close", requireScope("school:read"), async c => {
+  const principal = c.get("principal"), id = c.req.param("id");
+  const conversation = await assertConversation(c.env.FINANCE_DB, principal.organizationId, id);
+  if (conversation.status !== "closed") {
+    await c.env.FINANCE_DB.batch([
+      c.env.FINANCE_DB.prepare(`UPDATE ae_conversations SET status='closed',updated_at=CURRENT_TIMESTAMP
+        WHERE id=? AND organization_id=? AND status<>'closed'`).bind(id, principal.organizationId),
+      c.env.FINANCE_DB.prepare(`INSERT INTO audit_logs(id,organization_id,actor_id,action,entity_type,entity_id,after)
+        VALUES(?,?,?,?,?,?,?)`).bind(createId("aud"), principal.organizationId, principal.userId, "agentic.conversation.closed", "ae_conversation", id, JSON.stringify({ status: "closed" })),
+    ]);
+  }
+  return c.json({ data: { ...conversation, status: "closed" } });
 });
 
 agenticChatStudioRoutes.patch("/chat-studio/actions/:id/payload", requireScope("school:read"), async c => {
