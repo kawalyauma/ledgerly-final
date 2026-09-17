@@ -152,6 +152,7 @@ agenticEmployeeRoutes.post("/conversations/:id/messages", requireScope("school:r
   if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Message is required", parsed.error.flatten());
   const principal = c.get("principal");
   const conversation = await assertConversation(c.env.FINANCE_DB, principal.organizationId, c.req.param("id"));
+  if (conversation.status === "closed") throw new AppError(409, "CONVERSATION_CLOSED", "This chat is closed. Start a new chat to continue.");
   if (!isAgentKey(conversation.agentKey)) throw new AppError(409, "AGENT_INVALID", "Conversation agent is invalid");
   const agent = await effectiveAgent(c.env.FINANCE_DB, principal.organizationId, conversation.agentKey);
   if (!agent.enabled) throw new AppError(409, "AGENT_DISABLED", "This AI employee is disabled");
