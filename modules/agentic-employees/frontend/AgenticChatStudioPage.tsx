@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
-  BarChart3, Bot, Brain, CheckCircle2, ChevronRight, Database, Download, FileDown,
+  Archive, BarChart3, Bot, Brain, CheckCircle2, ChevronRight, Database, Download, FileDown,
   FileSpreadsheet, FileText, LoaderCircle, MessageSquare, Pencil, Plus, Presentation,
   RefreshCcw, Send, ShieldCheck, Sparkles, X,
 } from "lucide-react";
@@ -12,7 +12,8 @@ type Message={id:string;role:"user"|"assistant";content:string;model?:string;cre
 type Settings={provider:string;configured:boolean;models:Record<string,string>};
 type Action={id:string;agentKey:string;actionType:string;title:string;summary:string;requiredScope:string;status:string;approvalId?:string|null;payload:Record<string,unknown>;resultEntityType?:string|null;resultEntityId?:string|null;failureText?:string|null;createdAt?:string;updatedAt?:string};
 type Artifact={id:string;title:string;format:"pdf"|"docx"|"xlsx"|"pptx";sourceMimeType:string;sourceSizeBytes:number;pdfSizeBytes:number;pdfPageCount:number;status:string;createdAt?:string};
-type LiveStatus={phase:string;activeTool?:string|null;waitingForApproval:boolean;tools:Array<{id:string;toolName:string;status:string;errorText?:string}>};
+type LiveTool={id:string;toolName:string;status:string;errorText?:string;createdAt?:string;completedAt?:string};
+type LiveStatus={phase:string;activeTool?:string|null;waitingForApproval:boolean;tools:LiveTool[]};
 type Phase="ready"|"thinking"|"querying_ledgerly"|"analyzing_data"|"checking_memory"|"preparing_approval"|"building_document"|"writing"|"waiting_for_approval"|"validating_edits"|"approving"|"executing"|"creating_pdf"|"creating_xlsx"|"creating_pptx"|"creating_docx";
 
 const AGENT_META:Record<string,{label:string;initials:string;prompts:string[]}>= {
@@ -27,9 +28,9 @@ const AGENT_META:Record<string,{label:string;initials:string;prompts:string[]}>=
 const PHASES:Record<Phase,{label:string;detail:string;icon:ReactNode}>={
   ready:{label:"Ready",detail:"Ask naturally — Ledgerly data and governed actions are available.",icon:<CheckCircle2 size={15}/>},
   thinking:{label:"Thinking",detail:"Understanding your request and deciding what evidence is needed…",icon:<LoaderCircle className="spin" size={15}/>},
-  querying_ledgerly:{label:"Querying Ledgerly",detail:"Reading permitted school records and verified metrics…",icon:<Database size={15}/>},
-  analyzing_data:{label:"Analyzing",detail:"Comparing verified records and calculating the response structure…",icon:<BarChart3 size={15}/>},
-  checking_memory:{label:"Checking memory",detail:"Reviewing relevant working and institutional context…",icon:<Brain size={15}/>},
+  querying_ledgerly:{label:"Checking Ledgerly",detail:"Reading permitted school records and verified metrics…",icon:<Database size={15}/>},
+  analyzing_data:{label:"Analyzing",detail:"Comparing verified records and organizing the answer…",icon:<BarChart3 size={15}/>},
+  checking_memory:{label:"Checking context",detail:"Reviewing relevant saved working and institutional context…",icon:<Brain size={15}/>},
   preparing_approval:{label:"Preparing approval",detail:"Building a governed action for your review in this chat…",icon:<ShieldCheck size={15}/>},
   building_document:{label:"Building document",detail:"Structuring tables, charts and professional report content…",icon:<FileText size={15}/>},
   writing:{label:"Writing",detail:"Composing the final response from verified evidence…",icon:<Sparkles size={15}/>},
@@ -48,9 +49,13 @@ export function AgenticChatStudioPage(){
   const[selected,setSelected]=useState("headteacher"),[messages,setMessages]=useState<Message[]>([]),[actions,setActions]=useState<Action[]>([]),[artifacts,setArtifacts]=useState<Artifact[]>([]);
   const[settings,setSettings]=useState<Settings|null>(null),[text,setText]=useState(""),[busy,setBusy]=useState(false),[phase,setPhase]=useState<Phase>("ready"),[error,setError]=useState("");
   const[actionBusy,setActionBusy]=useState(""),[editing,setEditing]=useState(""),[drafts,setDrafts]=useState<Record<string,string>>({});
+  const[liveStatus,setLiveStatus]=useState<LiveStatus|null>(null);
+  const baselineToolIds=useRef<Set<string>>(new Set());
   const agent=useMemo(()=>agents.find(item=>item.key===selected)||agents[0],[agents,selected]);
   const meta=agent?(AGENT_META[agent.key]||{label:"Ledgerly AI employee",initials:"AI",prompts:["What needs attention today?"]}):AGENT_META.headteacher;
   const pending=useMemo(()=>actions.filter(item=>["suggested","prepared","awaiting_approval","approved"].includes(item.status)),[actions]);
+  const activeChats=useMemo(()=>conversations.filter(item=>item.status!=="closed"),[conversations]);
+  const closedChats=useMemo(()=>conversations.filter(item=>item.status==="closed"),[conversations]);
 
   useEffect(()=>{void bootstrap();},[]);
 
@@ -59,8 +64,8 @@ export function AgenticChatStudioPage(){
     try{
       const[nextAgents,nextConversations,nextSettings]=await Promise.all([get<Agent[]>("/agentic-employees/agents"),get<Conversation[]>("/agentic-employees/conversations"),get<Settings>("/agentic-employees/settings")]);
       setAgents(nextAgents);setConversations(nextConversations);setSettings(nextSettings);
-      const first=nextConversations[0];
-      if(first){setSelected(first.agentKey);await loadConversation(first);}else if(nextAgents.length)setSelected(nextAgents.find(a=>a.key==="headteacher")?.key||nextAgents[0].key);
+      const first=nextConversations.find(item=>item.status!=="closed");
+      if(first){setSelected(first.agentKey);await loadConversation(first);}else{setConversation(null);setMessages([]);setActions([]);setArtifacts([]);const fallbackKey=nextConversations[0]?.agentKey||nextAgents.find(a=>a.key==="headteacher")?.key||nextAgents[0]?.key;if(fallbackKey)setSelected(fallbackKey);}
     }catch(err){setError(errorText(err));}
   }
 
@@ -72,33 +77,59 @@ export function AgenticChatStudioPage(){
   }
 
   async function loadConversation(next:Conversation){
-    setBusy(true);setError("");setSelected(next.agentKey);setConversation(next);setPhase("thinking");
-    try{const history=await get<Message[]>(`/agentic-employees/conversations/${next.id}/messages`);setMessages(history);const nextActions=await loadSidecars(next.id);setPhase(nextActions.some(a=>["suggested","prepared","awaiting_approval","approved"].includes(a.status))?"waiting_for_approval":"ready");}
+    setBusy(true);setLiveStatus(null);setError("");setSelected(next.agentKey);setConversation(next);setPhase("ready");
+    try{const history=await get<Message[]>(`/agentic-employees/conversations/${next.id}/messages`);setMessages(history);const nextActions=await loadSidecars(next.id);setPhase(next.status!=="closed"&&nextActions.some(a=>["suggested","prepared","awaiting_approval","approved"].includes(a.status))?"waiting_for_approval":"ready");}
     catch(err){setError(errorText(err));setPhase("ready");}finally{setBusy(false);}
   }
 
-  function latestFor(agentKey:string){return conversations.filter(c=>c.agentKey===agentKey).sort((a,b)=>String(b.lastMessageAt||b.createdAt||"").localeCompare(String(a.lastMessageAt||a.createdAt||"")))[0];}
+  function latestFor(agentKey:string){return conversations.filter(c=>c.agentKey===agentKey&&c.status!=="closed").sort((a,b)=>String(b.lastMessageAt||b.createdAt||"").localeCompare(String(a.lastMessageAt||a.createdAt||"")))[0];}
   async function openAgent(next:Agent,forceNew=false){
     setSelected(next.key);setError("");
     const existing=!forceNew?latestFor(next.key):undefined;if(existing){await loadConversation(existing);return;}
-    setBusy(true);setPhase("thinking");
-    try{const created=await post<Conversation>("/agentic-employees/conversations",{agentKey:next.key,title:next.title});setConversations(current=>[created,...current]);setConversation(created);setMessages([]);setActions([]);setArtifacts([]);setPhase("ready");}
+    setBusy(true);setLiveStatus(null);setPhase("ready");
+    try{const created=await post<Conversation>("/agentic-employees/conversations",{agentKey:next.key,title:next.title});setConversations(current=>[created,...current]);setConversation(created);setMessages([]);setActions([]);setArtifacts([]);setDrafts({});setText("");setPhase("ready");}
     catch(err){setError(errorText(err));setPhase("ready");}finally{setBusy(false);}
   }
 
+  async function startNewChat(){if(agent&&!busy)await openAgent(agent,true);}
+
+  async function closeConversation(){
+    if(!conversation||conversation.status==="closed"||busy||actionBusy)return;
+    setBusy(true);setError("");setLiveStatus(null);
+    try{
+      const closed=await post<Conversation>(`/agentic-employees/chat-studio/conversations/${conversation.id}/close`,{});
+      setConversation(closed);setConversations(current=>current.map(item=>item.id===closed.id?{...item,...closed,status:"closed"}:item));setText("");setPhase("ready");
+    }catch(err){setError(errorText(err));}finally{setBusy(false);}
+  }
+
+  async function captureToolBaseline(id:string){
+    try{const status=await get<LiveStatus>(`/agentic-employees/chat-studio/conversations/${id}/status`);baselineToolIds.current=new Set(status.tools.map(item=>item.id));}
+    catch{baselineToolIds.current=new Set();}
+  }
+
   async function pollStatus(id:string){
-    try{const status=await get<LiveStatus>(`/agentic-employees/chat-studio/conversations/${id}/status`);if(status.activeTool||status.waitingForApproval)setPhase((status.phase in PHASES?status.phase:"analyzing_data") as Phase);}catch{/* The message request remains authoritative. */}
+    try{
+      const status=await get<LiveStatus>(`/agentic-employees/chat-studio/conversations/${id}/status`);
+      const currentTools=status.tools.filter(item=>!baselineToolIds.current.has(item.id));
+      const visible:{phase:string;activeTool?:string|null;waitingForApproval:boolean;tools:LiveTool[]}={...status,tools:currentTools};
+      setLiveStatus(visible);
+      if(status.activeTool||currentTools.length||status.waitingForApproval)setPhase((status.phase in PHASES?status.phase:"analyzing_data") as Phase);
+    }catch{/* The message request remains authoritative. */}
   }
 
   async function send(){
-    if(!conversation||!text.trim()||busy)return;const content=text.trim();setText("");setError("");setBusy(true);setPhase("thinking");
+    if(!conversation||conversation.status==="closed"||!text.trim()||busy)return;const activeConversation=conversation;const content=text.trim();setText("");setError("");setBusy(true);setPhase("thinking");
+    await captureToolBaseline(activeConversation.id);
+    setLiveStatus({phase:"thinking",activeTool:null,waitingForApproval:false,tools:[]});
     const optimistic:Message={id:`local-${Date.now()}`,role:"user",content,createdAt:new Date().toISOString()};setMessages(current=>[...current,optimistic]);
-    const timer=window.setInterval(()=>void pollStatus(conversation.id),700);
+    const timer=window.setInterval(()=>void pollStatus(activeConversation.id),650);void pollStatus(activeConversation.id);
     try{
-      const message=await post<Message>(`/agentic-employees/conversations/${conversation.id}/messages`,{content});setPhase("writing");setMessages(current=>[...current,message]);
-      const nextActions=await loadSidecars(conversation.id);const nextConversations=await get<Conversation[]>("/agentic-employees/conversations");setConversations(nextConversations);
+      const message=await post<Message>(`/agentic-employees/conversations/${activeConversation.id}/messages`,{content});
+      window.clearInterval(timer);setLiveStatus(null);setPhase("writing");setMessages(current=>[...current,message]);
+      const nextActions=await loadSidecars(activeConversation.id);const nextConversations=await get<Conversation[]>("/agentic-employees/conversations");setConversations(nextConversations);const refreshed=nextConversations.find(item=>item.id===activeConversation.id);if(refreshed)setConversation(refreshed);
       setPhase(nextActions.some(a=>["suggested","prepared","awaiting_approval","approved"].includes(a.status))?"waiting_for_approval":"ready");
-    }catch(err){setMessages(current=>current.filter(item=>item.id!==optimistic.id));setError(errorText(err));setPhase("ready");}finally{window.clearInterval(timer);setBusy(false);}
+    }catch(err){setMessages(current=>current.filter(item=>item.id!==optimistic.id));setError(errorText(err));setPhase("ready");}
+    finally{window.clearInterval(timer);baselineToolIds.current=new Set();setLiveStatus(null);setBusy(false);}
   }
 
   function parseDraft(action:Action){try{const value=JSON.parse(drafts[action.id]||"{}");if(!value||typeof value!=="object"||Array.isArray(value))throw new Error();return value as Record<string,unknown>;}catch{throw new Error("The edited approval details must be valid JSON.");}}
@@ -136,40 +167,58 @@ export function AgenticChatStudioPage(){
 
   return <div className="acs-page">
     <aside className="acs-sidebar">
-      <div className="acs-brand"><span className="acs-logo"><Sparkles size={18}/></span><div><b>Ledgerly AI</b><small>Chat Studio</small></div><button title="New conversation" disabled={!agent} onClick={()=>agent&&void openAgent(agent,true)}><Plus size={17}/></button></div>
+      <div className="acs-brand"><span className="acs-logo"><Sparkles size={18}/></span><div><b>Ledgerly AI</b><small>Chat Studio</small></div><button title="New conversation" disabled={!agent||busy} onClick={()=>void startNewChat()}><Plus size={17}/></button></div>
       <div className="acs-provider"><span className={settings?.configured?"online":"offline"}/><div><b>{settings?.configured?"AI online":"Provider setup needed"}</b><small>{settings?.provider||"AI provider"}</small></div></div>
       <div className="acs-side-label">AI EMPLOYEES</div>
-      <div className="acs-agent-list">{agents.map(item=>{const m=AGENT_META[item.key]||{label:item.title,initials:"AI",prompts:[]};return <button key={item.key} className={item.key===selected?"active":""} disabled={!item.enabled} onClick={()=>void openAgent(item)}><span className="acs-avatar">{m.initials}</span><span><b>{item.name}</b><small>{m.label}</small></span><em>{item.modelTier.toUpperCase()}</em></button>;})}</div>
-      <div className="acs-side-label acs-thread-heading"><span>RECENT CHATS</span><button onClick={()=>void bootstrap()} title="Refresh"><RefreshCcw size={13}/></button></div>
-      <div className="acs-thread-list">{conversations.slice(0,12).map(item=><button key={item.id} className={conversation?.id===item.id?"active":""} onClick={()=>void loadConversation(item)}><MessageSquare size={14}/><span><b>{item.title}</b><small>{formatWhen(item.lastMessageAt||item.createdAt)}</small></span></button>)}</div>
+      <div className="acs-agent-list">{agents.map(item=>{const m=AGENT_META[item.key]||{label:item.title,initials:"AI",prompts:[]};return <button key={item.key} className={item.key===selected?"active":""} disabled={!item.enabled||busy} onClick={()=>void openAgent(item)}><span className="acs-avatar">{m.initials}</span><span><b>{item.name}</b><small>{m.label}</small></span><em>{item.modelTier.toUpperCase()}</em></button>;})}</div>
+      <div className="acs-side-label acs-thread-heading"><span>OPEN CHATS</span><button onClick={()=>void bootstrap()} title="Refresh"><RefreshCcw size={13}/></button></div>
+      <div className="acs-thread-list acs-thread-list-open">{activeChats.slice(0,12).map(item=><button key={item.id} className={conversation?.id===item.id?"active":""} onClick={()=>void loadConversation(item)}><MessageSquare size={14}/><span><b>{item.title}</b><small>{formatWhen(item.lastMessageAt||item.createdAt)}</small></span></button>)}{!activeChats.length&&<small className="acs-no-threads">No open chats</small>}</div>
+      {closedChats.length>0&&<><div className="acs-side-label acs-closed-heading">CLOSED</div><div className="acs-thread-list acs-thread-list-closed">{closedChats.slice(0,6).map(item=><button key={item.id} className={conversation?.id===item.id?"active":""} onClick={()=>void loadConversation(item)}><Archive size={14}/><span><b>{item.title}</b><small>{formatWhen(item.lastMessageAt||item.createdAt)} · read only</small></span></button>)}</div></>}
     </aside>
 
     <main className="acs-main">
       <header className="acs-header">
         <div className="acs-agent-title"><span className="acs-avatar large">{meta.initials}</span><div><span>{meta.label.toUpperCase()}</span><h1>{agent?.name||"Ledgerly AI"}</h1><p>{agent?.title||"AI employee"} · {agent?.configuredTools.length||0} permitted tools</p></div></div>
-        <div className={`acs-live ${phase!=="ready"?"working":""}`}>{PHASES[phase].icon}<div><b>{PHASES[phase].label}</b><span>{PHASES[phase].detail}</span></div></div>
+        <div className="acs-header-right">
+          <div className="acs-chat-actions"><button disabled={!agent||busy} onClick={()=>void startNewChat()}><Plus size={14}/>New chat</button>{conversation&&conversation.status!=="closed"&&<button className="secondary" disabled={busy||Boolean(actionBusy)} onClick={()=>void closeConversation()}><Archive size={14}/>Close chat</button>}</div>
+          <div className={`acs-live ${phase!=="ready"?"working":""}`}>{PHASES[phase].icon}<div><b>{PHASES[phase].label}</b><span>{PHASES[phase].detail}</span></div></div>
+        </div>
       </header>
       {error&&<div className="acs-error"><span>{error}</span><button onClick={()=>setError("")}><X size={15}/></button></div>}
 
       <section className="acs-chat">
-        {!conversation&&<div className="acs-empty"><Bot size={34}/><h2>Choose an AI employee</h2><p>Start a conversation and work naturally with permitted Ledgerly data, professional files and inline approvals.</p></div>}
-        {conversation&&messages.length===0&&<div className="acs-welcome"><span className="acs-avatar hero">{meta.initials}</span><h2>What should {agent?.name} work on?</h2><p>Ask naturally. Reports can include professional tables, charts, PDF, Excel and presentations.</p><div className="acs-starters">{meta.prompts.map(prompt=><button key={prompt} onClick={()=>setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
+        {!conversation&&<div className="acs-empty"><Bot size={34}/><h2>Start a fresh AI chat</h2><p>Choose an AI employee or start a new conversation. Each chat keeps its own history, files and approvals.</p><button className="acs-empty-action" disabled={!agent||busy} onClick={()=>void startNewChat()}><Plus size={15}/>Start new chat</button></div>}
+        {conversation&&messages.length===0&&conversation.status!=="closed"&&<div className="acs-welcome"><span className="acs-avatar hero">{meta.initials}</span><h2>What should {agent?.name} work on?</h2><p>Ask naturally. Reports can include professional tables, charts, PDF, Excel and presentations.</p><div className="acs-starters">{meta.prompts.map(prompt=><button key={prompt} onClick={()=>setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
         {messages.map(message=><article key={message.id} className={`acs-message ${message.role}`}><div className="acs-message-meta"><b>{message.role==="user"?"You":agent?.name||"Ledgerly AI"}</b><span>{formatWhen(message.createdAt)}</span></div><div className="acs-message-body"><RichContent content={message.content}/></div>{message.model&&<small className="acs-model">{message.model}</small>}</article>)}
-        {busy&&<article className="acs-message assistant acs-thinking"><div className="acs-message-meta"><b>{agent?.name||"Ledgerly AI"}</b></div><div className="acs-thinking-line">{PHASES[phase].icon}<span>{PHASES[phase].label}…</span></div><small>{PHASES[phase].detail}</small></article>}
+        {busy&&liveStatus&&<WorkingCard phase={phase} status={liveStatus} agentName={agent?.name||"Ledgerly AI"}/>}
 
         {pending.map(action=><ApprovalCard key={action.id} action={action} draft={drafts[action.id]||JSON.stringify(action.payload,null,2)} editing={editing===action.id} busy={actionBusy===action.id} onEdit={()=>setEditing(current=>current===action.id?"":action.id)} onDraft={value=>setDrafts(current=>({...current,[action.id]:value}))} onSave={()=>void saveEdits(action).catch(()=>{})} onApprove={()=>void approveAndRun(action)} onReject={()=>void rejectAction(action)}/>)}
 
         {artifacts.length>0&&<div className="acs-artifact-zone"><div className="acs-zone-title"><FileDown size={16}/><span>FILES CREATED IN THIS CHAT</span></div>{artifacts.map(item=><ArtifactCard key={item.id} item={item} onDownload={()=>void downloadArtifact(item,false)} onPdf={()=>void downloadArtifact(item,true)}/>)}</div>}
+        {conversation?.status==="closed"&&<div className="acs-closed-chat"><Archive size={18}/><div><b>This chat is closed</b><span>The history stays available here, but no new messages can be added to this conversation.</span></div><button disabled={!agent||busy} onClick={()=>void startNewChat()}><Plus size={14}/>Start new chat</button></div>}
       </section>
 
-      {conversation&&<footer className="acs-composer-wrap">
+      {conversation&&conversation.status!=="closed"&&<footer className="acs-composer-wrap">
         <div className="acs-quick"><button onClick={()=>quickArtifact("pdf")}><FileText size={14}/> PDF report</button><button onClick={()=>quickArtifact("xlsx")}><FileSpreadsheet size={14}/> Excel</button><button onClick={()=>quickArtifact("pptx")}><Presentation size={14}/> Presentation</button><button onClick={()=>setText("Analyze this using verified Ledgerly data and show the comparison in a clear table: ")}><BarChart3 size={14}/> Analyze</button></div>
-        <div className="acs-composer"><textarea value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void send();}}} placeholder={`Message ${agent?.name||"Ledgerly AI"}…`} rows={2}/><button disabled={busy||!text.trim()} onClick={()=>void send()}><Send size={18}/><span>Send</span></button></div>
+        <div className="acs-composer"><textarea value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void send();}} placeholder={`Message ${agent?.name||"Ledgerly AI"}…`} rows={2}/><button disabled={busy||!text.trim()} onClick={()=>void send()}><Send size={18}/><span>Send</span></button></div>
         <div className="acs-composer-note"><ShieldCheck size={12}/> AI writes remain governed: proposed changes appear here for review, editing and approval before execution.</div>
       </footer>}
     </main>
   </div>;
 }
+
+function WorkingCard({phase,status,agentName}:{phase:Phase;status:LiveStatus;agentName:string}){
+  const current=PHASES[phase]||PHASES.thinking;
+  const tools=[...status.tools].reverse().slice(-5);
+  return <article className="acs-message assistant acs-thinking acs-working-card">
+    <div className="acs-message-meta"><b>{agentName}</b><span>working now</span></div>
+    <div className="acs-thinking-line">{current.icon}<span>{current.label}…</span></div>
+    <small>{current.detail}</small>
+    <div className="acs-work-trail"><WorkStep label="Understanding your request" status={tools.length?"succeeded":"running"}/>{tools.map(item=><WorkStep key={item.id} label={safeToolLabel(item.toolName)} status={item.status}/>)}</div>
+  </article>;
+}
+
+function WorkStep({label,status}:{label:string;status:string}){const running=status==="running";const failed=status==="failed";return <div className={`acs-work-step ${failed?"failed":running?"running":"done"}`}>{running?<LoaderCircle className="spin" size={12}/>:failed?<X size={12}/>:<CheckCircle2 size={12}/>}<span>{label}</span></div>}
 
 function ApprovalCard({action,draft,editing,busy,onEdit,onDraft,onSave,onApprove,onReject}:{action:Action;draft:string;editing:boolean;busy:boolean;onEdit:()=>void;onDraft:(value:string)=>void;onSave:()=>void;onApprove:()=>void;onReject:()=>void}){
   const isDocument=action.actionType==="document.generate",format=isDocument?String(action.payload.format||"").toUpperCase():"";
@@ -200,6 +249,7 @@ function RichContent({content}:{content:string}){
 function splitTable(line:string){return line.trim().replace(/^\||\|$/g,"").split("|").map(value=>value.trim());}
 function inline(value:string){const parts=value.split(/(\*\*[^*]+\*\*)/g);return <>{parts.map((part,i)=>part.startsWith("**")&&part.endsWith("**")?<strong key={i}>{part.slice(2,-2)}</strong>:part)}</>;}
 function friendly(value:string){return value.replace(/[._-]+/g," ").replace(/\b\w/g,x=>x.toUpperCase());}
+function safeToolLabel(name:string){const value=name.toLowerCase();const exact:Record<string,string>={resolve_guardian_family:"Resolving family relationships",family_comprehensive_report:"Gathering family records",search_students:"Finding students",search_staff:"Finding staff",fee_balance_lookup:"Checking fee balance",fee_arrears_summary:"Checking fee arrears",fee_collection_summary:"Checking fee collections",system_read:"Reading Ledgerly records",system_catalog:"Checking available Ledgerly capabilities",prepare_system_action:"Preparing action for approval",prepare_document:"Preparing professional document",list_saved_documents:"Checking saved documents",prepare_print_document:"Preparing print request",academics_overview:"Checking academic records",lesson_plan_queue:"Checking lesson plans",scheme_coverage:"Checking scheme coverage",hr_overview:"Checking staff records",hr_leave_queue:"Checking leave records",books_overview:"Checking books and stock",communications_summary:"Checking communications"};if(exact[value])return exact[value];if(value.includes("memory"))return"Checking saved context";if(value.includes("timetable"))return"Checking timetable data";if(value.includes("report"))return"Preparing report data";if(value.includes("document"))return"Preparing document";if(value.includes("search")||value.includes("lookup"))return`Checking ${friendly(value.replace(/search|lookup/g,"")).trim().toLowerCase()}`;return friendly(value);}
 function safeFileName(value:string){return value.normalize("NFKD").replace(/[^a-zA-Z0-9._-]+/g,"-").replace(/-+/g,"-").replace(/^-|-$/g,"").slice(0,120)||"ledgerly-report";}
 function formatBytes(value:number){if(!Number.isFinite(value)||value<=0)return"file";if(value<1024)return`${value} B`;if(value<1024*1024)return`${(value/1024).toFixed(1)} KB`;return`${(value/1024/1024).toFixed(1)} MB`;}
 function formatWhen(value?:string){if(!value)return"now";const date=new Date(value);if(Number.isNaN(date.getTime()))return value;const diff=Date.now()-date.getTime();if(diff<60_000)return"now";if(diff<3_600_000)return`${Math.max(1,Math.floor(diff/60_000))}m`;if(diff<86_400_000)return`${Math.floor(diff/3_600_000)}h`;return date.toLocaleDateString();}
