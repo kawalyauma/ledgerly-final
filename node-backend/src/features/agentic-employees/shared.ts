@@ -7,4 +7,4 @@ export type { AuthPrincipal } from "../../http/types.js";
 
 export type Env = Record<string, any>;
 export type AppVariables = { principal: import("../../http/types.js").AuthPrincipal };
-export type AgentDocumentFormat = "docx" | "xlsx" | "pptx";
+export type AgentDocumentFormat = "pdf" | "docx" | "xlsx" | "pptx";
