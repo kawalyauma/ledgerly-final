@@ -7,6 +7,7 @@ export type LightToolDescriptor={name:string;description:string;kind:LightTaskKi
 export type LightToolRegistry={tools:LightToolDescriptor[];kinds:LightTaskKind[];modules:string[];groupsByModule:Record<string,string[]>;stats:{total:number;routeTools:number;nativeTools:number;writes:number;reads:number}};
 
 const DISCOVERY=new Set(["system_catalog","system_schema","system_read","prepare_system_action"]);
+const NODE_STUBBED_NATIVE=new Set(["timetable_intelligence","draft_timetable","timetable_week_context","timetable_lesson_context","timetable_contingency_options"]);
 const ACTION_WORDS=new Set(["approve","reject","publish","apply","execute","reverse","void","close","reopen","archive","restore","promote","transfer","assign","unassign","send","submit","activate","deactivate","finalize","post","allocate","reconcile","reschedule","substitute"]);
 const QUERY_WORDS=new Set(["search","lookup","preview","calculate","validate","check","summary","matrix","context","options","status"]);
 const REPORT_WORDS=new Set(["report","reports","statement","statements","analytics","dashboard","summary"]);
@@ -34,7 +35,7 @@ function nativeModule(name:string){if(/fee|arrears|collection/.test(name))return
 function nativeGroup(name:string,module:string){if(name.includes("fee"))return"fees";if(name.includes("timetable"))return"timetable";if(name.includes("lesson"))return"lesson plans";if(name.includes("scheme"))return"schemes";if(/guardian|family/.test(name))return"families";if(name.includes("student"))return"students";if(/staff|hr_/.test(name))return"staff";return module;}
 
 export async function buildLightToolRegistry(env:Env,principal:AuthPrincipal,agent:AgentDefinition):Promise<LightToolRegistry>{
- const nativeSpecs=(openAiTools(agent,null) as Array<{name:string;description?:string;parameters?:Record<string,unknown>}>).filter(x=>!DISCOVERY.has(x.name));
+ const nativeSpecs=(openAiTools(agent,null) as Array<{name:string;description?:string;parameters?:Record<string,unknown>}>).filter(x=>!DISCOVERY.has(x.name)&&!NODE_STUBBED_NATIVE.has(x.name));
  const native:LightToolDescriptor[]=nativeSpecs.map(spec=>{const d=spec.description||spec.name.replace(/_/g," "),kind=nativeKind(spec.name,d),module=nativeModule(spec.name);return{name:spec.name,description:d,kind,module,group:nativeGroup(spec.name,module),source:"native",readOnly:!spec.name.startsWith("prepare_")&&!spec.name.startsWith("remember_")&&!spec.name.startsWith("update_"),nativeName:spec.name,parameters:spec.parameters||{type:"object",properties:{}},aliases:[spec.name.replace(/_/g," "),d.toLowerCase().slice(0,180)]};});
  const gateway=env.AGENT_SYSTEM_GATEWAY;const routes=gateway?await gateway.catalog(agent.key,principal):[];
  const routed:LightToolDescriptor[]=routes.slice(0,2000).map((r:any)=>{const method=String(r.method||"GET").toUpperCase() as LightToolDescriptor["method"],path=String(r.path||""),kind=kindFor(method!,path),name=routeName(method!,path,kind);return{name,description:description(method!,path,kind,name),kind,module:businessModule(path),group:groupFor(path),source:"route",readOnly:method==="GET"||(method==="POST"&&kind==="query"),method,pathTemplate:path,aliases:aliases(method!,path,kind,name)};});
