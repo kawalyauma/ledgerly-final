@@ -16,7 +16,8 @@ type Agent = {
   configuredTools: string[];
 };
 type Conversation = { id: string; agentKey: string; title: string; status: string; lastMessageAt?: string; createdAt?: string };
-type Message = { id: string; role: "user" | "assistant"; content: string; model?: string; createdAt?: string };
+type ToolEvent = { id: string; tool: string; status: string; error?: string; actionId?: string };
+type Message = { id: string; role: "user" | "assistant"; content: string; model?: string; createdAt?: string; toolEvents?: ToolEvent[] };
 type Task = { id: string; agentKey: string; title: string; status: string; resultText?: string; errorText?: string; createdAt?: string };
 type Approval = { id: string; agentKey: string; actionType: string; requiredScope: string; status: string; payload: Record<string, unknown>; createdAt: string };
 type Settings = { provider: string; configured: boolean; models: Record<string, string> };
@@ -53,6 +54,8 @@ export function AgenticEmployeesPage() {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [actionBusy, setActionBusy] = useState("");
+  const [actionResults, setActionResults] = useState<Record<string, { status: "done" | "error"; message: string }>>({});
   const [tasks, setTasks] = useState<Task[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -150,6 +153,17 @@ export function AgenticEmployeesPage() {
     try { await post(`/agentic-employees/approvals/${id}/execute`, {}); await refresh(); await openActivity(); }
     catch (err) { setError(errorText(err)); } finally { setBusy(false); }
   }
+  async function approveAndRun(actionId: string) {
+    setActionResults(current => { const next = { ...current }; delete next[actionId]; return next; });
+    setActionBusy(actionId);
+    try {
+      const { result } = await post<{ result: Record<string, any> }>(`/agentic-employees/actions/${actionId}/approve-and-execute`, {});
+      setActionResults(current => ({ ...current, [actionId]: { status: "done", message: result?.entityId ? `Done — ${result.entityType || "created"} ${result.entityId}` : "Done." } }));
+      await refresh();
+    } catch (err) {
+      setActionResults(current => ({ ...current, [actionId]: { status: "error", message: errorText(err) } }));
+    } finally { setActionBusy(""); }
+  }
   async function setTier(nextAgent: Agent, modelTier: Agent["modelTier"]) {
     setError("");
     try { await patch(`/agentic-employees/agents/${nextAgent.key}`, { modelTier }); await refresh(); }
@@ -240,7 +254,20 @@ export function AgenticEmployeesPage() {
         <div className="ae-chat ae-chat-pro">
           {!conversation && <div className="ae-empty"><MessageSquare/><h3>Choose an employee to start</h3><p>Your conversations are saved and can be resumed later.</p></div>}
           {conversation && !messages.length && <div className="ae-chat-welcome"><div className={`ae-welcome-icon ae-accent-${profile.accent}`}>{profile.icon}</div><h3>What should {agent?.name} do?</h3><p>{profile.short}. Start with one of these, or describe the work naturally.</p><div className="ae-starter-grid">{profile.prompts.map(prompt => <button key={prompt} onClick={() => setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
-          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}><div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div><p>{message.content}</p>{message.model && <small>{message.model}</small>}</div>)}
+          {messages.map(message => <div key={message.id} className={`ae-message ${message.role}`}>
+            <div className="ae-message-label"><b>{message.role === "user" ? "You" : agent?.name}</b>{message.createdAt && <span>{formatWhen(message.createdAt)}</span>}</div>
+            <p>{message.content}</p>
+            {message.model && <small>{message.model}</small>}
+            {(message.toolEvents || []).filter(event => event.actionId).map(event => {
+              const outcome = actionResults[event.actionId!];
+              return <div key={event.id} className="ae-action-inline">
+                <span><ShieldCheck size={15}/> {event.tool === "prepare_system_action" ? "Ledgerly action prepared" : "Action prepared"} — needs your approval</span>
+                {outcome
+                  ? <em className={outcome.status === "done" ? "ae-action-ok" : "ae-action-fail"}>{outcome.message}</em>
+                  : <button type="button" disabled={actionBusy === event.actionId!} onClick={() => void approveAndRun(event.actionId!)}>{actionBusy === event.actionId! ? "Running…" : "Approve & run"}</button>}
+              </div>;
+            })}
+          </div>)}
           {busy && <div className="ae-message assistant ae-working"><b>{agent?.name}</b><p><Sparkles size={14}/> Working with Ledgerly…</p></div>}
         </div>
         {conversation && <><div className="ae-quick-tools"><button onClick={() => go("agentic-employees-vision")}><Camera size={15}/> Use a photo</button><button onClick={() => setText(`Create a ${agent?.key === "bursar" ? "spreadsheet" : "document"} for `)}><FileText size={15}/> Create document</button><button onClick={() => setText("What do you remember about ")}><Brain size={15}/> Ask memory</button><button onClick={() => go("agentic-employees-actions")}><ShieldCheck size={15}/> Review actions</button></div><footer className="ae-composer-pro"><textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder={`Message ${agent?.name || "this employee"}… You can speak naturally.`}/><button disabled={busy || !text.trim()} onClick={() => void send()}><Send size={17}/> Send</button></footer></>}

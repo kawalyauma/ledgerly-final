@@ -8,14 +8,15 @@ import { testProviderConnection } from "./openai.js";
 
 export const agenticProviderRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-const providerSchema = z.enum(["openai", "google", "anthropic"]);
-const modelSchema = z.string().trim().min(1).max(160).regex(/^[A-Za-z0-9._:/-]+$/);
+const providerSchema = z.enum(["openai", "google", "anthropic", "cloudflare"]);
+const modelSchema = z.string().trim().min(1).max(160).regex(/^[A-Za-z0-9._:/@-]+$/);
 const configurationSchema = z.object({
   temperature: z.number().min(0).max(2).nullable().optional(),
   topP: z.number().min(0).max(1).nullable().optional(),
   maxOutputTokens: z.number().int().min(128).max(65536).optional(),
   timeoutMs: z.number().int().min(5000).max(120000).optional(),
   reasoningEffort: z.enum(["default", "low", "medium", "high", "max"]).optional(),
+  accountId: z.string().trim().max(64).nullable().optional(),
 }).optional();
 
 agenticProviderRoutes.get("/provider-catalog", requireScope("school:read"), c => c.json({

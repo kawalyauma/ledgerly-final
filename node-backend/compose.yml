@@ -6,6 +6,8 @@ services:
       POSTGRES_DB: ledgerly
       POSTGRES_USER: ledgerly
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerly-change-me}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,6 +20,8 @@ services:
     image: redis:8-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -26,16 +30,22 @@ services:
       timeout: 3s
       retries: 20
 
+  # migrate/api/queue/scheduler run on the host network, not the compose bridge
+  # network, so they can reach real AI providers (OpenAI/Gemini/Claude/Workers
+  # AI) — some sandboxed Docker hosts block outbound internet from the default
+  # bridge network entirely. Postgres/Redis are reached via the published
+  # loopback ports above instead of their service-name DNS.
   migrate:
     build:
       context: .
       network: host
+    network_mode: host
     restart: "no"
     command: ["node", "dist/db/migrate.js"]
     environment: &backend-env
       NODE_ENV: production
-      DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@postgres:5432/ledgerly
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@127.0.0.1:5432/ledgerly
+      REDIS_URL: redis://127.0.0.1:6379
       STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: /data/storage
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
@@ -56,13 +66,14 @@ services:
     build:
       context: .
       network: host
+    network_mode: host
     restart: unless-stopped
     command: ["node", "dist/server.js"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      PORT: ${LEDGERLY_API_PORT:-8787}
     volumes:
       - app-storage:/data/storage
-    ports:
-      - "${LEDGERLY_API_PORT:-8080}:8080"
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -71,6 +82,7 @@ services:
     build:
       context: .
       network: host
+    network_mode: host
     restart: unless-stopped
     command: ["node", "dist/queue/worker.js"]
     environment: *backend-env
@@ -84,6 +96,7 @@ services:
     build:
       context: .
       network: host
+    network_mode: host
     restart: unless-stopped
     command: ["node", "dist/scheduler/scheduler.js"]
     environment: *backend-env

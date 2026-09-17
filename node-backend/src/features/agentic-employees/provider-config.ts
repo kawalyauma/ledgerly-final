@@ -2,7 +2,7 @@ import { AppError } from "./shared.js";
 import type { Env } from "./shared.js";
 import type { ModelTier } from "./policy.js";
 
-export type AiProviderId = "openai" | "google" | "anthropic";
+export type AiProviderId = "openai" | "google" | "anthropic" | "cloudflare";
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "max";
 export type TierModels = Record<ModelTier, string>;
 export type AdvancedAiConfig = {
@@ -11,6 +11,10 @@ export type AdvancedAiConfig = {
   maxOutputTokens: number;
   timeoutMs: number;
   reasoningEffort: ReasoningEffort;
+  /** Cloudflare account ID. Only meaningful when provider is "cloudflare": the
+   * Workers AI OpenAI-compatible endpoint is scoped per account
+   * (https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/v1). */
+  accountId: string | null;
 };
 
 type AiEnv = Env & { AI_PROVIDER_ENCRYPTION_KEY?: string };
@@ -63,6 +67,22 @@ export const AI_PROVIDER_CATALOG = {
     ],
     defaults: { luna: "claude-haiku-4-5-20251001", terra: "claude-sonnet-5", sol: "claude-opus-5" },
   },
+  cloudflare: {
+    id: "cloudflare" as const,
+    label: "Cloudflare Workers AI",
+    description: "Models hosted on Cloudflare's Workers AI, through its OpenAI-compatible endpoint. Requires this school's Cloudflare account ID.",
+    // Not every Workers AI model supports OpenAI-style tool/function calling;
+    // picking one that doesn't causes 400s from Cloudflare once tools are sent.
+    // These are confirmed to support function calling.
+    models: [
+      { id: "@cf/meta/llama-3.3-70b-instruct-fp8-fast", label: "Llama 3.3 70B (fp8 fast)", tier: "sol" },
+      { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "sol" },
+      { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1 24B", tier: "terra" },
+      { id: "@cf/meta/llama-4-scout-17b-16e-instruct", label: "Llama 4 Scout 17B", tier: "terra" },
+      { id: "@cf/openai/gpt-oss-20b", label: "GPT-OSS 20B", tier: "luna" },
+    ],
+    defaults: { luna: "@cf/openai/gpt-oss-20b", terra: "@cf/mistralai/mistral-small-3.1-24b-instruct", sol: "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
+  },
 } as const;
 
 export const DEFAULT_ADVANCED_CONFIG: AdvancedAiConfig = {
@@ -71,10 +91,11 @@ export const DEFAULT_ADVANCED_CONFIG: AdvancedAiConfig = {
   maxOutputTokens: 4096,
   timeoutMs: 60000,
   reasoningEffort: "default",
+  accountId: null,
 };
 
 function isProvider(value: unknown): value is AiProviderId {
-  return value === "openai" || value === "google" || value === "anthropic";
+  return value === "openai" || value === "google" || value === "anthropic" || value === "cloudflare";
 }
 
 function safeJson<T>(value: string | null | undefined, fallback: T): T {
@@ -85,8 +106,8 @@ function safeJson<T>(value: string | null | undefined, fallback: T): T {
 function normalizeModelId(value: unknown, fallback: string) {
   const model = typeof value === "string" ? value.trim() : "";
   if (!model) return fallback;
-  if (model.length > 160 || !/^[A-Za-z0-9._:/-]+$/.test(model)) {
-    throw new AppError(422, "VALIDATION_ERROR", "Model IDs may only contain letters, numbers, dot, underscore, colon, slash and hyphen.");
+  if (model.length > 160 || !/^[A-Za-z0-9._:/@-]+$/.test(model)) {
+    throw new AppError(422, "VALIDATION_ERROR", "Model IDs may only contain letters, numbers, dot, underscore, colon, slash, at-sign and hyphen.");
   }
   return model;
 }
@@ -114,6 +135,13 @@ function requiredNumber(value: unknown, fallback: number, name: string, min: num
   return Math.round(number);
 }
 
+function normalizeAccountId(value: unknown): string | null {
+  if (value === null || value === undefined || value === "") return null;
+  const id = String(value).trim();
+  if (id.length > 64 || !/^[A-Za-z0-9_-]+$/.test(id)) throw new AppError(422, "VALIDATION_ERROR", "Cloudflare account ID looks invalid.");
+  return id;
+}
+
 export function normalizeAdvancedConfig(input?: Partial<AdvancedAiConfig> | null): AdvancedAiConfig {
   const reasoning = input?.reasoningEffort ?? DEFAULT_ADVANCED_CONFIG.reasoningEffort;
   if (!["default", "low", "medium", "high", "max"].includes(reasoning)) throw new AppError(422, "VALIDATION_ERROR", "Invalid reasoning effort.");
@@ -123,6 +151,7 @@ export function normalizeAdvancedConfig(input?: Partial<AdvancedAiConfig> | null
     maxOutputTokens: requiredNumber(input?.maxOutputTokens, DEFAULT_ADVANCED_CONFIG.maxOutputTokens, "Maximum output tokens", 128, 65536),
     timeoutMs: requiredNumber(input?.timeoutMs, DEFAULT_ADVANCED_CONFIG.timeoutMs, "Request timeout", 5000, 120000),
     reasoningEffort: reasoning as ReasoningEffort,
+    accountId: normalizeAccountId(input?.accountId),
   };
 }
 
@@ -209,10 +238,11 @@ export async function saveProviderSettings(db: D1Database, env: AiEnv, organizat
   clearApiKey?: boolean;
   config?: Partial<AdvancedAiConfig>;
 }) {
-  if (!isProvider(input.provider)) throw new AppError(422, "VALIDATION_ERROR", "Choose OpenAI, Google Gemini or Anthropic Claude.");
+  if (!isProvider(input.provider)) throw new AppError(422, "VALIDATION_ERROR", "Choose OpenAI, Google Gemini, Anthropic Claude or Cloudflare Workers AI.");
   const current = await loadRow(db, organizationId);
   const models = normalizeModels(input.provider, input.models);
   const config = normalizeAdvancedConfig(input.config);
+  if (input.provider === "cloudflare" && !config.accountId) throw new AppError(422, "VALIDATION_ERROR", "A Cloudflare account ID is required for Cloudflare Workers AI.");
   let ciphertext = current?.apiKeyCiphertext ?? null;
   let hint = current?.apiKeyHint ?? null;
   if (input.clearApiKey) {
@@ -253,8 +283,10 @@ export async function resolveRuntimeProvider(db: D1Database, env: AiEnv, organiz
     apiKey = await decryptApiKey(env.AI_PROVIDER_ENCRYPTION_KEY, row.apiKeyCiphertext);
   } else if (provider === "openai") apiKey = env.OPENAI_API_KEY;
   if (!apiKey) throw new AppError(503, "AI_NOT_CONFIGURED", `No API key has been saved for ${AI_PROVIDER_CATALOG[provider].label}.`);
+  if (provider === "cloudflare" && !config.accountId) throw new AppError(503, "AI_NOT_CONFIGURED", "No Cloudflare account ID has been saved for this school.");
   const baseUrl = provider === "openai" ? String(env.OPENAI_BASE_URL || "https://api.openai.com/v1").replace(/\/$/, "")
     : provider === "google" ? "https://generativelanguage.googleapis.com/v1beta/openai"
+    : provider === "cloudflare" ? `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/v1`
     : "https://api.anthropic.com/v1";
   return { provider, apiKey, model: models[tier], config, baseUrl };
 }

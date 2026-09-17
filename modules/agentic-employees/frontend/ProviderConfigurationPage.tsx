@@ -3,7 +3,7 @@ import { Bot, CheckCircle2, KeyRound, RefreshCw, Save, ShieldCheck, Sparkles, Te
 import { errorText, get, patch, post } from "../../../web/api";
 import "./provider-configuration.css";
 
-type ProviderId = "openai" | "google" | "anthropic";
+type ProviderId = "openai" | "google" | "anthropic" | "cloudflare";
 type Tier = "luna" | "terra" | "sol";
 type ProviderModel = { id: string; label: string; tier: string };
 type ProviderCatalogItem = {
@@ -27,6 +27,7 @@ type Settings = {
     maxOutputTokens: number;
     timeoutMs: number;
     reasoningEffort: "default" | "low" | "medium" | "high" | "max";
+    accountId: string | null;
   };
   updatedAt: string | null;
 };
@@ -41,9 +42,10 @@ type FormState = {
   maxOutputTokens: number;
   timeoutMs: number;
   reasoningEffort: Settings["config"]["reasoningEffort"];
+  accountId: string;
 };
 
-const providerTone: Record<ProviderId, string> = { openai: "OpenAI", google: "Gemini", anthropic: "Claude" };
+const providerTone: Record<ProviderId, string> = { openai: "OpenAI", google: "Gemini", anthropic: "Claude", cloudflare: "Cloudflare" };
 const tierCopy: Record<Tier, { title: string; description: string }> = {
   luna: { title: "Luna · Fast", description: "Routine, high-volume employee work" },
   terra: { title: "Terra · Balanced", description: "Planning, analysis and daily operations" },
@@ -61,6 +63,7 @@ function toForm(settings: Settings): FormState {
     maxOutputTokens: settings.config.maxOutputTokens,
     timeoutMs: settings.config.timeoutMs,
     reasoningEffort: settings.config.reasoningEffort,
+    accountId: settings.config.accountId || "",
   };
 }
 
@@ -102,13 +105,25 @@ export function ProviderConfigurationPage() {
     setForm(current => current ? { ...current, models: { ...current.models, [tier]: value } } : current);
   }
 
+  // Some browsers' native <input list=…> autofill/suggestion UI can insert a
+  // "Label value" concatenation instead of the option's bare value. Model IDs
+  // never contain whitespace, so recover the intended ID defensively.
+  function sanitizeModelId(value: string) {
+    const trimmed = value.trim();
+    const valid = /^[A-Za-z0-9._:/@-]+$/;
+    if (valid.test(trimmed)) return trimmed;
+    const lastToken = trimmed.split(/\s+/).filter(Boolean).pop() || "";
+    if (valid.test(lastToken)) return lastToken;
+    return trimmed.replace(/[^A-Za-z0-9._:/@-]/g, "");
+  }
+
   async function save() {
     if (!form) return;
     setSaving(true); setError(""); setSuccess(""); setTestResult(null);
     try {
       const data = await patch<Settings>("/agentic-employees/provider-settings", {
         provider: form.provider,
-        models: form.models,
+        models: { luna: sanitizeModelId(form.models.luna), terra: sanitizeModelId(form.models.terra), sol: sanitizeModelId(form.models.sol) },
         apiKey: form.apiKey.trim() || undefined,
         clearApiKey: form.clearApiKey,
         config: {
@@ -117,6 +132,7 @@ export function ProviderConfigurationPage() {
           maxOutputTokens: Number(form.maxOutputTokens),
           timeoutMs: Number(form.timeoutMs),
           reasoningEffort: form.reasoningEffort,
+          accountId: form.provider === "cloudflare" ? (form.accountId.trim() || null) : null,
         },
       });
       setSettings(data); setForm(toForm(data));
@@ -168,6 +184,7 @@ export function ProviderConfigurationPage() {
       <div className="aipc-section-heading"><div><span>2</span><h2>School API credential</h2></div><p>The key is encrypted before storage and is never returned to the browser after saving.</p></div>
       <div className="aipc-credential-grid">
         <label className="aipc-field aipc-wide"><span>{selectedProvider?.label} API key</span><input type="password" autoComplete="new-password" value={form.apiKey} onChange={e => setForm({ ...form, apiKey: e.target.value, clearApiKey: false })} placeholder={settings.apiKeyConfigured ? `Saved: ${settings.apiKeyHint || "credential configured"} — leave blank to keep it` : "Paste this school's API key"}/><small>Leave blank to keep the saved key. Ledgerly only shows a masked hint after save.</small></label>
+        {form.provider === "cloudflare" && <label className="aipc-field aipc-wide"><span>Cloudflare account ID</span><input type="text" value={form.accountId} onChange={e => setForm({ ...form, accountId: e.target.value })} placeholder="e.g. a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"/><small>Found on your Cloudflare dashboard's Workers AI overview page. The Workers AI endpoint is scoped to this account.</small></label>}
         <div className="aipc-secret-summary"><ShieldCheck size={22}/><div><strong>{settings.apiKeyConfigured ? "Credential protected" : "No school credential yet"}</strong><span>{settings.apiKeyHint || "Add the API key supplied by the selected AI company."}</span></div></div>
       </div>
       {settings.apiKeyConfigured && <label className="aipc-check"><input type="checkbox" checked={form.clearApiKey} onChange={e => setForm({ ...form, clearApiKey: e.target.checked, apiKey: e.target.checked ? "" : form.apiKey })}/> Remove the stored school API key when I save</label>}

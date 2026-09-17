@@ -21,4 +21,45 @@ agenticActionRoutes.post("/actions/:id/review",actionOperator,async c=>{const p=
 
 agenticActionRoutes.post("/actions/:id/execute",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(row.status!=="approved"||!row.approvalId)throw new AppError(409,"INVALID_STATE","Only an approved action can execute");if(p.role!=="owner"&&p.role!=="admin"&&!p.scopes.includes(row.requiredScope))throw new AppError(403,"FORBIDDEN",`Execution requires ${row.requiredScope}`);try{const result=await executeApprovedAction(c.env,p,row.approvalId);await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind((result as any).entityType||null,(result as any).entityId||null,p.userId,row.id,p.organizationId).run();return c.json({data:{action:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id),result}});}catch(error){const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status<>'executed'`).bind(text,p.userId,row.id,p.organizationId).run();throw error;}});
 
+// One-shot approve-and-run for the chat UI: walks a suggested/prepared/
+// awaiting_approval action all the way through to executed in a single call,
+// so a reviewer can approve directly from the conversation instead of
+// visiting the Action Center. Ledgerly's real permission checks still run
+// underneath at execution — this only collapses the review *ceremony*.
+agenticActionRoutes.post("/actions/:id/approve-and-execute",actionOperator,async c=>{
+  const p=c.get("principal");
+  let row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));
+  if(["executing","executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE",`This action is already ${row.status} and cannot be approved again`);
+  if(p.role!=="owner"&&p.role!=="admin"&&!p.scopes.includes(row.requiredScope))throw new AppError(403,"FORBIDDEN",`Approving this action requires ${row.requiredScope}`);
+  if(row.status==="suggested"){
+    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='prepared',prepared_by=?,prepared_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='suggested'`).bind(p.userId,row.id,p.organizationId).run();
+    row=await actionRow(c.env.FINANCE_DB,p.organizationId,row.id);
+  }
+  if(row.status==="prepared"){
+    const approvalId=createId("aaa");
+    await c.env.FINANCE_DB.batch([
+      c.env.FINANCE_DB.prepare(`INSERT INTO ae_approvals(id,organization_id,agent_key,requested_by,action_type,required_scope,payload_json,status) VALUES (?,?,?,?,?,?,?,'pending')`).bind(approvalId,p.organizationId,row.agentKey,p.userId,row.actionType,row.requiredScope,JSON.stringify(row.payload)),
+      c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='awaiting_approval',approval_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='prepared'`).bind(approvalId,row.id,p.organizationId),
+    ]);
+    row=await actionRow(c.env.FINANCE_DB,p.organizationId,row.id);
+  }
+  if(row.status==="awaiting_approval"&&row.approvalId){
+    await c.env.FINANCE_DB.batch([
+      c.env.FINANCE_DB.prepare(`UPDATE ae_approvals SET status='approved',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='pending'`).bind(p.userId,row.approvalId,p.organizationId),
+      c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='approved',approved_by=?,approved_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(p.userId,row.id,p.organizationId),
+    ]);
+    row=await actionRow(c.env.FINANCE_DB,p.organizationId,row.id);
+  }
+  if(row.status!=="approved"||!row.approvalId)throw new AppError(409,"INVALID_STATE",`Action is ${row.status}, expected approved before executing`);
+  try{
+    const result=await executeApprovedAction(c.env,p,row.approvalId);
+    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='executed',result_entity_type=?,result_entity_id=?,executed_by=?,executed_at=COALESCE(executed_at,CURRENT_TIMESTAMP),failure_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind((result as any).entityType||null,(result as any).entityId||null,p.userId,row.id,p.organizationId).run();
+    return c.json({data:{action:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id),result}});
+  }catch(error){
+    const text=error instanceof Error?error.message.slice(0,1000):String(error).slice(0,1000);
+    await c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='failed',failure_text=?,executed_by=?,executed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status<>'executed'`).bind(text,p.userId,row.id,p.organizationId).run();
+    throw error;
+  }
+});
+
 agenticActionRoutes.post("/actions/:id/dismiss",actionOperator,async c=>{const p=c.get("principal"),row=await actionRow(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(["executing","executed","failed","dismissed"].includes(row.status))throw new AppError(409,"INVALID_STATE","This action is already terminal or executing");const statements=[c.env.FINANCE_DB.prepare(`UPDATE ae_actions SET status='dismissed',dismissed_by=?,dismissed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?`).bind(p.userId,row.id,p.organizationId)];if(row.approvalId)statements.push(c.env.FINANCE_DB.prepare("UPDATE ae_approvals SET status='cancelled',reviewed_by=?,reviewed_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status IN ('pending','approved')").bind(p.userId,row.approvalId,p.organizationId));await c.env.FINANCE_DB.batch(statements);return c.json({data:await actionRow(c.env.FINANCE_DB,p.organizationId,row.id)});});

@@ -141,10 +141,16 @@ agenticEmployeeRoutes.get("/conversations/:id/messages", requireScope("school:re
   const principal = c.get("principal");
   await assertConversation(c.env.FINANCE_DB, principal.organizationId, c.req.param("id"));
   const result = await c.env.FINANCE_DB.prepare(`
-    SELECT id, role, content, model, provider_response_id AS providerResponseId, created_at AS createdAt
+    SELECT id, role, content, model, provider_response_id AS providerResponseId, metadata_json AS metadataJson, created_at AS createdAt
     FROM ae_messages WHERE organization_id=? AND conversation_id=? ORDER BY created_at, id
-  `).bind(principal.organizationId, c.req.param("id")).all();
-  return c.json({ data: result.results });
+  `).bind(principal.organizationId, c.req.param("id")).all<Record<string, unknown>>();
+  const data = result.results.map(row => {
+    const { metadataJson, ...rest } = row as Record<string, unknown>;
+    let toolEvents: unknown[] | undefined;
+    try { toolEvents = metadataJson ? JSON.parse(String(metadataJson)).toolEvents : undefined; } catch { toolEvents = undefined; }
+    return { ...rest, toolEvents };
+  });
+  return c.json({ data });
 });
 
 agenticEmployeeRoutes.post("/conversations/:id/messages", requireScope("school:read"), async c => {

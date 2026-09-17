@@ -5,13 +5,18 @@
 import { SignJWT } from "jose";
 import type { AuthPrincipal } from "../../http/types.js";
 
+// Every AI employee can reach anything a real logged-in user with that same
+// role/scopes could reach — Ledgerly's own permission checks (requireScope,
+// role checks) still run for real on every delegated request underneath this,
+// so this allowlist is about which *areas* of the product an employee should
+// be poking around in, not a second, stricter permission system.
 const profiles: Record<string, string[]> = {
-  secretary: ["/api/v1/school", "/api/v1/contacts", "/api/v1/documents", "/api/v1/files"],
-  dos: ["/api/v1/school", "/api/v1/reports", "/api/v1/documents", "/api/v1/files"],
-  bursar: ["/api/v1/accounts", "/api/v1/journals", "/api/v1/reports", "/api/v1/documents", "/api/v1/files", "/api/v1/payments", "/api/v1/banking", "/api/v1/budgets", "/api/v1/school"],
+  secretary: ["/api/v1/"],
+  dos: ["/api/v1/"],
+  bursar: ["/api/v1/"],
   headteacher: ["/api/v1/"],
-  hr: ["/api/v1/school", "/api/v1/contacts", "/api/v1/documents", "/api/v1/files", "/api/v1/reports"],
-  librarian: ["/api/v1/school", "/api/v1/documents", "/api/v1/files", "/api/v1/reports"],
+  hr: ["/api/v1/"],
+  librarian: ["/api/v1/"],
 };
 const blocked = ["/api/v1/agentic-employees", "/api/v1/admin", "/api/v1/integrations", "/api/v1/modules"];
 
@@ -42,7 +47,10 @@ export function createAgentSystemGateway(app: { fetch: (req: Request) => Promise
     async catalog(agentKey) {
       const routes = (app.routes || []).map(r => ({ method: String(r.method || "GET").toUpperCase(), path: String(r.path || "") }))
         .filter(r => ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(r.method) && r.path.startsWith("/api/v1/") && agentPathAllowed(agentKey, r.path));
-      return Array.from(new Map(routes.map(r => [`${r.method} ${r.path}`, r])).values()).slice(0, 500);
+      // No cap here: system_tools' catalog handler applies the model's search
+      // query against this full allowed set before truncating for the model.
+      // Capping here first would silently hide legitimate routes from search.
+      return Array.from(new Map(routes.map(r => [`${r.method} ${r.path}`, r])).values());
     },
     async request(input) {
       const method = String(input.method || "GET").toUpperCase();
