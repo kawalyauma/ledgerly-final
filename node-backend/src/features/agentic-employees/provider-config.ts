@@ -2,200 +2,62 @@ import { AppError } from "./shared.js";
 import type { Env } from "./shared.js";
 import type { ModelTier } from "./policy.js";
 
-export type AiProviderId = "openai" | "groq" | "google" | "anthropic" | "cloudflare" | "openrouter" | "ollama";
+export type AiProviderId = "openai" | "groq" | "google" | "anthropic" | "cloudflare" | "openrouter" | "ollama" | "custom";
 export type ProviderApiStyle = "responses" | "chat-completions" | "anthropic";
 export type ReasoningEffort = "default" | "low" | "medium" | "high" | "max";
 export type TierModels = Record<ModelTier, string>;
 export type AdvancedAiConfig = {
-  temperature: number | null;
-  topP: number | null;
-  maxOutputTokens: number;
-  timeoutMs: number;
-  reasoningEffort: ReasoningEffort;
-  accountId: string | null;
-  baseUrl: string | null;
+  temperature: number | null; topP: number | null; maxOutputTokens: number; timeoutMs: number;
+  reasoningEffort: ReasoningEffort; accountId: string | null; baseUrl: string | null;
 };
-
 type AiEnv = Env & { AI_PROVIDER_ENCRYPTION_KEY?: string };
-type ProviderRow = {
-  organizationId: string;
-  provider: AiProviderId;
-  modelsJson: string;
-  apiKeyCiphertext: string | null;
-  apiKeyHint: string | null;
-  configJson: string;
-  updatedAt: string;
+type ProviderRow = { organizationId:string; provider:AiProviderId; modelsJson:string; apiKeyCiphertext:string|null; apiKeyHint:string|null; configJson:string; updatedAt:string };
+type ProviderCatalogEntry = { id:AiProviderId; label:string; description:string; apiStyle:ProviderApiStyle; apiKeyRequired:boolean; models:Array<{id:string;label:string;tier:ModelTier}>; defaults:TierModels };
+
+export const AI_PROVIDER_CATALOG: Record<AiProviderId,ProviderCatalogEntry> = {
+  openai:{id:"openai",label:"OpenAI / ChatGPT",description:"OpenAI models using the Responses API.",apiStyle:"responses",apiKeyRequired:true,models:[
+    {id:"gpt-6-astra",label:"GPT-6 Astra",tier:"sol"},{id:"gpt-5.6-sol",label:"GPT-5.6 Sol",tier:"sol"},{id:"gpt-5.6-terra",label:"GPT-5.6 Terra",tier:"terra"},{id:"gpt-5.6-luna",label:"GPT-5.6 Luna",tier:"luna"},
+  ],defaults:{luna:"gpt-5.6-luna",terra:"gpt-5.6-terra",sol:"gpt-5.6-sol"}},
+  groq:{id:"groq",label:"Groq",description:"Groq-hosted models through the OpenAI-compatible Chat Completions API.",apiStyle:"chat-completions",apiKeyRequired:true,models:[
+    {id:"openai/gpt-oss-20b",label:"GPT-OSS 20B",tier:"luna"},{id:"openai/gpt-oss-120b",label:"GPT-OSS 120B",tier:"terra"},{id:"openai/gpt-oss-120b",label:"GPT-OSS 120B",tier:"sol"},
+  ],defaults:{luna:"openai/gpt-oss-20b",terra:"openai/gpt-oss-120b",sol:"openai/gpt-oss-120b"}},
+  google:{id:"google",label:"Google Gemini",description:"Gemini through Google's OpenAI-compatible endpoint.",apiStyle:"chat-completions",apiKeyRequired:true,models:[
+    {id:"gemini-3.5-flash-lite",label:"Gemini 3.5 Flash-Lite",tier:"luna"},{id:"gemini-3.5-flash",label:"Gemini 3.5 Flash",tier:"terra"},{id:"gemini-3.7-flash",label:"Gemini 3.7 Flash",tier:"terra"},{id:"gemini-3.8-flash",label:"Gemini 3.8 Flash",tier:"terra"},{id:"gemini-2.5-pro",label:"Gemini 2.5 Pro",tier:"sol"},{id:"gemini-3.1-pro-preview",label:"Gemini 3.1 Pro Preview",tier:"sol"},
+  ],defaults:{luna:"gemini-3.5-flash-lite",terra:"gemini-3.8-flash",sol:"gemini-3.1-pro-preview"}},
+  anthropic:{id:"anthropic",label:"Anthropic Claude",description:"Claude through Anthropic's native Messages API.",apiStyle:"anthropic",apiKeyRequired:true,models:[
+    {id:"claude-haiku-4-5-20251001",label:"Claude Haiku 4.5",tier:"luna"},{id:"claude-sonnet-5",label:"Claude Sonnet 5",tier:"terra"},{id:"claude-opus-5",label:"Claude Opus 5",tier:"sol"},{id:"claude-fable-5-1",label:"Claude Fable 5.1",tier:"sol"},
+  ],defaults:{luna:"claude-haiku-4-5-20251001",terra:"claude-sonnet-5",sol:"claude-opus-5"}},
+  cloudflare:{id:"cloudflare",label:"Cloudflare Workers AI",description:"Workers AI through its OpenAI-compatible endpoint. Requires the school's Cloudflare account ID.",apiStyle:"chat-completions",apiKeyRequired:true,models:[
+    {id:"@cf/openai/gpt-oss-20b",label:"GPT-OSS 20B",tier:"luna"},{id:"@cf/mistralai/mistral-small-3.1-24b-instruct",label:"Mistral Small 3.1 24B",tier:"terra"},{id:"@cf/meta/llama-4-scout-17b-16e-instruct",label:"Llama 4 Scout 17B",tier:"terra"},{id:"@cf/openai/gpt-oss-120b",label:"GPT-OSS 120B",tier:"sol"},{id:"@cf/meta/llama-3.3-70b-instruct-fp8-fast",label:"Llama 3.3 70B",tier:"sol"},
+  ],defaults:{luna:"@cf/openai/gpt-oss-20b",terra:"@cf/mistralai/mistral-small-3.1-24b-instruct",sol:"@cf/meta/llama-3.3-70b-instruct-fp8-fast"}},
+  openrouter:{id:"openrouter",label:"OpenRouter",description:"OpenRouter models through its OpenAI-compatible API. Model IDs remain editable per tier.",apiStyle:"chat-completions",apiKeyRequired:true,models:[
+    {id:"openai/gpt-oss-20b:free",label:"GPT-OSS 20B (Free route)",tier:"luna"},{id:"openai/gpt-oss-120b:free",label:"GPT-OSS 120B (Free route)",tier:"terra"},{id:"openai/gpt-oss-120b",label:"GPT-OSS 120B",tier:"sol"},
+  ],defaults:{luna:"openai/gpt-oss-20b:free",terra:"openai/gpt-oss-120b:free",sol:"openai/gpt-oss-120b"}},
+  ollama:{id:"ollama",label:"Ollama / Local AI",description:"Local or LAN Ollama through its OpenAI-compatible endpoint. An API key is not required by default.",apiStyle:"chat-completions",apiKeyRequired:false,models:[
+    {id:"qwen3:8b",label:"Qwen3 8B",tier:"luna"},{id:"qwen3:14b",label:"Qwen3 14B",tier:"terra"},{id:"gpt-oss:20b",label:"GPT-OSS 20B",tier:"sol"},
+  ],defaults:{luna:"qwen3:8b",terra:"qwen3:14b",sol:"gpt-oss:20b"}},
+  custom:{id:"custom",label:"Custom OpenAI-compatible",description:"Any OpenAI-compatible Chat Completions service. Set its base URL and model IDs; API key is optional for trusted local gateways.",apiStyle:"chat-completions",apiKeyRequired:false,models:[
+    {id:"model",label:"Custom model",tier:"luna"},{id:"model",label:"Custom model",tier:"terra"},{id:"model",label:"Custom model",tier:"sol"},
+  ],defaults:{luna:"model",terra:"model",sol:"model"}},
 };
 
-type ProviderCatalogEntry = {
-  id: AiProviderId;
-  label: string;
-  description: string;
-  apiStyle: ProviderApiStyle;
-  apiKeyRequired: boolean;
-  models: Array<{ id: string; label: string; tier: ModelTier }>;
-  defaults: TierModels;
-};
+export const DEFAULT_ADVANCED_CONFIG:AdvancedAiConfig={temperature:null,topP:null,maxOutputTokens:4096,timeoutMs:60000,reasoningEffort:"default",accountId:null,baseUrl:null};
+export function isProvider(value:unknown):value is AiProviderId{return typeof value==="string"&&value in AI_PROVIDER_CATALOG;}
+function safeJson<T>(value:string|null|undefined,fallback:T):T{try{return value?JSON.parse(value) as T:fallback;}catch{return fallback;}}
+function normalizeModelId(value:unknown,fallback:string){const model=typeof value==="string"?value.trim():"";if(!model)return fallback;if(model.length>180||!/^[A-Za-z0-9._:/@+-]+$/.test(model))throw new AppError(422,"VALIDATION_ERROR","Model ID contains unsupported characters.");return model;}
+export function normalizeModels(provider:AiProviderId,input?:Partial<TierModels>|null):TierModels{const d=AI_PROVIDER_CATALOG[provider].defaults;return{luna:normalizeModelId(input?.luna,d.luna),terra:normalizeModelId(input?.terra,d.terra),sol:normalizeModelId(input?.sol,d.sol)};}
+function nullableNumber(value:unknown,name:string,min:number,max:number){if(value===null||value===undefined||value==="")return null;const n=Number(value);if(!Number.isFinite(n)||n<min||n>max)throw new AppError(422,"VALIDATION_ERROR",`${name} must be between ${min} and ${max}.`);return n;}
+function requiredNumber(value:unknown,fallback:number,name:string,min:number,max:number){if(value===null||value===undefined||value==="")return fallback;const n=Number(value);if(!Number.isFinite(n)||n<min||n>max)throw new AppError(422,"VALIDATION_ERROR",`${name} must be between ${min} and ${max}.`);return Math.round(n);}
+function normalizeAccountId(value:unknown){if(value===null||value===undefined||value==="")return null;const id=String(value).trim();if(id.length>64||!/^[A-Za-z0-9_-]+$/.test(id))throw new AppError(422,"VALIDATION_ERROR","Cloudflare account ID looks invalid.");return id;}
+function normalizeBaseUrl(value:unknown){if(value===null||value===undefined||value==="")return null;const raw=String(value).trim().replace(/\/$/,"");if(raw.length>500)throw new AppError(422,"VALIDATION_ERROR","AI provider base URL is too long.");let url:URL;try{url=new URL(raw);}catch{throw new AppError(422,"VALIDATION_ERROR","AI provider base URL is invalid.");}if(url.protocol!=="http:"&&url.protocol!=="https:")throw new AppError(422,"VALIDATION_ERROR","AI provider base URL must use HTTP or HTTPS.");return raw;}
+export function normalizeAdvancedConfig(input?:Partial<AdvancedAiConfig>|null):AdvancedAiConfig{const reasoning=input?.reasoningEffort??DEFAULT_ADVANCED_CONFIG.reasoningEffort;if(!["default","low","medium","high","max"].includes(reasoning))throw new AppError(422,"VALIDATION_ERROR","Invalid reasoning effort.");return{temperature:nullableNumber(input?.temperature,"Temperature",0,2),topP:nullableNumber(input?.topP,"Top P",0,1),maxOutputTokens:requiredNumber(input?.maxOutputTokens,4096,"Maximum output tokens",128,65536),timeoutMs:requiredNumber(input?.timeoutMs,60000,"Request timeout",5000,120000),reasoningEffort:reasoning as ReasoningEffort,accountId:normalizeAccountId(input?.accountId),baseUrl:normalizeBaseUrl(input?.baseUrl)};}
 
-export const AI_PROVIDER_CATALOG: Record<AiProviderId, ProviderCatalogEntry> = {
-  openai: {
-    id: "openai", label: "OpenAI / ChatGPT", description: "OpenAI models using the Responses API.", apiStyle: "responses", apiKeyRequired: true,
-    models: [
-      { id: "gpt-5.6-luna", label: "GPT-5.6 Luna", tier: "luna" },
-      { id: "gpt-5.6-terra", label: "GPT-5.6 Terra", tier: "terra" },
-      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol", tier: "sol" },
-    ], defaults: { luna: "gpt-5.6-luna", terra: "gpt-5.6-terra", sol: "gpt-5.6-sol" },
-  },
-  groq: {
-    id: "groq", label: "Groq", description: "Groq-hosted models through the OpenAI-compatible Chat Completions API.", apiStyle: "chat-completions", apiKeyRequired: true,
-    models: [
-      { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B", tier: "luna" },
-      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "terra" },
-      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "sol" },
-    ], defaults: { luna: "openai/gpt-oss-20b", terra: "openai/gpt-oss-120b", sol: "openai/gpt-oss-120b" },
-  },
-  google: {
-    id: "google", label: "Google Gemini", description: "Gemini through Google's OpenAI-compatible endpoint.", apiStyle: "chat-completions", apiKeyRequired: true,
-    models: [
-      { id: "gemini-3.5-flash-lite", label: "Gemini Flash Lite", tier: "luna" },
-      { id: "gemini-3.8-flash", label: "Gemini Flash", tier: "terra" },
-      { id: "gemini-3.1-pro-preview", label: "Gemini Pro", tier: "sol" },
-    ], defaults: { luna: "gemini-3.5-flash-lite", terra: "gemini-3.8-flash", sol: "gemini-3.1-pro-preview" },
-  },
-  anthropic: {
-    id: "anthropic", label: "Anthropic Claude", description: "Claude through Anthropic's native Messages API.", apiStyle: "anthropic", apiKeyRequired: true,
-    models: [
-      { id: "claude-haiku-4-5-20251001", label: "Claude Haiku", tier: "luna" },
-      { id: "claude-sonnet-5", label: "Claude Sonnet", tier: "terra" },
-      { id: "claude-opus-5", label: "Claude Opus", tier: "sol" },
-    ], defaults: { luna: "claude-haiku-4-5-20251001", terra: "claude-sonnet-5", sol: "claude-opus-5" },
-  },
-  cloudflare: {
-    id: "cloudflare", label: "Cloudflare Workers AI", description: "Workers AI through its OpenAI-compatible endpoint.", apiStyle: "chat-completions", apiKeyRequired: true,
-    models: [
-      { id: "@cf/openai/gpt-oss-20b", label: "GPT-OSS 20B", tier: "luna" },
-      { id: "@cf/mistralai/mistral-small-3.1-24b-instruct", label: "Mistral Small 3.1", tier: "terra" },
-      { id: "@cf/openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "sol" },
-    ], defaults: { luna: "@cf/openai/gpt-oss-20b", terra: "@cf/mistralai/mistral-small-3.1-24b-instruct", sol: "@cf/openai/gpt-oss-120b" },
-  },
-  openrouter: {
-    id: "openrouter", label: "OpenRouter", description: "OpenRouter models through its OpenAI-compatible API. Model IDs remain editable per tier.", apiStyle: "chat-completions", apiKeyRequired: true,
-    models: [
-      { id: "openai/gpt-oss-20b:free", label: "GPT-OSS 20B (Free route)", tier: "luna" },
-      { id: "openai/gpt-oss-120b:free", label: "GPT-OSS 120B (Free route)", tier: "terra" },
-      { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B", tier: "sol" },
-    ], defaults: { luna: "openai/gpt-oss-20b:free", terra: "openai/gpt-oss-120b:free", sol: "openai/gpt-oss-120b" },
-  },
-  ollama: {
-    id: "ollama", label: "Ollama / Local AI", description: "Local or LAN Ollama through its OpenAI-compatible endpoint. No API key is required by default.", apiStyle: "chat-completions", apiKeyRequired: false,
-    models: [
-      { id: "qwen3:8b", label: "Qwen3 8B", tier: "luna" },
-      { id: "qwen3:14b", label: "Qwen3 14B", tier: "terra" },
-      { id: "gpt-oss:20b", label: "GPT-OSS 20B", tier: "sol" },
-    ], defaults: { luna: "qwen3:8b", terra: "qwen3:14b", sol: "gpt-oss:20b" },
-  },
-};
-
-export const DEFAULT_ADVANCED_CONFIG: AdvancedAiConfig = {
-  temperature: null, topP: null, maxOutputTokens: 4096, timeoutMs: 60000,
-  reasoningEffort: "default", accountId: null, baseUrl: null,
-};
-
-export function isProvider(value: unknown): value is AiProviderId {
-  return typeof value === "string" && value in AI_PROVIDER_CATALOG;
-}
-function safeJson<T>(value: string | null | undefined, fallback: T): T { try { return value ? JSON.parse(value) as T : fallback; } catch { return fallback; } }
-function normalizeModelId(value: unknown, fallback: string) {
-  const model = typeof value === "string" ? value.trim() : "";
-  if (!model) return fallback;
-  if (model.length > 180 || !/^[A-Za-z0-9._:/@+-]+$/.test(model)) throw new AppError(422, "VALIDATION_ERROR", "Model ID contains unsupported characters.");
-  return model;
-}
-export function normalizeModels(provider: AiProviderId, input?: Partial<TierModels> | null): TierModels {
-  const defaults = AI_PROVIDER_CATALOG[provider].defaults;
-  return { luna: normalizeModelId(input?.luna, defaults.luna), terra: normalizeModelId(input?.terra, defaults.terra), sol: normalizeModelId(input?.sol, defaults.sol) };
-}
-function nullableNumber(value: unknown, name: string, min: number, max: number) {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value); if (!Number.isFinite(n) || n < min || n > max) throw new AppError(422, "VALIDATION_ERROR", `${name} must be between ${min} and ${max}.`); return n;
-}
-function requiredNumber(value: unknown, fallback: number, name: string, min: number, max: number) {
-  if (value === null || value === undefined || value === "") return fallback;
-  const n = Number(value); if (!Number.isFinite(n) || n < min || n > max) throw new AppError(422, "VALIDATION_ERROR", `${name} must be between ${min} and ${max}.`); return Math.round(n);
-}
-function normalizeAccountId(value: unknown) {
-  if (value === null || value === undefined || value === "") return null;
-  const id = String(value).trim(); if (id.length > 64 || !/^[A-Za-z0-9_-]+$/.test(id)) throw new AppError(422, "VALIDATION_ERROR", "Cloudflare account ID looks invalid."); return id;
-}
-function normalizeBaseUrl(value: unknown) {
-  if (value === null || value === undefined || value === "") return null;
-  const raw = String(value).trim().replace(/\/$/, "");
-  if (raw.length > 500) throw new AppError(422, "VALIDATION_ERROR", "AI provider base URL is too long.");
-  let url: URL; try { url = new URL(raw); } catch { throw new AppError(422, "VALIDATION_ERROR", "AI provider base URL is invalid."); }
-  if (url.protocol !== "http:" && url.protocol !== "https:") throw new AppError(422, "VALIDATION_ERROR", "AI provider base URL must use HTTP or HTTPS.");
-  return raw;
-}
-export function normalizeAdvancedConfig(input?: Partial<AdvancedAiConfig> | null): AdvancedAiConfig {
-  const reasoning = input?.reasoningEffort ?? DEFAULT_ADVANCED_CONFIG.reasoningEffort;
-  if (!["default","low","medium","high","max"].includes(reasoning)) throw new AppError(422, "VALIDATION_ERROR", "Invalid reasoning effort.");
-  return {
-    temperature: nullableNumber(input?.temperature, "Temperature", 0, 2), topP: nullableNumber(input?.topP, "Top P", 0, 1),
-    maxOutputTokens: requiredNumber(input?.maxOutputTokens, 4096, "Maximum output tokens", 128, 65536), timeoutMs: requiredNumber(input?.timeoutMs, 60000, "Request timeout", 5000, 120000),
-    reasoningEffort: reasoning as ReasoningEffort, accountId: normalizeAccountId(input?.accountId), baseUrl: normalizeBaseUrl(input?.baseUrl),
-  };
-}
-
-function b64e(bytes: Uint8Array) { let s=""; for(const b of bytes)s+=String.fromCharCode(b); return btoa(s); }
-function b64d(value: string) { const s=atob(value); return Uint8Array.from(s,c=>c.charCodeAt(0)); }
-async function encryptionKey(secret: string) { const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(secret)); return crypto.subtle.importKey("raw",digest,{name:"AES-GCM"},false,["encrypt","decrypt"]); }
-async function encryptApiKey(secret: string, plaintext: string) { const iv=crypto.getRandomValues(new Uint8Array(12)); const enc=await crypto.subtle.encrypt({name:"AES-GCM",iv},await encryptionKey(secret),new TextEncoder().encode(plaintext)); return `v1.${b64e(iv)}.${b64e(new Uint8Array(enc))}`; }
-async function decryptApiKey(secret: string, ciphertext: string) {
-  const [version,ivText,encryptedText]=ciphertext.split("."); if(version!=="v1"||!ivText||!encryptedText) throw new AppError(500,"AI_SECRET_INVALID","Stored AI provider credentials are invalid.");
-  try { const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(ivText)},await encryptionKey(secret),b64d(encryptedText)); return new TextDecoder().decode(dec); }
-  catch { throw new AppError(503,"AI_SECRET_UNAVAILABLE","AI provider credentials cannot be decrypted. Check AI_PROVIDER_ENCRYPTION_KEY on the server."); }
-}
+function b64e(bytes:Uint8Array){let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s);}function b64d(value:string){const s=atob(value);return Uint8Array.from(s,c=>c.charCodeAt(0));}
+async function encryptionKey(secret:string){const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(secret));return crypto.subtle.importKey("raw",digest,{name:"AES-GCM"},false,["encrypt","decrypt"]);}
+async function encryptApiKey(secret:string,plaintext:string){const iv=crypto.getRandomValues(new Uint8Array(12));const enc=await crypto.subtle.encrypt({name:"AES-GCM",iv},await encryptionKey(secret),new TextEncoder().encode(plaintext));return`v1.${b64e(iv)}.${b64e(new Uint8Array(enc))}`;}
+async function decryptApiKey(secret:string,ciphertext:string){const[version,ivText,encryptedText]=ciphertext.split(".");if(version!=="v1"||!ivText||!encryptedText)throw new AppError(500,"AI_SECRET_INVALID","Stored AI provider credentials are invalid.");try{const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:b64d(ivText)},await encryptionKey(secret),b64d(encryptedText));return new TextDecoder().decode(dec);}catch{throw new AppError(503,"AI_SECRET_UNAVAILABLE","AI provider credentials cannot be decrypted. Check AI_PROVIDER_ENCRYPTION_KEY on the server.");}}
 async function loadRow(db:D1Database,organizationId:string){return db.prepare(`SELECT organization_id AS organizationId, provider, models_json AS modelsJson, api_key_ciphertext AS apiKeyCiphertext, api_key_hint AS apiKeyHint, config_json AS configJson, updated_at AS updatedAt FROM ae_ai_provider_settings WHERE organization_id=?`).bind(organizationId).first<ProviderRow>();}
-
-export async function getProviderSettings(db:D1Database,env:AiEnv,organizationId:string){
-  const row=await loadRow(db,organizationId);
-  if(!row){const provider:AiProviderId="openai",models=normalizeModels(provider,{luna:env.OPENAI_MODEL_LUNA,terra:env.OPENAI_MODEL_TERRA,sol:env.OPENAI_MODEL_SOL});return{provider,source:"environment-default" as const,configured:Boolean(env.OPENAI_API_KEY),apiKeyConfigured:Boolean(env.OPENAI_API_KEY),apiKeyHint:env.OPENAI_API_KEY?"Environment secret":null,models,config:DEFAULT_ADVANCED_CONFIG,updatedAt:null};}
-  const provider=isProvider(row.provider)?row.provider:"openai",models=normalizeModels(provider,safeJson<Partial<TierModels>>(row.modelsJson,{})),config=normalizeAdvancedConfig(safeJson<Partial<AdvancedAiConfig>>(row.configJson,{}));
-  const environmentFallback=provider==="openai"&&Boolean(env.OPENAI_API_KEY), keyOptional=!AI_PROVIDER_CATALOG[provider].apiKeyRequired;
-  return{provider,source:"school" as const,configured:keyOptional||Boolean(row.apiKeyCiphertext)||environmentFallback,apiKeyConfigured:keyOptional||Boolean(row.apiKeyCiphertext)||environmentFallback,apiKeyHint:row.apiKeyHint||(environmentFallback?"Environment secret":keyOptional?"Not required":null),models,config,updatedAt:row.updatedAt};
-}
-
-export async function saveProviderSettings(db:D1Database,env:AiEnv,organizationId:string,userId:string,input:{provider:AiProviderId;models?:Partial<TierModels>;apiKey?:string|null;clearApiKey?:boolean;config?:Partial<AdvancedAiConfig>}){
-  if(!isProvider(input.provider))throw new AppError(422,"VALIDATION_ERROR","Choose a supported AI provider.");
-  const current=await loadRow(db,organizationId),models=normalizeModels(input.provider,input.models),config=normalizeAdvancedConfig(input.config);
-  if(input.provider==="cloudflare"&&!config.accountId)throw new AppError(422,"VALIDATION_ERROR","A Cloudflare account ID is required for Workers AI.");
-  let ciphertext=current?.apiKeyCiphertext??null,hint=current?.apiKeyHint??null;
-  if(input.clearApiKey){ciphertext=null;hint=null;}else if(typeof input.apiKey==="string"&&input.apiKey.trim()){
-    const key=input.apiKey.trim(); if(key.length<4||key.length>512)throw new AppError(422,"VALIDATION_ERROR","The API key format is invalid.");
-    if(!env.AI_PROVIDER_ENCRYPTION_KEY||env.AI_PROVIDER_ENCRYPTION_KEY.length<24)throw new AppError(503,"AI_ENCRYPTION_NOT_CONFIGURED","Set AI_PROVIDER_ENCRYPTION_KEY before saving AI API keys.");
-    ciphertext=await encryptApiKey(env.AI_PROVIDER_ENCRYPTION_KEY,key);hint=`••••${key.slice(-4)}`;
-  }
-  await db.prepare(`INSERT INTO ae_ai_provider_settings (organization_id,provider,models_json,api_key_ciphertext,api_key_hint,config_json,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(organization_id) DO UPDATE SET provider=excluded.provider,models_json=excluded.models_json,api_key_ciphertext=excluded.api_key_ciphertext,api_key_hint=excluded.api_key_hint,config_json=excluded.config_json,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).bind(organizationId,input.provider,JSON.stringify(models),ciphertext,hint,JSON.stringify(config),userId).run();
-  return getProviderSettings(db,env,organizationId);
-}
-
-function defaultBaseUrl(provider:AiProviderId,config:AdvancedAiConfig,env:AiEnv){
-  if(config.baseUrl)return config.baseUrl;
-  if(provider==="openai")return String(env.OPENAI_BASE_URL||"https://api.openai.com/v1").replace(/\/$/,"");
-  if(provider==="groq")return "https://api.groq.com/openai/v1";
-  if(provider==="google")return "https://generativelanguage.googleapis.com/v1beta/openai";
-  if(provider==="anthropic")return "https://api.anthropic.com/v1";
-  if(provider==="cloudflare")return `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/v1`;
-  if(provider==="openrouter")return "https://openrouter.ai/api/v1";
-  return "http://127.0.0.1:11434/v1";
-}
-
-export async function resolveRuntimeProvider(db:D1Database,env:AiEnv,organizationId:string,tier:ModelTier){
-  const row=await loadRow(db,organizationId);
-  if(!row){if(!env.OPENAI_API_KEY)throw new AppError(503,"AI_NOT_CONFIGURED","AI is not configured for this school. Add an API key in AI Workforce → AI Provider Configuration.");const provider:AiProviderId="openai",models=normalizeModels(provider,{luna:env.OPENAI_MODEL_LUNA,terra:env.OPENAI_MODEL_TERRA,sol:env.OPENAI_MODEL_SOL}),config=DEFAULT_ADVANCED_CONFIG;return{provider,apiStyle:AI_PROVIDER_CATALOG[provider].apiStyle,apiKey:env.OPENAI_API_KEY,model:models[tier],config,baseUrl:defaultBaseUrl(provider,config,env)};}
-  const provider=isProvider(row.provider)?row.provider:"openai",models=normalizeModels(provider,safeJson<Partial<TierModels>>(row.modelsJson,{})),config=normalizeAdvancedConfig(safeJson<Partial<AdvancedAiConfig>>(row.configJson,{}));
-  if(provider==="cloudflare"&&!config.accountId)throw new AppError(503,"AI_NOT_CONFIGURED","No Cloudflare account ID has been saved for this school.");
-  let apiKey:string|undefined;
-  if(row.apiKeyCiphertext){if(!env.AI_PROVIDER_ENCRYPTION_KEY)throw new AppError(503,"AI_SECRET_UNAVAILABLE","AI provider encryption key is missing on the server.");apiKey=await decryptApiKey(env.AI_PROVIDER_ENCRYPTION_KEY,row.apiKeyCiphertext);}else if(provider==="openai")apiKey=env.OPENAI_API_KEY;
-  if(!apiKey&&AI_PROVIDER_CATALOG[provider].apiKeyRequired)throw new AppError(503,"AI_NOT_CONFIGURED",`No API key has been saved for ${AI_PROVIDER_CATALOG[provider].label}.`);
-  return{provider,apiStyle:AI_PROVIDER_CATALOG[provider].apiStyle,apiKey:apiKey||"ollama",model:models[tier],config,baseUrl:defaultBaseUrl(provider,config,env)};
-}
+export async function getProviderSettings(db:D1Database,env:AiEnv,organizationId:string){const row=await loadRow(db,organizationId);if(!row){const provider:AiProviderId="openai",models=normalizeModels(provider,{luna:env.OPENAI_MODEL_LUNA,terra:env.OPENAI_MODEL_TERRA,sol:env.OPENAI_MODEL_SOL});return{provider,source:"environment-default" as const,configured:Boolean(env.OPENAI_API_KEY),apiKeyConfigured:Boolean(env.OPENAI_API_KEY),apiKeyHint:env.OPENAI_API_KEY?"Environment secret":null,models,config:DEFAULT_ADVANCED_CONFIG,updatedAt:null};}const provider=isProvider(row.provider)?row.provider:"openai",models=normalizeModels(provider,safeJson<Partial<TierModels>>(row.modelsJson,{})),config=normalizeAdvancedConfig(safeJson<Partial<AdvancedAiConfig>>(row.configJson,{}));const environmentFallback=provider==="openai"&&Boolean(env.OPENAI_API_KEY),keyOptional=!AI_PROVIDER_CATALOG[provider].apiKeyRequired;return{provider,source:"school" as const,configured:keyOptional||Boolean(row.apiKeyCiphertext)||environmentFallback,apiKeyConfigured:keyOptional||Boolean(row.apiKeyCiphertext)||environmentFallback,apiKeyHint:row.apiKeyHint||(environmentFallback?"Environment secret":keyOptional?"Optional":null),models,config,updatedAt:row.updatedAt};}
+export async function saveProviderSettings(db:D1Database,env:AiEnv,organizationId:string,userId:string,input:{provider:AiProviderId;models?:Partial<TierModels>;apiKey?:string|null;clearApiKey?:boolean;config?:Partial<AdvancedAiConfig>}){if(!isProvider(input.provider))throw new AppError(422,"VALIDATION_ERROR","Choose a supported AI provider.");const current=await loadRow(db,organizationId),models=normalizeModels(input.provider,input.models),config=normalizeAdvancedConfig(input.config);if(input.provider==="cloudflare"&&!config.accountId)throw new AppError(422,"VALIDATION_ERROR","A Cloudflare account ID is required for Workers AI.");if(input.provider==="custom"&&!config.baseUrl)throw new AppError(422,"VALIDATION_ERROR","A base URL is required for a custom OpenAI-compatible provider.");let ciphertext=current?.apiKeyCiphertext??null,hint=current?.apiKeyHint??null;if(input.clearApiKey){ciphertext=null;hint=null;}else if(typeof input.apiKey==="string"&&input.apiKey.trim()){const key=input.apiKey.trim();if(key.length<4||key.length>512)throw new AppError(422,"VALIDATION_ERROR","The API key format is invalid.");if(!env.AI_PROVIDER_ENCRYPTION_KEY||env.AI_PROVIDER_ENCRYPTION_KEY.length<24)throw new AppError(503,"AI_ENCRYPTION_NOT_CONFIGURED","Set AI_PROVIDER_ENCRYPTION_KEY before saving AI API keys.");ciphertext=await encryptApiKey(env.AI_PROVIDER_ENCRYPTION_KEY,key);hint=`••••${key.slice(-4)}`;}await db.prepare(`INSERT INTO ae_ai_provider_settings (organization_id,provider,models_json,api_key_ciphertext,api_key_hint,config_json,updated_by) VALUES (?,?,?,?,?,?,?) ON CONFLICT(organization_id) DO UPDATE SET provider=excluded.provider,models_json=excluded.models_json,api_key_ciphertext=excluded.api_key_ciphertext,api_key_hint=excluded.api_key_hint,config_json=excluded.config_json,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP`).bind(organizationId,input.provider,JSON.stringify(models),ciphertext,hint,JSON.stringify(config),userId).run();return getProviderSettings(db,env,organizationId);}
+function defaultBaseUrl(provider:AiProviderId,config:AdvancedAiConfig,env:AiEnv){if(config.baseUrl)return config.baseUrl;if(provider==="openai")return String(env.OPENAI_BASE_URL||"https://api.openai.com/v1").replace(/\/$/,"");if(provider==="groq")return"https://api.groq.com/openai/v1";if(provider==="google")return"https://generativelanguage.googleapis.com/v1beta/openai";if(provider==="anthropic")return"https://api.anthropic.com/v1";if(provider==="cloudflare")return`https://api.cloudflare.com/client/v4/accounts/${config.accountId}/ai/v1`;if(provider==="openrouter")return"https://openrouter.ai/api/v1";if(provider==="ollama")return"http://127.0.0.1:11434/v1";return"";}
+export async function resolveRuntimeProvider(db:D1Database,env:AiEnv,organizationId:string,tier:ModelTier){const row=await loadRow(db,organizationId);if(!row){if(!env.OPENAI_API_KEY)throw new AppError(503,"AI_NOT_CONFIGURED","AI is not configured for this school. Add an API key in AI Workforce → AI Provider Configuration.");const provider:AiProviderId="openai",models=normalizeModels(provider,{luna:env.OPENAI_MODEL_LUNA,terra:env.OPENAI_MODEL_TERRA,sol:env.OPENAI_MODEL_SOL}),config=DEFAULT_ADVANCED_CONFIG;return{provider,apiStyle:AI_PROVIDER_CATALOG[provider].apiStyle,apiKey:env.OPENAI_API_KEY,model:models[tier],config,baseUrl:defaultBaseUrl(provider,config,env)};}const provider=isProvider(row.provider)?row.provider:"openai",models=normalizeModels(provider,safeJson<Partial<TierModels>>(row.modelsJson,{})),config=normalizeAdvancedConfig(safeJson<Partial<AdvancedAiConfig>>(row.configJson,{}));if(provider==="cloudflare"&&!config.accountId)throw new AppError(503,"AI_NOT_CONFIGURED","No Cloudflare account ID has been saved for this school.");if(provider==="custom"&&!config.baseUrl)throw new AppError(503,"AI_NOT_CONFIGURED","No base URL has been saved for the custom AI provider.");let apiKey:string|undefined;if(row.apiKeyCiphertext){if(!env.AI_PROVIDER_ENCRYPTION_KEY)throw new AppError(503,"AI_SECRET_UNAVAILABLE","AI provider encryption key is missing on the server.");apiKey=await decryptApiKey(env.AI_PROVIDER_ENCRYPTION_KEY,row.apiKeyCiphertext);}else if(provider==="openai")apiKey=env.OPENAI_API_KEY;if(!apiKey&&AI_PROVIDER_CATALOG[provider].apiKeyRequired)throw new AppError(503,"AI_NOT_CONFIGURED",`No API key has been saved for ${AI_PROVIDER_CATALOG[provider].label}.`);return{provider,apiStyle:AI_PROVIDER_CATALOG[provider].apiStyle,apiKey:apiKey||"",model:models[tier],config,baseUrl:defaultBaseUrl(provider,config,env)};}
