@@ -8,8 +8,8 @@ import { testProviderConnection } from "./openai.js";
 
 export const agenticProviderRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-const providerSchema = z.enum(["openai", "google", "anthropic", "cloudflare"]);
-const modelSchema = z.string().trim().min(1).max(160).regex(/^[A-Za-z0-9._:/@-]+$/);
+const providerSchema = z.enum(["openai", "groq", "google", "anthropic", "cloudflare", "openrouter", "ollama"]);
+const modelSchema = z.string().trim().min(1).max(180).regex(/^[A-Za-z0-9._:/@+-]+$/);
 const configurationSchema = z.object({
   temperature: z.number().min(0).max(2).nullable().optional(),
   topP: z.number().min(0).max(1).nullable().optional(),
@@ -17,16 +17,15 @@ const configurationSchema = z.object({
   timeoutMs: z.number().int().min(5000).max(120000).optional(),
   reasoningEffort: z.enum(["default", "low", "medium", "high", "max"]).optional(),
   accountId: z.string().trim().max(64).nullable().optional(),
+  baseUrl: z.string().trim().url().max(500).nullable().optional(),
 }).optional();
 
 agenticProviderRoutes.get("/provider-catalog", requireScope("school:read"), c => c.json({
   data: {
     providers: Object.values(AI_PROVIDER_CATALOG),
     limits: {
-      temperature: { min: 0, max: 2 },
-      topP: { min: 0, max: 1 },
-      maxOutputTokens: { min: 128, max: 65536 },
-      timeoutMs: { min: 5000, max: 120000 },
+      temperature: { min: 0, max: 2 }, topP: { min: 0, max: 1 },
+      maxOutputTokens: { min: 128, max: 65536 }, timeoutMs: { min: 5000, max: 120000 },
       reasoningEffort: ["default", "low", "medium", "high", "max"],
     },
   },
@@ -37,25 +36,15 @@ agenticProviderRoutes.get("/provider-settings", requireScope("school:read"), asy
   return c.json({ data: await getProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId) });
 });
 
-// Compatibility endpoint used by the existing AI Workforce overview/settings card.
-// This route is intentionally mounted before the legacy /settings route.
 agenticProviderRoutes.get("/settings", requireScope("school:read"), async c => {
   const principal = c.get("principal");
   const settings = await getProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId);
   const catalog = AI_PROVIDER_CATALOG[settings.provider];
-  return c.json({
-    data: {
-      provider: catalog.label,
-      providerId: settings.provider,
-      configured: settings.configured,
-      apiKeyConfigured: settings.apiKeyConfigured,
-      apiKeyHint: settings.apiKeyHint,
-      models: settings.models,
-      config: settings.config,
-      source: settings.source,
-      updatedAt: settings.updatedAt,
-    },
-  });
+  return c.json({ data: {
+    provider: catalog.label, providerId: settings.provider, configured: settings.configured,
+    apiKeyConfigured: settings.apiKeyConfigured, apiKeyHint: settings.apiKeyHint,
+    models: settings.models, config: settings.config, source: settings.source, updatedAt: settings.updatedAt,
+  }});
 });
 
 agenticProviderRoutes.patch("/provider-settings", requireScope("school:write"), async c => {
@@ -71,10 +60,7 @@ agenticProviderRoutes.patch("/provider-settings", requireScope("school:write"), 
   const current = await getProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId);
   const providerChanged = current.source === "school" && current.provider !== parsed.data.provider;
   const hasReplacementKey = typeof parsed.data.apiKey === "string" && parsed.data.apiKey.trim().length > 0;
-  const input = {
-    ...parsed.data,
-    clearApiKey: Boolean(parsed.data.clearApiKey || (providerChanged && !hasReplacementKey)),
-  };
+  const input = { ...parsed.data, clearApiKey: Boolean(parsed.data.clearApiKey || (providerChanged && !hasReplacementKey)) };
   const data = await saveProviderSettings(c.env.FINANCE_DB, c.env, principal.organizationId, principal.userId, input);
   return c.json({ data });
 });
