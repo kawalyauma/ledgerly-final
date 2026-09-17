@@ -19,13 +19,16 @@ describe("Light Mode hierarchical tool registry",()=>{
     expect(registry.tools.filter(tool=>tool.source==="route").every(tool=>tool.aliases.length>0)).toBe(true);
   });
 
-  it("categorizes report, query and write routes before the cheap model sees them",async()=>{
+  it("categorizes business areas and promotes common operations to semantic names",async()=>{
     const gateway:AgentSystemGateway={catalog:async()=>[
       {method:"GET",path:"/api/v1/school/student-management/reports/enrollment"},
       {method:"GET",path:"/api/v1/school/student-management/students"},
+      {method:"POST",path:"/api/v1/school/student-management/students"},
       {method:"POST",path:"/api/v1/school/setup/classes"},
       {method:"PUT",path:"/api/v1/school/setup/classes/:id"},
       {method:"DELETE",path:"/api/v1/school/setup/classes/:id"},
+      {method:"GET",path:"/api/v1/school/fees/balances"},
+      {method:"POST",path:"/api/v1/school/staff-management/staff"},
     ],request:async()=>({ok:true,status:200,data:{}})};
     const registry=await buildLightToolRegistry({AGENT_SYSTEM_GATEWAY:gateway} as Env,principal,AGENTS.headteacher);
     const routeTools=registry.tools.filter(tool=>tool.source==="route");
@@ -34,5 +37,10 @@ describe("Light Mode hierarchical tool registry",()=>{
     expect(routeTools.some(tool=>tool.kind==="create")).toBe(true);
     expect(routeTools.some(tool=>tool.kind==="update")).toBe(true);
     expect(routeTools.some(tool=>tool.kind==="delete")).toBe(true);
+    expect(routeTools.find(tool=>tool.name==="create_class")?.module).toBe("school setup");
+    expect(routeTools.find(tool=>tool.name==="create_student")?.module).toBe("students");
+    expect(routeTools.find(tool=>tool.name==="create_staff_member")?.module).toBe("staff");
+    expect(routeTools.find(tool=>tool.pathTemplate==="/api/v1/school/fees/balances")?.module).toBe("finance");
+    expect(routeTools.find(tool=>tool.name==="student_enrollment_report")?.kind).toBe("report");
   });
 });
