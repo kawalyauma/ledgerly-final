@@ -17,7 +17,7 @@ export async function cumulativeAcademicSection(db: D1Database, organizationId: 
     LEFT JOIN school_terms t ON t.id=e.term_id
     LEFT JOIN school_classes c ON c.id=rc.class_id
     LEFT JOIN school_streams st ON st.id=rc.stream_id
-    WHERE rc.organization_id=? AND rc.student_id=? AND rc.is_published=1 AND e.status='published'
+    WHERE rc.organization_id=? AND rc.student_id=? AND rc.is_published=true AND e.status='published'
     ORDER BY COALESCE(e.end_date,e.start_date,rc.published_at) DESC,rc.published_at DESC
     LIMIT ?
   `).bind(organizationId, studentId, limit).all<Record<string, unknown>>();
@@ -29,7 +29,7 @@ export async function cumulativeAcademicSection(db: D1Database, organizationId: 
            m.is_absent AS isAbsent,m.is_exempt AS isExempt
     FROM exm_marks m
     JOIN exm_exams e ON e.id=m.exam_id AND e.organization_id=m.organization_id
-    JOIN exm_report_cards rc ON rc.organization_id=m.organization_id AND rc.exam_id=m.exam_id AND rc.student_id=m.student_id AND rc.is_published=1
+    JOIN exm_report_cards rc ON rc.organization_id=m.organization_id AND rc.exam_id=m.exam_id AND rc.student_id=m.student_id AND rc.is_published=true
     JOIN school_subjects s ON s.id=m.subject_id
     LEFT JOIN school_academic_years ay ON ay.id=e.academic_year_id
     LEFT JOIN school_terms t ON t.id=e.term_id
