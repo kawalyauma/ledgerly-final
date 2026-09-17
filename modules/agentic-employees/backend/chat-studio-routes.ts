@@ -3,6 +3,7 @@ import type { AppVariables, Env } from "../../../src/types";
 import { AppError } from "../../../src/lib/errors";
 import { requireScope } from "../../../src/lib/auth";
 import { createId } from "../../../src/lib/ids";
+import { resolveLightReferences } from "./light-reference-resolver";
 
 export const agenticChatStudioRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -58,7 +59,7 @@ async function getAction(db: D1Database, organizationId: string, id: string): Pr
   return { ...row, payload: parsePayload(row.payloadJson) };
 }
 
-function normalizeEditablePayload(action: ActionRow & { payload: Record<string, unknown> }, candidateValue: unknown) {
+function normalizeEditablePayload(action: ActionRow & { payload: Record<string, unknown> }, candidateValue: unknown): Record<string, unknown> {
   const candidate = object(candidateValue);
   const original = action.payload;
   switch (action.actionType) {
@@ -116,6 +117,15 @@ function normalizeEditablePayload(action: ActionRow & { payload: Record<string, 
     default:
       throw new AppError(409, "ACTION_NOT_EDITABLE", "This action type is not editable in chat");
   }
+}
+
+async function reResolveEditedSystemBody(db: D1Database, organizationId: string, action: ActionRow, payload: Record<string, unknown>) {
+  if (action.actionType !== "system.api.request" || payload.body === undefined || payload.body === null) return payload;
+  if (typeof payload.body !== "object" || Array.isArray(payload.body)) throw new AppError(422, "VALIDATION_ERROR", "Edited API request body must be a JSON object");
+  const resolved = await resolveLightReferences(db, organizationId, payload.body);
+  if (resolved.issues.length) throw new AppError(422, "VALIDATION_ERROR", resolved.issues.join(" "));
+  payload.body = resolved.value;
+  return payload;
 }
 
 function phaseForTool(name: string) {
@@ -196,7 +206,8 @@ agenticChatStudioRoutes.patch("/chat-studio/actions/:id/payload", requireScope("
   if (action.status !== "suggested") throw new AppError(409, "ACTION_LOCKED", "Only an unapproved suggested action can be edited");
   if (!canUseScope(principal, action.requiredScope)) throw new AppError(403, "FORBIDDEN", `Editing this action requires ${action.requiredScope}`);
   const body = object(await c.req.json());
-  const payload = normalizeEditablePayload(action, body.payload);
+  let payload = normalizeEditablePayload(action, body.payload);
+  payload = await reResolveEditedSystemBody(c.env.FINANCE_DB, principal.organizationId, action, payload);
   const title = action.actionType === "document.generate" ? `Generate ${String(payload.title)}`.slice(0, 240) : action.title;
   await c.env.FINANCE_DB.batch([
     c.env.FINANCE_DB.prepare("UPDATE ae_actions SET payload_json=?,title=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=? AND status='suggested'")
