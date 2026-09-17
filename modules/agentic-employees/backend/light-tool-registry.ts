@@ -32,6 +32,7 @@ const ACTION_WORDS = new Set(["approve","reject","publish","apply","execute","re
 const QUERY_WORDS = new Set(["search","lookup","preview","calculate","validate","check","summary","matrix","context","options","status"]);
 const REPORT_WORDS = new Set(["report","reports","statement","statements","analytics","dashboard","summary"]);
 const DOC_WORDS = new Set(["document","documents","files","pdf","xlsx","pptx","docx","print","printerly"]);
+const ADVANCED_DISCOVERY_TOOLS = new Set(["system_catalog","system_read","prepare_system_action"]);
 
 function tokens(path: string) {
   return path.split("?")[0].split("/").filter(Boolean).slice(2).map(part => part.replace(/^:/, "by_").replace(/[^A-Za-z0-9_-]+/g, "_").toLowerCase());
@@ -89,7 +90,7 @@ function verbFor(method: string, kind: LightTaskKind) {
 }
 
 function routeName(method: string, path: string, kind: LightTaskKind) {
-  const parts = tokens(path).map(part => part.replace(/^by_/, "by_")).join("_");
+  const parts = tokens(path).join("_");
   const base = `${verbFor(method, kind)}_${parts}`.replace(/_+/g, "_").replace(/^_|_$/g, "").slice(0, 72);
   return `route_${base}_${hashText(`${method}:${path}`)}`;
 }
@@ -104,10 +105,10 @@ function routeAliases(method: string, path: string, kind: LightTaskKind) {
   const words = pathWords(path);
   const noun = words.slice(-2).join(" ");
   const aliases = new Set<string>([noun, words.join(" "), `${verbFor(method, kind)} ${noun}`]);
-  if (kind === "create") { aliases.add(`add ${noun}`); aliases.add(`new ${noun}`); aliases.add(`register ${noun}`); }
+  if (kind === "create") { aliases.add(`add ${noun}`); aliases.add(`new ${noun}`); aliases.add(`register ${noun}`); aliases.add(`open ${noun}`); }
   if (kind === "query") { aliases.add(`check ${noun}`); aliases.add(`find ${noun}`); aliases.add(`show ${noun}`); }
-  if (kind === "update") { aliases.add(`edit ${noun}`); aliases.add(`change ${noun}`); }
-  if (kind === "delete") { aliases.add(`remove ${noun}`); }
+  if (kind === "update") { aliases.add(`edit ${noun}`); aliases.add(`change ${noun}`); aliases.add(`rename ${noun}`); }
+  if (kind === "delete") aliases.add(`remove ${noun}`);
   return [...aliases].filter(Boolean).slice(0, 8);
 }
 
@@ -131,7 +132,6 @@ function nativeModule(name: string) {
   if (name.includes("document") || name.includes("print")) return "documents";
   if (name.includes("memory")) return "memory";
   if (name.includes("work_task")) return "tasks";
-  if (name.startsWith("system_")) return "system";
   return "general";
 }
 
@@ -157,7 +157,7 @@ function nativeAliases(name: string, description: string) {
 }
 
 export async function buildLightToolRegistry(env: Env, principal: AuthPrincipal, agent: AgentDefinition): Promise<LightToolRegistry> {
-  const nativeSpecs = openAiTools(agent, null) as Array<{ name: string; description?: string; parameters?: Record<string, unknown> }>;
+  const nativeSpecs = (openAiTools(agent, null) as Array<{ name: string; description?: string; parameters?: Record<string, unknown> }>).filter(spec => !ADVANCED_DISCOVERY_TOOLS.has(spec.name));
   const nativeTools: LightToolDescriptor[] = nativeSpecs.map(spec => {
     const description = spec.description || spec.name.replace(/_/g, " ");
     const kind = nativeKind(spec.name, description);
