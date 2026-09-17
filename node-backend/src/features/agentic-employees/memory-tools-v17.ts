@@ -5,6 +5,7 @@ import {generateDraft,lessonPeriodContext,listRules,matrix,validateTimetable,wee
 import {syncCurriculumLoadRules} from "./stubs.js";
 import {reviewGeneratedDraft} from "./stubs.js";
 import {recoveryOptions,substituteCandidates} from "./stubs.js";
+import { executeSemanticTool,isSemanticTool,semanticOpenAiTools } from "./semantic-tools.js";
 
 const MEMORY_TOOLS:any[]=[
  {type:"function",name:"search_memory",strict:false,description:"Search this employee's saved working and institutional memory.",parameters:{type:"object",properties:{query:{type:"string"},limit:{type:"integer",minimum:1,maximum:50}},additionalProperties:false}},
@@ -22,9 +23,22 @@ const TIMETABLE_TOOLS:any[]=[
 const timetableAgent=(key:string)=>key==="dos"||key==="headteacher";
 const timetableAllowed=(agent:any,name:string,requested?:string[]|null)=>timetableAgent(agent.key)&&(!requested||requested.includes(name));
 
-export function openAiTools(agent:any,requested?:string[]|null){return[...baseTools(agent,requested),...MEMORY_TOOLS,...TIMETABLE_TOOLS.filter(tool=>timetableAllowed(agent,tool.name,requested))];}
+function uniqueTools(tools:any[]){
+ const seen=new Set<string>();
+ return tools.filter(tool=>{const name=String(tool?.name||tool?.function?.name||"");if(!name||seen.has(name))return false;seen.add(name);return true;});
+}
 
-export async function executeTool(ctx:ToolContext,name:string,raw:unknown){
+export function openAiTools(agent:any,requested?:string[]|null){
+ return uniqueTools([
+  ...semanticOpenAiTools(agent,requested),
+  ...baseTools(agent,requested),
+  ...MEMORY_TOOLS,
+  ...TIMETABLE_TOOLS.filter(tool=>timetableAllowed(agent,tool.name,requested)),
+ ]);
+}
+
+export async function executeTool(ctx:ToolContext & {env?:any},name:string,raw:unknown){
+ if(isSemanticTool(name))return executeSemanticTool(ctx,name,raw);
  const tt=TIMETABLE_TOOLS.some(x=>x.name===name);
  if(tt){
   if(!timetableAllowed(ctx.agent,name,ctx.requestedTools))throw new Error(`${name} is not enabled for this employee run`);
