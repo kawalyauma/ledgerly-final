@@ -73,7 +73,7 @@ export const TOOL_SPECS: Record<string, ToolSpec> = {
   communications_summary: { name: "communications_summary", description: "Get communication campaign and delivery health for this organization.", parameters: objectSchema({}) },
   prepare_communication: {
     name: "prepare_communication",
-    description: "Prepare a Ledgerly SMS/WhatsApp communication campaign for human approval. It does not send anything by itself.",
+    description: "Prepare a Ledgerly SMS/WhatsApp communication campaign for inline human review in AI Chat. It does not send anything by itself and the user can edit permitted message details before approval.",
     parameters: objectSchema({
       audienceKind: { type: "string", enum: ["students", "staff", "fee_balances"] },
       channels: { type: "array", items: { type: "string", enum: ["sms", "whatsapp"] }, minItems: 1, maxItems: 2 },
@@ -307,7 +307,6 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
 
     case "prepare_communication": {
       need(ctx, "school:read");
-      const approvalId = createId("aap");
       const channels = Array.isArray(args.channels) ? [...new Set(args.channels.map(String).filter(x => x === "sms" || x === "whatsapp"))] : [];
       if (!channels.length) throw new Error("At least one supported communication channel is required");
       const audienceKind = String(args.audienceKind || "students");
@@ -323,11 +322,16 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
         subject: String(args.subject || "School update").slice(0, 200),
         message: String(args.message || "").slice(0, 2000),
       };
-      await ctx.db.prepare(`
-        INSERT INTO ae_approvals(id,organization_id,conversation_id,agent_key,requested_by,action_type,required_scope,payload_json,status)
-        VALUES (?,?,?,?,?,?,?,?,'pending')
-      `).bind(approvalId, organizationId, ctx.conversationId, ctx.agent.key, ctx.principal.userId, "communication.campaign.send", "communications:write", JSON.stringify(payload)).run();
-      return { approvalId, status: "pending", action: "communication.campaign.send", message: "Campaign prepared. A human with communications:write must approve it before the executor can send it." };
+      const id=createId("aea"),signature=String(payload.subject).toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,60)||"message";
+      const idempotencyKey=`conversation:${ctx.conversationId}:communication:${signature}`;
+      await ctx.db.prepare(`INSERT INTO ae_actions
+        (id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status)
+        VALUES (?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`)
+        .bind(id,organizationId,ctx.agent.key,"communication.campaign.send",`Send ${payload.subject}`,
+          `Review the ${channels.join(" + ")} communication and audience before sending.`,"communications:write",JSON.stringify(payload),idempotencyKey).run();
+      const action=await ctx.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?")
+        .bind(organizationId,idempotencyKey).first();
+      return { prepared:true,executed:false,requiresHumanApproval:true,approvalSurface:"chat",action };
     }
 
     default:
