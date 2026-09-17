@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { setDefaultResultOrder } from "node:dns";
 import { features } from "../features/index.js";
 import { JobRegistry } from "../jobs/registry.js";
 import { createRuntime } from "../runtime.js";
+
+// See src/server.ts: this host's dual-stack DNS resolution is unreliable for
+// some AI provider hosts (intermittent getaddrinfo EAI_AGAIN).
+setDefaultResultOrder("ipv4first");
 
 const runtime = await createRuntime();
 const registry = new JobRegistry();

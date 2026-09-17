@@ -121,7 +121,8 @@ function resultFor(entityType: string, query: string, matches: Row[]) {
     entityType, query, status: matches.length === 0 ? "not_found" : matches.length === 1 ? "resolved" : "ambiguous",
     resolved: matches.length === 1 ? matches[0] : null,
     matches,
-    rule: matches.length > 1 ? "Do not guess. Ask the user to disambiguate or use another recorded identifier." : undefined,
+    rule: matches.length > 1 ? "Do not guess. Ask the user to disambiguate or use another recorded identifier."
+      : matches.length === 0 ? `No ${entityType} records matching "${query}" exist yet for this school. Do not retry with different search terms or blame a missing route — tell the user plainly that none exist, and offer to prepare one via prepare_system_action if that fits their request.` : undefined,
   };
 }
 
