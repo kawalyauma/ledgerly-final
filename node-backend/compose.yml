@@ -26,41 +26,18 @@ services:
       timeout: 3s
       retries: 20
 
-  minio:
-    build:
-      context: ./minio-community
-      args:
-        MINIO_SOURCE_REF: ${MINIO_SOURCE_REF:-7aac2a2c5b7c882e68c1ce017d8256be2feea27f}
-    image: ledgerly-minio-community:7aac2a2c
-    restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ledgerly}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ledgerly-minio-change-me}
-    volumes:
-      - minio-data:/data
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:9000/minio/health/live >/dev/null || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-
   migrate:
-    build: .
+    build:
+      context: .
+      network: host
     restart: "no"
     command: ["node", "dist/db/migrate.js"]
     environment: &backend-env
       NODE_ENV: production
       DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@postgres:5432/ledgerly
       REDIS_URL: redis://redis:6379
-      STORAGE_DRIVER: minio
-      S3_ENDPOINT: http://minio:9000
-      S3_REGION: us-east-1
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-ledgerly}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ledgerly-minio-change-me}
-      S3_BUCKET: ledgerly
-      S3_FORCE_PATH_STYLE: "true"
-      S3_AUTO_CREATE_BUCKET: "true"
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_ROOT: /data/storage
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
       # Keep the main Node API and modular/self-host API on one token authority.
       JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
@@ -70,38 +47,47 @@ services:
       postgres: { condition: service_healthy }
 
   api:
-    build: .
+    build:
+      context: .
+      network: host
     restart: unless-stopped
     command: ["node", "dist/server.js"]
     environment: *backend-env
+    volumes:
+      - app-storage:/data/storage
     ports:
       - "${LEDGERLY_API_PORT:-8080}:8080"
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
 
   queue:
-    build: .
+    build:
+      context: .
+      network: host
     restart: unless-stopped
     command: ["node", "dist/queue/worker.js"]
     environment: *backend-env
+    volumes:
+      - app-storage:/data/storage
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
 
   scheduler:
-    build: .
+    build:
+      context: .
+      network: host
     restart: unless-stopped
     command: ["node", "dist/scheduler/scheduler.js"]
     environment: *backend-env
+    volumes:
+      - app-storage:/data/storage
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
-      minio: { condition: service_healthy }
 
 volumes:
   postgres-data:
   redis-data:
-  minio-data:
+  app-storage:

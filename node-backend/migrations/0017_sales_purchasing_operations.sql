@@ -165,4 +165,15 @@ CREATE TABLE document_approval_requests (
 );
 CREATE INDEX approval_requests_entity_idx ON document_approval_requests (organization_id,entity_type,entity_id,status);
 
-ALTER TABLE documents ADD COLUMN approval_status text NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required','pending','approved','rejected','revision_required'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'documents' AND column_name = 'approval_status'
+  ) THEN
+    ALTER TABLE documents ADD COLUMN approval_status text NOT NULL DEFAULT 'not_required' CHECK (approval_status IN ('not_required','pending','approved','rejected','revision_required'));
+  ELSE
+    ALTER TABLE documents DROP CONSTRAINT IF EXISTS documents_approval_status_check;
+    ALTER TABLE documents ADD CONSTRAINT documents_approval_status_check CHECK (approval_status IN ('not_required','pending','approved','rejected','revision_required'));
+  END IF;
+END $$;
