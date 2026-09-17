@@ -43,6 +43,12 @@ services:
       JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-your-finance-pro-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AI_PROVIDER_ENCRYPTION_KEY: ${AI_PROVIDER_ENCRYPTION_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL_LUNA: ${OPENAI_MODEL_LUNA:-}
+      OPENAI_MODEL_TERRA: ${OPENAI_MODEL_TERRA:-}
+      OPENAI_MODEL_SOL: ${OPENAI_MODEL_SOL:-}
     depends_on:
       postgres: { condition: service_healthy }
 

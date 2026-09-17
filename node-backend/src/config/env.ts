@@ -7,6 +7,10 @@ function envBoolean(defaultValue: boolean) {
   });
 }
 
+function emptyToUndefined<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => (value === "" ? undefined : value), schema);
+}
+
 function envList(defaultValue: string[] = []) {
   return z.string().optional().transform((value) => {
     if (value === undefined) return defaultValue;
@@ -54,6 +58,12 @@ const schema = z.object({
   SCHOOLPAY_ENFORCE_WEBHOOK_IP_ALLOWLIST: envBoolean(false),
   SCHOOLPAY_WEBHOOK_IP_ALLOWLIST: envList(),
   SCHOOLPAY_TRUSTED_PROXY_IPS: envList(["127.0.0.1", "::1"]),
+  OPENAI_API_KEY: emptyToUndefined(z.string().min(1).optional()),
+  OPENAI_BASE_URL: emptyToUndefined(z.string().url().optional()),
+  OPENAI_MODEL_LUNA: emptyToUndefined(z.string().min(1).optional()),
+  OPENAI_MODEL_TERRA: emptyToUndefined(z.string().min(1).optional()),
+  OPENAI_MODEL_SOL: emptyToUndefined(z.string().min(1).optional()),
+  AI_PROVIDER_ENCRYPTION_KEY: emptyToUndefined(z.string().min(24).optional()),
 }).superRefine((value, ctx) => {
   if (value.STORAGE_DRIVER === "minio") {
     for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
