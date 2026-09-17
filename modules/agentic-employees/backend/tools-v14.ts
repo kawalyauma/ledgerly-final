@@ -4,7 +4,7 @@ import { executeTool as executeBaseTool, openAiTools as baseOpenAiTools, type To
 
 const SPEC={
   type:"function",name:"prepare_work_task",strict:false,
-  description:"Prepare a Tasks & Work follow-up in the AI Action Center. This does not create the task; a human must prepare, approve and execute the action.",
+  description:"Prepare a Tasks & Work follow-up for inline review in Ledgerly AI Chat. This does not create the task; a human can edit permitted details, then must approve and explicitly execute it.",
   parameters:{type:"object",properties:{
     title:{type:"string"},description:{type:"string"},priority:{type:"string",enum:["low","medium","high","urgent"]},
     assigneeUserId:{type:"string"},dueAt:{type:"string"}
@@ -52,5 +52,5 @@ export async function executeTool(ctx:ToolContext & {env?:Record<string,unknown>
       JSON.stringify({title,description,priority,assigneeUserId:args.assigneeUserId?String(args.assigneeUserId):null,dueAt:args.dueAt?String(args.dueAt):null}),idempotencyKey).run();
   const action=await ctx.db.prepare("SELECT id,status,title,action_type AS actionType FROM ae_actions WHERE organization_id=? AND idempotency_key=?")
     .bind(ctx.principal.organizationId,idempotencyKey).first();
-  return{prepared:true,executed:false,requiresHumanApproval:true,action};
+  return{prepared:true,executed:false,requiresHumanApproval:true,approvalSurface:"chat",action};
 }
