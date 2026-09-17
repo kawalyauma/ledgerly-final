@@ -32,21 +32,23 @@ describe("agentic semantic runtime", () => {
 });
 
 describe("agentic provider abstraction", () => {
-  it("supports switchable cloud and local providers", () => {
+  it("supports switchable cloud, local and future compatible providers", () => {
     expect(Object.keys(AI_PROVIDER_CATALOG).sort()).toEqual([
-      "anthropic", "cloudflare", "google", "groq", "ollama", "openai", "openrouter",
+      "anthropic", "cloudflare", "custom", "google", "groq", "ollama", "openai", "openrouter",
     ]);
     expect(AI_PROVIDER_CATALOG.openai.apiStyle).toBe("responses");
     expect(AI_PROVIDER_CATALOG.anthropic.apiStyle).toBe("anthropic");
-    for (const provider of ["groq", "google", "cloudflare", "openrouter", "ollama"] as const) {
+    for (const provider of ["groq", "google", "cloudflare", "openrouter", "ollama", "custom"] as const) {
       expect(AI_PROVIDER_CATALOG[provider].apiStyle).toBe("chat-completions");
     }
     expect(AI_PROVIDER_CATALOG.ollama.apiKeyRequired).toBe(false);
+    expect(AI_PROVIDER_CATALOG.custom.apiKeyRequired).toBe(false);
   });
 
-  it("allows provider-specific model IDs and custom local endpoints", () => {
+  it("allows provider-specific model IDs and custom/local endpoints", () => {
     expect(normalizeModels("groq", { sol: "openai/gpt-oss-120b" }).sol).toBe("openai/gpt-oss-120b");
     expect(normalizeModels("ollama", { luna: "qwen3:8b" }).luna).toBe("qwen3:8b");
+    expect(normalizeModels("custom", { terra: "my-company/model-v2" }).terra).toBe("my-company/model-v2");
     expect(normalizeAdvancedConfig({ baseUrl: "http://192.168.1.20:11434/v1" }).baseUrl).toBe("http://192.168.1.20:11434/v1");
   });
 });
