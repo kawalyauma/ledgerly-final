@@ -8,7 +8,7 @@ import { testProviderConnection } from "./openai.js";
 
 export const agenticProviderRoutes = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-const providerSchema = z.enum(["openai", "groq", "google", "anthropic", "cloudflare", "openrouter", "ollama"]);
+const providerSchema = z.enum(["openai", "groq", "google", "anthropic", "cloudflare", "openrouter", "ollama", "custom"]);
 const modelSchema = z.string().trim().min(1).max(180).regex(/^[A-Za-z0-9._:/@+-]+$/);
 const configurationSchema = z.object({
   temperature: z.number().min(0).max(2).nullable().optional(),
