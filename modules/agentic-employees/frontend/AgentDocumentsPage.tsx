@@ -1,25 +1,21 @@
-import { useEffect,useMemo,useState } from "react";
-import { Download,FileSpreadsheet,FileText,Presentation,Printer,RefreshCw,ShieldCheck } from "lucide-react";
-import { downloadFile,errorText,get,post } from "../../../web/api";
+import { useEffect,useState } from "react";
+import { Download,FileSpreadsheet,FileText,MessageSquare,Presentation,RefreshCw,ShieldCheck } from "lucide-react";
+import { downloadFile,errorText,get } from "../../../web/api";
 
-type Doc={id:string;agentKey:string;title:string;format:"docx"|"xlsx"|"pptx";sourceSizeBytes:number;pdfSizeBytes:number;status:string;createdBy?:string;createdAt:string};
-type PrinterRow={id:string;name:string;location?:string;status?:string};
+type Doc={id:string;agentKey:string;title:string;format:"pdf"|"docx"|"xlsx"|"pptx";sourceSizeBytes:number;pdfSizeBytes:number;pdfPageCount?:number;status:string;createdBy?:string;createdAt:string};
 const EMPLOYEE:Record<string,string>={secretary:"Amina · Secretary",dos:"Daniel · DOS",bursar:"Grace · Bursar",headteacher:"Mirembe · Head Teacher",hr:"Sarah · HR",librarian:"Peter · Librarian"};
 const icon=(format:string)=>format==="xlsx"?<FileSpreadsheet size={20}/>:format==="pptx"?<Presentation size={20}/>:<FileText size={20}/>;
 const bytes=(n:number)=>n>=1024*1024?`${(n/1024/1024).toFixed(1)} MB`:`${Math.max(1,Math.round(n/1024))} KB`;
 export function AgentDocumentsPage(){
- const[documents,setDocuments]=useState<Doc[]>([]),[printers,setPrinters]=useState<PrinterRow[]>([]),[printerId,setPrinterId]=useState(""),[busy,setBusy]=useState(""),[error,setError]=useState(""),[notice,setNotice]=useState("");
- async function load(){setError("");try{const[d,p]=await Promise.all([get<Doc[]>("/agentic-employees/documents"),get<PrinterRow[]>("/printerly/printers").catch(()=>[])]);setDocuments(d);setPrinters(p);}catch(e){setError(errorText(e));}}
+ const[documents,setDocuments]=useState<Doc[]>([]),[busy,setBusy]=useState(""),[error,setError]=useState("");
+ async function load(){setError("");try{setDocuments(await get<Doc[]>("/agentic-employees/documents"));}catch(e){setError(errorText(e));}}
  useEffect(()=>{void load();},[]);
- const readyPrinters=useMemo(()=>printers.filter(p=>!p.status||p.status==="ready"||p.status==="online"),[printers]);
  async function download(doc:Doc,kind:"source"|"pdf"){setBusy(`${doc.id}:${kind}`);setError("");try{await downloadFile(`/agentic-employees/documents/${doc.id}/${kind}`,kind==="source"?`${doc.title}.${doc.format}`:`${doc.title}.pdf`);}catch(e){setError(errorText(e));}finally{setBusy("");}}
- async function preparePrint(doc:Doc){setBusy(`${doc.id}:print`);setError("");setNotice("");try{await post(`/agentic-employees/documents/${doc.id}/prepare-print`,{printerId:printerId||null,copies:1,pageSize:"A4",colorMode:"monochrome",duplex:false,secureRelease:false,priority:"normal"});setNotice(`Print action prepared for “${doc.title}”. Review it in Action Center before anything is sent to Printerly.`);}catch(e){setError(errorText(e));}finally{setBusy("");}}
+ const openChat=()=>{location.hash="agentic-employees";};
  return <div className="ae-page">
-  <div className="ae-hero"><div><span className="ae-kicker">SAVED AI OUTPUTS</span><h1>Agent Documents</h1><p>DOCX, XLSX and PowerPoint files created by your AI employees are saved with a printable PDF companion. Printing remains human-governed.</p></div><button className="secondary" onClick={()=>void load()}><RefreshCw size={16}/>Refresh</button></div>
-  {error&&<div className="ae-error">{error}</div>}{notice&&<div className="ae-panel"><p>{notice}</p></div>}
-  <div className="ae-panel"><div className="ae-card-top"><div><h2><ShieldCheck size={18}/>Document safety</h2><p>Ask an employee in its workspace to prepare a document. The file is created only after Action Center approval. Printing creates a second approved action and still obeys Printerly rules, quotas, costing, secure release and any Printerly approval requirement.</p></div></div>
-   <label>Preferred printer</label><select value={printerId} onChange={e=>setPrinterId(e.target.value)}><option value="">Automatic / Printerly policy routing</option>{readyPrinters.map(p=><option key={p.id} value={p.id}>{p.name}{p.location?` · ${p.location}`:""}</option>)}</select>
-  </div>
-  <div className="ae-panel"><h2>Saved documents</h2><div className="ae-list">{documents.map(doc=><div key={doc.id}>{icon(doc.format)}<div><b>{doc.title}</b><small>{EMPLOYEE[doc.agentKey]||doc.agentKey} · {doc.format.toUpperCase()} · source {bytes(doc.sourceSizeBytes)} · PDF {bytes(doc.pdfSizeBytes)} · {new Date(doc.createdAt).toLocaleString()}</small><div className="ae-actions"><button className="secondary" disabled={busy.startsWith(doc.id)} onClick={()=>void download(doc,"source")}><Download size={15}/>Download {doc.format.toUpperCase()}</button><button className="secondary" disabled={busy.startsWith(doc.id)} onClick={()=>void download(doc,"pdf")}><Download size={15}/>Printable PDF</button><button disabled={busy.startsWith(doc.id)} onClick={()=>void preparePrint(doc)}><Printer size={15}/>Prepare Printerly print</button></div></div></div>)}{!documents.length&&<p>No saved AI documents yet. Ask Amina, Daniel, Grace, Mirembe, Sarah or Peter to prepare a DOCX, XLSX or PPTX document.</p>}</div></div>
+  <div className="ae-hero"><div><span className="ae-kicker">SAVED AI OUTPUTS</span><h1>Agent Documents</h1><p>Professional PDF, DOCX, XLSX and PowerPoint files created by your AI employees. Proposals, edits, approvals and governed print requests are handled in AI Chat Studio.</p></div><div className="ae-actions"><button className="secondary" onClick={()=>void load()}><RefreshCw size={16}/>Refresh</button><button onClick={openChat}><MessageSquare size={16}/>AI Chat Studio</button></div></div>
+  {error&&<div className="ae-error">{error}</div>}
+  <div className="ae-panel"><div className="ae-card-top"><div><h2><ShieldCheck size={18}/>Governed document workflow</h2><p>Ask an AI employee to prepare a report or file in Chat Studio. The proposal appears directly in that conversation, where you can review and edit permitted details before approval. Printing is also requested and approved from chat, then still obeys Printerly rules, quotas, costing and secure-release policy.</p></div></div></div>
+  <div className="ae-panel"><h2>Saved documents</h2><div className="ae-list">{documents.map(doc=><div key={doc.id}>{icon(doc.format)}<div><b>{doc.title}</b><small>{EMPLOYEE[doc.agentKey]||doc.agentKey} · {doc.format.toUpperCase()} · {bytes(doc.sourceSizeBytes)} · {doc.pdfPageCount||1} PDF page{doc.pdfPageCount===1?"":"s"} · {new Date(doc.createdAt).toLocaleString()}</small><div className="ae-actions"><button className="secondary" disabled={busy.startsWith(doc.id)} onClick={()=>void download(doc,"source")}><Download size={15}/>Download {doc.format.toUpperCase()}</button>{doc.format!=="pdf"&&<button className="secondary" disabled={busy.startsWith(doc.id)} onClick={()=>void download(doc,"pdf")}><Download size={15}/>PDF preview</button>}<button onClick={openChat}><MessageSquare size={15}/>Continue in chat</button></div></div></div>)}{!documents.length&&<p>No saved AI documents yet. Ask an AI employee in Chat Studio to create a professional PDF, DOCX, XLSX or PowerPoint report.</p>}</div></div>
  </div>;
 }
