@@ -1,4 +1,4 @@
-export type AgentDocumentFormat = "docx" | "xlsx" | "pptx";
+export type AgentDocumentFormat = "pdf" | "docx" | "xlsx" | "pptx";
 
 export interface AgentDocumentGenerateInput { documentId:string;organizationId:string;agentKey:string;title:string;format:AgentDocumentFormat;spec:Record<string,unknown>; }
 export interface AgentDocumentArtifact { sourceObjectKey:string;pdfObjectKey:string;sourceMimeType:string;sourceSizeBytes:number;pdfSizeBytes:number;pdfPageCount:number;checksumSha256:string; }
