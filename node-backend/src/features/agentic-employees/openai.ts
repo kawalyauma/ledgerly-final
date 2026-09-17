@@ -53,7 +53,7 @@ function chatTools(tools: ToolSpec[]) { return tools.map(tool => ({ type: "funct
 function anthropicTools(tools: ToolSpec[]) { return tools.map(tool => ({ name: tool.name, description: tool.description, input_schema: tool.parameters || { type: "object", properties: {} } })); }
 function providerHeaders(runtime: Runtime) {
   const headers: Record<string,string> = { "Content-Type": "application/json" };
-  if (runtime.provider !== "ollama" || runtime.apiKey) headers.Authorization = `Bearer ${runtime.apiKey}`;
+  if (runtime.apiKey) headers.Authorization = `Bearer ${runtime.apiKey}`;
   return headers;
 }
 
@@ -104,7 +104,7 @@ async function runChatCompletions(input:RunInput,runtime:Runtime,system:string,t
     if(tools.length){body.tools=chatTools(tools);body.tool_choice="auto";}
     if(runtime.config.temperature!==null)body.temperature=runtime.config.temperature;
     if(runtime.config.topP!==null)body.top_p=runtime.config.topP;
-    if(runtime.provider==="groq"&&runtime.config.reasoningEffort!=="default")body.reasoning_effort=runtime.config.reasoningEffort;
+    if(runtime.provider==="groq"&&runtime.model.includes("gpt-oss")&&runtime.config.reasoningEffort!=="default")body.reasoning_effort=runtime.config.reasoningEffort;
     const {payload,response}=await fetchJson<ChatCompletion>(`${runtime.baseUrl}/chat/completions`,{method:"POST",headers:providerHeaders(runtime),body:JSON.stringify(body)},runtime.config.timeoutMs);
     if(!response.ok)throw new AppError(502,"AI_PROVIDER_ERROR",`${label} request failed (${response.status}): ${payload.error?.message||JSON.stringify(payload).slice(0,500)}`);
     last=payload;const message=payload.choices?.[0]?.message;if(!message)throw new AppError(502,"AI_PROVIDER_ERROR",`${label} returned no assistant message.`);
