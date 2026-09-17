@@ -61,7 +61,7 @@ function looksLikeId(value: string) { return /^[a-z]{2,18}_[A-Za-z0-9-]{4,}$/i.t
 function searchExpressions(spec: RefSpec, fuzzy: boolean) {
   const op = fuzzy ? "LIKE lower(?)" : "=lower(?)";
   const expressions = spec.textColumns.map(column => `lower(coalesce(${column},'')) ${op}`);
-  if (spec.fullNameColumns?.length) expressions.push(`lower(trim(concat_ws(' ',${spec.fullNameColumns.map(column => `coalesce(${column},'')`).join(",")}))) ${op}`);
+  if (spec.fullNameColumns?.length) expressions.push(`lower(trim(concat_ws(' ',${spec.fullNameColumns.map(column => `nullif(${column},'')`).join(",")}))) ${op}`);
   return expressions;
 }
 
