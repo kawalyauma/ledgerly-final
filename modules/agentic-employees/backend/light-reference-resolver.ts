@@ -16,7 +16,7 @@ const REFERENCES:Record<string,RefSpec>={
   currentstreamid:{table:"school_streams",textColumns:["code","name"],activeColumn:"active"},
   subjectid:{table:"school_subjects",textColumns:["code","name"],activeColumn:"active"},
   departmentid:{table:"school_departments",textColumns:["code","name"],activeColumn:"active"},
-  parentid:{table:"school_departments",textColumns:["code","name"],activeColumn:"active"},
+  positionid:{table:"school_staff_positions",textColumns:["code","name"],activeColumn:"active"},
   gradingscaleid:{table:"school_grading_scales",textColumns:["code","name"],activeColumn:"active"},
   feecategoryid:{table:"school_fee_categories",textColumns:["code","name"],activeColumn:"active"},
   paymentmethodid:{table:"school_payment_methods",textColumns:["code","name"],activeColumn:"active"},
