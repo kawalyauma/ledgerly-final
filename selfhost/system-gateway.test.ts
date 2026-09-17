@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentPathAllowed } from "./system-gateway";
+import { agentPathAllowed, createAgentSystemGateway } from "./system-gateway";
 
 describe("Agentic employee delegated route policy",()=>{
   it("lets DOS use academics but not finance or exams",()=>{
@@ -27,5 +27,11 @@ describe("Agentic employee delegated route policy",()=>{
     expect(agentPathAllowed("secretary","/api/v1/school-evil")).toBe(false);
     expect(()=>agentPathAllowed("headteacher","https://example.com/api/v1/school")).toThrow();
     expect(()=>agentPathAllowed("headteacher","/api/v1/../admin")).toThrow();
+  });
+  it("keeps a catalog larger than 500 operations for hierarchical Light Mode routing",async()=>{
+    const app={routes:Array.from({length:650},(_,index)=>({method:index%2?"GET":"POST",path:`/api/v1/test-${index%10}/resource-${index}`}))};
+    const gateway=createAgentSystemGateway(app,()=>({}),"test-secret-long-enough-for-jwt-signing","ledgerly-test","ledgerly-test");
+    const routes=await gateway.catalog("headteacher",{userId:"usr",organizationId:"org",role:"owner",scopes:[]});
+    expect(routes).toHaveLength(650);
   });
 });
