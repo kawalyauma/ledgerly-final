@@ -25,8 +25,8 @@ async function registerGeneratedDocument(env:Env,principal:AuthPrincipal,input:{
 
 export async function executeDocumentGenerateAction(env:Env,principal:AuthPrincipal,payload:GenerateDocumentPayload,actionId?:string|null){
   if(!hasScope(principal,"documents:write"))throw new AppError(403,"FORBIDDEN","Generating an approved AI document requires documents:write");
-  if(!env.AGENT_DOCUMENT_SERVICE)throw new AppError(503,"DOCUMENT_RUNTIME_REQUIRED","Office document generation is available on the Ledgerly self-hosted document runtime");
-  const format=String(payload.format||"") as AgentDocumentFormat;if(!["docx","xlsx","pptx"].includes(format))throw new AppError(422,"INVALID_DOCUMENT_FORMAT","Document format must be DOCX, XLSX or PPTX");
+  if(!env.AGENT_DOCUMENT_SERVICE)throw new AppError(503,"DOCUMENT_RUNTIME_REQUIRED","Professional document generation is available on the Ledgerly self-hosted document runtime");
+  const format=String(payload.format||"").toLowerCase() as AgentDocumentFormat;if(!["pdf","docx","xlsx","pptx"].includes(format))throw new AppError(422,"INVALID_DOCUMENT_FORMAT","Document format must be PDF, DOCX, XLSX or PPTX");
   const title=String(payload.title||"").trim().slice(0,240);if(!title)throw new AppError(422,"VALIDATION_ERROR","Document title is required");
   const spec=payload.spec&&typeof payload.spec==="object"&&!Array.isArray(payload.spec)?payload.spec:{};
   const documentId=createId("aedoc"),agent=actionId?await env.FINANCE_DB.prepare("SELECT agent_key AS agentKey FROM ae_actions WHERE id=? AND organization_id=?").bind(actionId,principal.organizationId).first<{agentKey:string}>():null;
@@ -36,7 +36,7 @@ export async function executeDocumentGenerateAction(env:Env,principal:AuthPrinci
     await env.FINANCE_DB.prepare(`INSERT INTO ae_generated_documents
       (id,organization_id,agent_key,conversation_id,action_id,title,format,source_object_key,pdf_object_key,source_mime_type,source_size_bytes,pdf_size_bytes,pdf_page_count,checksum_sha256,spec_json,status,created_by)
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'saved',?)`).bind(documentId,principal.organizationId,agentKey,payload.conversationId||null,actionId||null,title,format,artifact.sourceObjectKey,artifact.pdfObjectKey,artifact.sourceMimeType,artifact.sourceSizeBytes,artifact.pdfSizeBytes,artifact.pdfPageCount,artifact.checksumSha256,JSON.stringify(spec),principal.userId).run();
-  }catch(error){await Promise.all([env.WORK_FILES_BUCKET.delete(artifact.sourceObjectKey).catch(()=>{}),env.WORK_FILES_BUCKET.delete(artifact.pdfObjectKey).catch(()=>{})]);throw error;}
+  }catch(error){const keys=[artifact.sourceObjectKey,artifact.pdfObjectKey].filter((value,index,all)=>all.indexOf(value)===index);await Promise.all(keys.map(key=>env.WORK_FILES_BUCKET.delete(key).catch(()=>{})));throw error;}
   await registerGeneratedDocument(env,principal,{documentId,title,format,agentKey,conversationId:payload.conversationId||null,actionId:actionId||null,sourceObjectKey:artifact.sourceObjectKey,pdfObjectKey:artifact.pdfObjectKey,sourceMimeType:artifact.sourceMimeType,sourceSizeBytes:artifact.sourceSizeBytes,pdfSizeBytes:artifact.pdfSizeBytes,pdfPageCount:artifact.pdfPageCount,checksumSha256:artifact.checksumSha256});
   return{entityType:"agent_document",entityId:documentId,documentId,title,format,...artifact};
 }
