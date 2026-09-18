@@ -17,7 +17,7 @@ from .models import (
 from .planner import DiscoursePlanner
 from .providers.base import GenerationProvider
 from .providers.factory import build_provider
-from .realization import (
+from .reasoning import ReasoningEngine\nfrom .realization import (
     DeterministicRealizer,
     build_generation_prompt,
     clean_response,
@@ -63,14 +63,14 @@ class ResponseIntelligenceEngine:
         if request.provider_mode == "required" and not use_provider:
             raise RuntimeError("A generation provider is required for this request but none is configured.")
 
-        draft = self.realizer.realize(request, evidence, plan)
+        draft = self.realizer.realize(request, evidence, plan, reasoning)
         provider_name = "deterministic"
         model = ""
         revision_count = 0
 
         if use_provider:
             try:
-                system, prompt = build_generation_prompt(request, evidence, plan)
+                system, prompt = build_generation_prompt(request, evidence, plan, reasoning=reasoning)
                 response = await self.provider.generate(
                     system=system,
                     prompt=prompt,
@@ -91,6 +91,7 @@ class ResponseIntelligenceEngine:
                 request=request,
                 evidence=evidence,
                 plan=plan,
+                reasoning=reasoning,
                 draft=draft,
                 quality=quality,
             )
@@ -98,7 +99,7 @@ class ResponseIntelligenceEngine:
         # If provider output still contains unsupported factual claims, deterministic output
         # is safer than returning fluent hallucination.
         if quality.grounding.score < 0.9 or quality.causality.score < 0.7:
-            fallback = self.realizer.realize(request, evidence, plan)
+            fallback = self.realizer.realize(request, evidence, plan, reasoning)
             fallback_quality = self.critic.evaluate(fallback, request, evidence)
             if fallback_quality.grounding.score >= quality.grounding.score:
                 draft = fallback
@@ -115,6 +116,7 @@ class ResponseIntelligenceEngine:
             plan=plan,
             quality=quality,
             evidence=evidence,
+            reasoning=reasoning,
             provider=provider_name,
             model=model,
             revision_count=revision_count,
@@ -148,6 +150,7 @@ class ResponseIntelligenceEngine:
         request: ResponseRequest,
         evidence: EvidenceBundle,
         plan: Any,
+        reasoning: Any,
         draft: str,
         quality: QualityReport,
     ) -> tuple[str, QualityReport, int]:
@@ -162,6 +165,7 @@ class ResponseIntelligenceEngine:
                 request,
                 evidence,
                 plan,
+                reasoning=reasoning,
                 previous_draft=current,
                 revision_instructions=current_quality.revision_instructions,
             )
