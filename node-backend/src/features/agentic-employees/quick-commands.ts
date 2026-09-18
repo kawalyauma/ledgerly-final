@@ -13,7 +13,7 @@ export type QuickCommandField={
   label:string;
   control:QuickFieldControl;
   required:boolean;
-  location:"path"|"body"|"native"|"meta";
+  location:"path"|"body"|"query"|"native"|"meta";
   enum?:string[];
   notes?:string;
   referenceKey?:string;
@@ -36,6 +36,7 @@ export type QuickCommandDescriptor={
   pathTemplate?:string;
   schemaCoverage:"curated"|"native"|"generic";
   fields:QuickCommandField[];
+  outputFormats:string[];
 };
 
 type RefSpec={table:string;valueColumn:string;searchColumns:string[];labelColumns:string[];subtitleColumns:string[];activeColumn?:string};
@@ -165,16 +166,51 @@ function nativeFields(tool:LightToolDescriptor):QuickCommandField[]{
   const params=(tool.parameters||{}) as any,props=(params.properties||{}) as Record<string,any>,required=new Set<string>(Array.isArray(params.required)?params.required.map(String):[]);
   return Object.entries(props).map(([name,spec])=>{const type=String(spec?.type||"string"),enumValues=Array.isArray(spec?.enum)?spec.enum.map(String):undefined,key=referenceKey(name);return{name,requestKey:name,label:title(name),control:controlFor(name,type,enumValues),required:required.has(name),location:"native",enum:enumValues,notes:String(spec?.description||""),referenceKey:key,min:Number.isFinite(spec?.minimum)?Number(spec.minimum):undefined,max:Number.isFinite(spec?.maximum)?Number(spec.maximum):undefined,integer:type==="integer"};});
 }
+function queryCriteriaFor(tool:LightToolDescriptor):QuickCommandField[]{
+  if(tool.source!=="route"||!tool.readOnly||tool.method!=="GET")return[];
+  const path=(tool.pathTemplate||"").toLowerCase(),fields:QuickCommandField[]=[];
+  const add=(field:QuickCommandField)=>{if(!fields.some(x=>x.name===field.name))fields.push(field);};
+  const text=(name:string,label:string,requestKey=name,notes?:string)=>add({name,requestKey,label,control:"text",required:false,location:"query",notes});
+  const ref=(name:string,label:string,requestKey=name)=>add({name,requestKey,label,control:"reference",required:false,location:"query",referenceKey:name,notes:`Filter by ${label.toLowerCase()}.`});
+  const date=(name:string,label:string,requestKey=name)=>add({name,requestKey,label,control:"date",required:false,location:"query"});
+  const number=(name:string,label:string,requestKey=name,min=0,max=5000)=>add({name,requestKey,label,control:"number",required:false,location:"query",min,max,integer:true});
+  const enumField=(name:string,label:string,values:string[],requestKey=name)=>add({name,requestKey,label,control:"enum",required:false,location:"query",enum:values});
+  const detail=/\/:id(?:\/|$)/.test(path);
+  if(!detail){text("q","Search","q","Search by name, number, code or other text supported by this endpoint.");text("status","Status");}
+  if(tool.kind==="report"||/report|analytics|dashboard|attendance|fees|finance|payment|receipt|journal|ledger|exam|books|distribution/.test(path)){date("from","From date");date("to","To date");}
+  if(/balance|statement|aging|valuation|register|summary/.test(path))date("asOf","As of date");
+  if(/school|student|academic|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("academicYearId","Academic year");
+  if(/term|academic|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("termId","Term");
+  if(/student|attendance|fees|exam|book|class|stream|timetable|lesson|scheme/.test(path))ref("classId","Class");
+  if(/student|attendance|fees|exam|book|stream|timetable/.test(path))ref("streamId","Stream");
+  if(/student|fees|attendance|exam|book|guardian|family|discipline/.test(path))ref("studentId","Student");
+  if(/guardian|family|student/.test(path))ref("guardianId","Guardian");
+  if(/staff|teacher|attendance|lesson|scheme|timetable|hr|leave/.test(path))ref("staffId","Staff member");
+  if(/subject|exam|lesson|scheme|timetable|academic/.test(path))ref("subjectId","Subject");
+  if(/department|staff|hr/.test(path))ref("departmentId","Department");
+  if(/fee|fees|billing|charge/.test(path))ref("feeCategoryId","Fee category");
+  if(/account|ledger|journal|finance/.test(path))ref("accountId","Account");
+  if(/contact|customer|supplier|statement/.test(path))ref("contactId","Contact");
+  if(!detail){number("limit","Maximum results","limit",1,500);number("offset","Skip results","offset",0,100000);text("sort","Sort by");enumField("order","Order",["asc","desc"]);}
+  return fields;
+}
+function outputFormatsFor(tool:LightToolDescriptor){
+  if(!tool.readOnly)return["approval"];
+  if(tool.kind==="report")return["table","json","csv","xlsx","pdf"];
+  return["table","json","csv","xlsx"];
+}
+
 function fieldsFor(tool:LightToolDescriptor){
   if(tool.source==="native")return{fields:nativeFields(tool),coverage:"native" as const};
   const fields=pathFields(tool),schema=collectionSchema(tool.pathTemplate||"");
+  for(const field of queryCriteriaFor(tool))if(!fields.some(x=>x.name===field.name))fields.push(field);
   if(schema){if(["POST","PUT","PATCH"].includes(tool.method||"")){const requiredOverride=tool.method==="POST"?undefined:false;for(const field of schema.fields){if(fields.some(x=>x.name===field.name))continue;fields.push(fieldFromSchema(field,requiredOverride));}}return{fields,coverage:"curated" as const};}
   if(!tool.readOnly)fields.push({name:"bodyJson",requestKey:"bodyJson",label:"Additional Details (JSON)",control:"json",required:false,location:"meta",notes:"Optional JSON body for routes that do not yet have a curated form schema."});
   return{fields,coverage:"generic" as const};
 }
 
 export function buildQuickCommandCatalog(registry:LightToolRegistry){
-  const commands:QuickCommandDescriptor[]=registry.tools.map(tool=>{const built=fieldsFor(tool),aliases=aliasesFor(tool),command=canonicalFor(tool);if(!aliases.includes(command))aliases.unshift(command);return{toolName:tool.name,command,aliases,description:tool.description,module:tool.module,group:tool.group,kind:tool.kind,source:tool.source,readOnly:tool.readOnly,method:tool.method,pathTemplate:tool.pathTemplate,schemaCoverage:built.coverage,fields:built.fields};});
+  const commands:QuickCommandDescriptor[]=registry.tools.map(tool=>{const built=fieldsFor(tool),aliases=aliasesFor(tool),command=canonicalFor(tool);if(!aliases.includes(command))aliases.unshift(command);return{toolName:tool.name,command,aliases,description:tool.description,module:tool.module,group:tool.group,kind:tool.kind,source:tool.source,readOnly:tool.readOnly,method:tool.method,pathTemplate:tool.pathTemplate,schemaCoverage:built.coverage,fields:built.fields,outputFormats:outputFormatsFor(tool)};});
   const commandCount=new Set(commands.flatMap(item=>item.aliases)).size;
   return{commands,stats:{toolCount:registry.stats.total,commandCount,routeTools:registry.stats.routeTools,nativeTools:registry.stats.nativeTools,writes:registry.stats.writes,reads:registry.stats.reads}};
 }
@@ -270,11 +306,13 @@ export async function executeQuickCommand(input:{db:D1Database;env:Env;principal
     if(!input.env.AGENT_SYSTEM_GATEWAY)throw new AppError(503,"GATEWAY_UNAVAILABLE","Ledgerly command gateway is unavailable.");
     const pathParams:Record<string,unknown>={};for(const field of descriptor.fields.filter(f=>f.location==="path")){let value=typed[field.name];if(field.referenceKey&&typeof value==="string"){const resolved=await resolveLightReferences(input.db,input.principal.organizationId,{[field.referenceKey]:value});if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));value=(resolved.value as any)[field.referenceKey];}pathParams[field.requestKey]=value;}
     const filled=fillPath(tool.pathTemplate||"",pathParams);if(filled.missing.length)throw new AppError(422,"VALIDATION_ERROR",`Select ${filled.missing.join(", ")} first.`);
+    const query=new URLSearchParams();for(const field of descriptor.fields.filter(f=>f.location==="query")){let value=typed[field.name];if(value===undefined||value===null||String(value).trim()==="")continue;if(field.referenceKey&&typeof value==="string"){const rr=await resolveLightReferences(input.db,input.principal.organizationId,{[field.referenceKey]:value});if(rr.issues.length)throw new AppError(422,"VALIDATION_ERROR",rr.issues.join(" "));value=(rr.value as any)[field.referenceKey];}query.set(field.requestKey,String(value));}
+    const requestPath=query.size?`${filled.path}${filled.path.includes("?")?"&":"?"}${query.toString()}`:filled.path;
     const body:Record<string,unknown>={};for(const field of descriptor.fields.filter(f=>f.location==="body"))if(typed[field.name]!==undefined)body[field.requestKey]=typed[field.name];
     const bodyJson=typed.bodyJson;if(bodyJson&&typeof bodyJson==="object"&&!Array.isArray(bodyJson))Object.assign(body,bodyJson);
     const resolved=await resolveLightReferences(input.db,input.principal.organizationId,defaults(tool,body));if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));
     const schemaIssues=validateResolved(tool,resolved.value as Record<string,unknown>);if(schemaIssues.length)throw new AppError(422,"VALIDATION_ERROR",schemaIssues.join(". "));
-    if(tool.readOnly){const response=await input.env.AGENT_SYSTEM_GATEWAY.request({agentKey:input.agent.key,principal:input.principal,method:tool.method||"GET",path:filled.path,body:tool.method==="GET"?undefined:resolved.value});if(!response.ok)throw new AppError(response.status||502,"COMMAND_FAILED",response.data?.error?.message||`Ledgerly returned HTTP ${response.status}`);result=response.data;}
+    if(tool.readOnly){const response=await input.env.AGENT_SYSTEM_GATEWAY.request({agentKey:input.agent.key,principal:input.principal,method:tool.method||"GET",path:requestPath,body:tool.method==="GET"?undefined:resolved.value});if(!response.ok)throw new AppError(response.status||502,"COMMAND_FAILED",response.data?.error?.message||`Ledgerly returned HTTP ${response.status}`);result=response.data;}
     else{const method=tool.method||"POST",payload={agentKey:input.agent.key,method,path:filled.path,body:resolved.value},key=`conversation:${input.conversationId}:quick:${method}:${filled.path}:${hashText(JSON.stringify(resolved.value))}`,id=createId("aea"),actionTitle=title(descriptor.command);await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`).bind(id,input.principal.organizationId,input.agent.key,"system.api.request",actionTitle.slice(0,240),`Quick command /${descriptor.command} validated and prepared for approval.`,scopeFor(filled.path),JSON.stringify(payload),key).run();const action=await input.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?").bind(input.principal.organizationId,key).first();result={prepared:true,requiresHumanApproval:true,action};prepared=true;}
   }
   const assistantText=prepared?`**Quick command validated.** I prepared **${title(descriptor.command)}** for review below. Nothing is written to Ledgerly until you approve and run it.`:`**Quick command completed: /${descriptor.command}**\n\n${markdown(result)}`;
