@@ -78,17 +78,17 @@ export const QuickCommandPalette=forwardRef<QuickCommandPaletteHandle,Props>(fun
       <div className="acs-command-form">
         <div className="acs-command-form-head"><div><span><Command size={15}/> QUICK COMMAND</span><h3>/{chosenAlias||selected.command}</h3><p>{selected.description}</p></div><button onClick={closeForm} disabled={submitting} aria-label="Close"><X size={18}/></button></div>
         <div className="acs-command-form-meta"><span><b>Module</b>{selected.module}</span><span><b>Tool</b>{selected.toolName.replace(/_/g," ")}</span><span><b>Safety</b>{selected.readOnly?"Runs read-only":"Review required before write"}</span><span><b>Form</b>{selected.schemaCoverage}</span></div>
-        <div className="acs-command-fields">{selected.fields.map(field=><CommandFieldEditor key={field.name} field={field} value={values[field.name]} error={errors[field.name]} disabled={submitting} onChange={next=>{setValues(current=>({...current,[field.name]:next}));if(errors[field.name])setErrors(current=>({...current,[field.name]:""}));}}/>)}</div>
+        <div className="acs-command-fields">{selected.fields.map(field=><CommandFieldEditor key={field.name} agentKey={agentKey} field={field} value={values[field.name]} error={errors[field.name]} disabled={submitting} onChange={next=>{setValues(current=>({...current,[field.name]:next}));if(errors[field.name])setErrors(current=>({...current,[field.name]:""}));}}/>)}</div>
         <div className="acs-command-form-foot"><div><ShieldCheck size={14}/><span>{selected.readOnly?"This command reads permitted Ledgerly data directly.":"Ledgerly validates the form again on the server, resolves selected records to canonical IDs, and creates an approval card before any write."}</span></div><button className="secondary" onClick={closeForm} disabled={submitting}>Cancel</button><button className="primary" onClick={()=>void submit()} disabled={submitting}>{submitting?<LoaderCircle className="spin" size={15}/>:<CheckCircle2 size={15}/>} {selected.readOnly?"Run command":"Validate & prepare"}</button></div>
       </div>
     </div>}
   </>;
 });
 
-function CommandFieldEditor({field,value,error,disabled,onChange}:{field:CommandField;value:unknown;error?:string;disabled:boolean;onChange:(value:unknown)=>void}){
+function CommandFieldEditor({agentKey,field,value,error,disabled,onChange}:{agentKey?:string;field:CommandField;value:unknown;error?:string;disabled:boolean;onChange:(value:unknown)=>void}){
   const id=`qcmd-${field.name}`;
   return <label className={`acs-command-field ${error?"invalid":""}`} htmlFor={id}><span>{field.label}{field.required&&<em>*</em>}</span>{field.notes&&<small>{field.notes}</small>}
-    {field.control==="reference"?<ReferenceTextbox id={id} field={field} value={String(value??"")} disabled={disabled} onChange={onChange}/>:
+    {field.control==="reference"?<ReferenceTextbox id={id} agentKey={agentKey} field={field} value={String(value??"")} disabled={disabled} onChange={onChange}/>:
       field.control==="boolean"?<div className="acs-command-bool"><input id={id} type="checkbox" checked={Boolean(value)} disabled={disabled} onChange={e=>onChange(e.target.checked)}/><span>{Boolean(value)?"Yes":"No"}</span></div>:
       field.control==="enum"?<><input id={id} list={`${id}-options`} value={String(value??"")} disabled={disabled} placeholder="Type to search choices…" onChange={e=>onChange(e.target.value)}/><datalist id={`${id}-options`}>{field.enum?.map(option=><option key={option} value={option}/>)}</datalist></>:
       field.control==="textarea"||field.control==="json"?<textarea id={id} rows={field.control==="json"?5:3} value={String(value??"")} disabled={disabled} placeholder={field.control==="json"?"{ }":"Enter details…"} onChange={e=>onChange(e.target.value)}/>:
@@ -97,9 +97,9 @@ function CommandFieldEditor({field,value,error,disabled,onChange}:{field:Command
   </label>;
 }
 
-function ReferenceTextbox({id,field,value,disabled,onChange}:{id:string;field:CommandField;value:string;disabled:boolean;onChange:(value:unknown)=>void}){
+function ReferenceTextbox({id,agentKey,field,value,disabled,onChange}:{id:string;agentKey?:string;field:CommandField;value:string;disabled:boolean;onChange:(value:unknown)=>void}){
   const[query,setQuery]=useState(value),[options,setOptions]=useState<ReferenceOption[]>([]),[open,setOpen]=useState(false),[loading,setLoading]=useState(false),timer=useRef<number|undefined>(undefined);
-  useEffect(()=>{if(!open||!field.referenceKey)return;window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>{setLoading(true);void get<ReferenceOption[]>(`/agentic-employees/chat-studio/reference-options?field=${encodeURIComponent(field.referenceKey!)}&q=${encodeURIComponent(query)}&limit=20`).then(setOptions).catch(()=>setOptions([])).finally(()=>setLoading(false));},160);return()=>window.clearTimeout(timer.current);},[open,query,field.referenceKey]);
+  useEffect(()=>{if(!open||!field.referenceKey)return;window.clearTimeout(timer.current);timer.current=window.setTimeout(()=>{setLoading(true);void get<ReferenceOption[]>(`/agentic-employees/chat-studio/reference-options?agentKey=${encodeURIComponent(agentKey||"headteacher")}&field=${encodeURIComponent(field.referenceKey!)}&q=${encodeURIComponent(query)}&limit=20`).then(setOptions).catch(()=>setOptions([])).finally(()=>setLoading(false));},160);return()=>window.clearTimeout(timer.current);},[open,query,field.referenceKey]);
   useEffect(()=>{if(!open&&value&&!query)setQuery(value);},[value,open,query]);
   return <div className="acs-reference-box"><div className="acs-reference-input"><Search size={14}/><input id={id} value={query} disabled={disabled} autoComplete="off" placeholder="Search by name, code or number…" onFocus={()=>setOpen(true)} onChange={e=>{setQuery(e.target.value);onChange(e.target.value);setOpen(true);}}/></div>
     {open&&<div className="acs-reference-results">{loading&&<div className="acs-reference-state"><LoaderCircle className="spin" size={13}/>Searching…</div>}{!loading&&!options.length&&<div className="acs-reference-state">Type to search Ledgerly records</div>}{options.map(option=><button type="button" key={option.value} onMouseDown={e=>e.preventDefault()} onClick={()=>{setQuery(option.label);onChange(option.value);setOpen(false);}}><span><b>{option.label}</b>{option.subtitle&&<small>{option.subtitle}</small>}</span><CheckCircle2 size={13}/></button>)}</div>}
