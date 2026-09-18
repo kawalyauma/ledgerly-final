@@ -88,8 +88,8 @@ export const moduleCatalog = [
   {
     "key": "agentic-employees",
     "name": "AI Employees",
-    "version": "2.0.0",
-    "description": "Tenant-safe AI school employees with a professional Chat Studio, live execution status, editable inline approvals, governed Ledgerly actions and professional PDF, DOCX, XLSX and PPTX reporting.",
+    "version": "2.1.0",
+    "description": "Tenant-safe AI school employees with a professional Chat Studio, searchable slash quick commands, schema-driven validated forms, governed Ledgerly actions and professional PDF, DOCX, XLSX and PPTX reporting.",
     "category": "automation",
     "core": false,
     "active": true,
@@ -221,7 +221,14 @@ export const moduleCatalog = [
         "governed-system-mutations",
         "short-lived-delegated-jwt",
         "agent-role-and-user-scope-intersection",
-        "legacy-action-audit-route"
+        "legacy-action-audit-route",
+        "slash-quick-command-palette",
+        "500-plus-command-alias-catalog",
+        "schema-driven-command-forms",
+        "searchable-reference-pickers",
+        "deterministic-command-validation",
+        "direct-read-quick-commands",
+        "governed-write-quick-commands"
       ]
     }
   },

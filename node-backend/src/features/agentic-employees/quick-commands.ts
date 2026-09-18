@@ -4,6 +4,7 @@ import type { AgentDefinition } from "./policy.js";
 import { executeTool } from "./memory-tools-v17.js";
 import { lookupSystemSchema,type SchemaField } from "./system-schemas.js";
 import { resolveLightReferences } from "./light-reference-resolver.js";
+import { approveAndExecuteAction } from "./executor.js";
 import type { LightToolDescriptor,LightToolRegistry } from "./light-tool-registry.js";
 
 export type QuickFieldControl="text"|"textarea"|"date"|"number"|"boolean"|"enum"|"reference"|"json"|"array";
@@ -275,8 +276,25 @@ export async function executeQuickCommand(input:{db:D1Database;env:Env;principal
     const resolved=await resolveLightReferences(input.db,input.principal.organizationId,defaults(tool,body));if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));
     const schemaIssues=validateResolved(tool,resolved.value as Record<string,unknown>);if(schemaIssues.length)throw new AppError(422,"VALIDATION_ERROR",schemaIssues.join(". "));
     if(tool.readOnly){const response=await input.env.AGENT_SYSTEM_GATEWAY.request({agentKey:input.agent.key,principal:input.principal,method:tool.method||"GET",path:filled.path,body:tool.method==="GET"?undefined:resolved.value});if(!response.ok)throw new AppError(response.status||502,"COMMAND_FAILED",response.data?.error?.message||`Ledgerly returned HTTP ${response.status}`);result=response.data;}
-    else{const method=tool.method||"POST",payload={agentKey:input.agent.key,method,path:filled.path,body:resolved.value},key=`conversation:${input.conversationId}:quick:${method}:${filled.path}:${hashText(JSON.stringify(resolved.value))}`,id=createId("aea"),actionTitle=title(descriptor.command);await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`).bind(id,input.principal.organizationId,input.agent.key,"system.api.request",actionTitle.slice(0,240),`Quick command /${descriptor.command} validated and prepared for approval.`,scopeFor(filled.path),JSON.stringify(payload),key).run();const action=await input.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?").bind(input.principal.organizationId,key).first();result={prepared:true,requiresHumanApproval:true,action};prepared=true;}
+    else{
+      const method=tool.method||"POST",payload={agentKey:input.agent.key,method,path:filled.path,body:resolved.value},actionTitle=title(descriptor.command);
+      let key=`conversation:${input.conversationId}:quick:${method}:${filled.path}:${hashText(JSON.stringify(resolved.value))}`,id=createId("aea");
+      await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`).bind(id,input.principal.organizationId,input.agent.key,"system.api.request",actionTitle.slice(0,240),`Quick command /${descriptor.command}, submitted directly by ${input.principal.userId} via the chat composer.`,scopeFor(filled.path),JSON.stringify(payload),key).run();
+      let actionRow=await input.db.prepare("SELECT id,status FROM ae_actions WHERE organization_id=? AND idempotency_key=?").bind(input.principal.organizationId,key).first<{id:string;status:string}>();
+      if(actionRow&&["failed","dismissed","executed"].includes(actionRow.status)){
+        key=`${key}:retry:${id}`;
+        await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`).bind(id,input.principal.organizationId,input.agent.key,"system.api.request",actionTitle.slice(0,240),`Quick command /${descriptor.command}, submitted directly by ${input.principal.userId} via the chat composer.`,scopeFor(filled.path),JSON.stringify(payload),key).run();
+        actionRow=await input.db.prepare("SELECT id,status FROM ae_actions WHERE organization_id=? AND idempotency_key=?").bind(input.principal.organizationId,key).first<{id:string;status:string}>();
+      }
+      // A quick command is a request the human just typed and validated through
+      // a form themselves — unlike the AI's own autonomous tool calls, there is
+      // no separate judgement to review here, so it runs immediately. Ledgerly's
+      // real permission/scope checks still apply underneath via the gateway
+      // call, and the ae_actions/ae_approvals audit trail is still written.
+      const {action:executedAction,result:apiResult}=await approveAndExecuteAction(input.env,input.principal,actionRow!.id);
+      result={...apiResult,action:executedAction};
+    }
   }
-  const assistantText=prepared?`**Quick command validated.** I prepared **${title(descriptor.command)}** for review below. Nothing is written to Ledgerly until you approve and run it.`:`**Quick command completed: /${descriptor.command}**\n\n${markdown(result)}`;
+  const assistantText=prepared?`**Quick command validated.** I prepared **${title(descriptor.command)}** for review below. Nothing is written to Ledgerly until you approve and run it.`:`**Quick command completed: /${descriptor.command}**\n\n${markdown(result.response??result)}`;
   return{...await recordQuickMessages(input.db,input.principal,input.conversationId,commandText,assistantText),prepared,result,command:descriptor};
 }
