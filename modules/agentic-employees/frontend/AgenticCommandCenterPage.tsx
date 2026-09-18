@@ -28,6 +28,22 @@ const FORMAT_META:Record<string,{label:string;icon:typeof Table2;hint:string}>={
   approval:{label:"Approval workflow",icon:ShieldCheck,hint:"Write commands are reviewed before execution"},
 };
 
+const COMPOSITE_COMMAND:CommandDescriptor={
+  toolName:"__composite_report__",
+  command:"composite report",
+  aliases:["custom report","cross module report","combined report","compare data","analyze across modules","advanced report","report builder"],
+  description:"Build a read-only report by planning and combining multiple permitted Ledgerly data capabilities.",
+  module:"agentic",
+  group:"composite reporting",
+  kind:"analysis",
+  source:"native",
+  readOnly:true,
+  schemaCoverage:"dynamic-multi-tool",
+  fields:[{name:"prompt",requestKey:"prompt",label:"Report request",control:"textarea",required:true,location:"meta",notes:"Describe the records, comparisons, thresholds and periods. Ledgerly will plan the required read-only data steps."}],
+  outputFormats:["table","json","csv","xlsx","pdf"],
+};
+
+
 export function AgenticCommandCenterPage(){
   const[agents,setAgents]=useState<Agent[]>([]);
   const[agentKey,setAgentKey]=useState("headteacher");
@@ -69,7 +85,7 @@ export function AgenticCommandCenterPage(){
   const kinds=useMemo(()=>[...new Set((catalog?.commands||[]).map(c=>c.kind))].sort(),[catalog]);
   const matches=useMemo(()=>{
     const needle=search.trim().replace(/^\//,"").toLowerCase();
-    return (catalog?.commands||[])
+    return [COMPOSITE_COMMAND,...(catalog?.commands||[])]
       .filter(c=>moduleFilter==="all"||c.module===moduleFilter)
       .filter(c=>kindFilter==="all"||c.kind===kindFilter)
       .map(c=>({c,score:scoreCommand(c,needle)}))
@@ -82,6 +98,7 @@ export function AgenticCommandCenterPage(){
     setSelected(command);setResult(null);setPrepared(false);setError("");setStep(1);
     const defaults:Record<string,unknown>={};
     for(const field of command.fields)if(field.defaultValue!==undefined)defaults[field.name]=field.defaultValue==="$today"?new Date().toISOString().slice(0,10):field.defaultValue;
+    if(command.toolName==="__composite_report__")defaults.prompt=search.trim().replace(/^\//,"");
     setValues(defaults);
     setFormat((command.outputFormats?.[0]||(command.readOnly?"table":"approval")) as OutputFormat);
   }
@@ -105,12 +122,19 @@ export function AgenticCommandCenterPage(){
     setRunning(true);setError("");setResult(null);setPrepared(false);
     try{
       const conversation=await ensureConversation();
-      const response=await post<RunResponse>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/quick-command",{
-        toolName:selected.toolName,values,commandText:"/"+selected.command,outputFormat:format
-      });
-      setResult(response.result);setPrepared(Boolean(response.prepared));setStep(3);
-      setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:Boolean(response.prepared),result:response.result},...h].slice(0,20));
-      if(!response.prepared&&["csv","xlsx","pdf"].includes(format))exportResult(response.result,format,selected.command);
+      if(selected.toolName==="__composite_report__"){
+        const composite=await post<any>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/composite-report",{prompt:String(values.prompt||""),outputFormat:format});
+        setResult(composite);setPrepared(false);setStep(3);
+        setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:false,result:composite},...h].slice(0,20));
+        if(["csv","xlsx","pdf"].includes(format)&&!composite?.needsCriteria)exportResult(composite,format,selected.command);
+      }else{
+        const response=await post<RunResponse>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/quick-command",{
+          toolName:selected.toolName,values,commandText:"/"+selected.command,outputFormat:format
+        });
+        setResult(response.result);setPrepared(Boolean(response.prepared));setStep(3);
+        setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:Boolean(response.prepared),result:response.result},...h].slice(0,20));
+        if(!response.prepared&&["csv","xlsx","pdf"].includes(format))exportResult(response.result,format,selected.command);
+      }
     }catch(err){setError(errorText(err));}finally{setRunning(false);}
   }
 
@@ -210,7 +234,7 @@ function Welcome({catalog}:{catalog:CommandCatalog|null}){return <div className=
   <span className="acc-welcome-icon"><Command size={30}/></span>
   <p>COMMAND-DRIVEN OPERATIONS</p><h2>Start with <code>/</code> and tell Ledgerly what you want to do.</h2>
   <span>This is not a raw developer shell. It discovers permitted business capabilities, asks for safe criteria and inputs, validates references, lets you choose the output, and routes writes through approval.</span>
-  <div className="acc-example-grid">{["/create student","/open class","/report fee balances","/find staff attendance","/list subjects","/generate report"].map(x=><code key={x}>{x}</code>)}</div>
+  <div className="acc-example-grid">{["/create student","/open class","/report fee balances","/find staff attendance","/list subjects","/composite report"].map(x=><code key={x}>{x}</code>)}</div>
   <div className="acc-welcome-stats"><b>{catalog?.stats.toolCount??"Hundreds of"} live tools</b><span>expanded into {catalog?.stats.commandCount??"many"} searchable command phrases.</span></div>
 </div>;}
 
@@ -235,6 +259,7 @@ function ReferenceField({field,value,onChange,agentKey}:{field:CommandField;valu
 
 function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   if(value===null||value===undefined)return <div className="acc-empty"><Database size={24}/><b>No result payload</b></div>;
+  const composite:any=value;if(composite?.needsCriteria&&Array.isArray(composite.questions))return <div className="acc-ready-card"><Sparkles size={24}/><b>More criteria needed</b><span>{composite.questions.join(" ")}</span></div>;
   if(format==="json")return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
   const rows=rowsFrom(value);
   if(!rows.length)return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
@@ -255,7 +280,7 @@ function objectRow(v:any):Record<string,unknown>{return v&&typeof v==="object"&&
 function cell(value:unknown){if(value===null||value===undefined)return"—";if(typeof value==="object")return JSON.stringify(value);return String(value);}
 function humanize(value:string){return value.replace(/[_-]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2").replace(/\b\w/g,c=>c.toUpperCase());}
 function kindInitial(kind:string){return({query:"Q",report:"R",create:"C",update:"U",delete:"D",action:"A",document:"DOC",analysis:"AI",communication:"COM"} as Record<string,string>)[kind]||kind.slice(0,2).toUpperCase();}
-function scoreCommand(c:CommandDescriptor,needle:string){if(!needle)return 1;const command=c.command.toLowerCase();if(command===needle)return 1000;if(command.startsWith(needle))return 800;if(command.includes(needle))return 600;let best=0;for(const a of c.aliases||[]){const x=a.toLowerCase();if(x===needle)best=Math.max(best,900);else if(x.startsWith(needle))best=Math.max(best,700);else if(x.includes(needle))best=Math.max(best,500);}const meta=(c.module+" "+c.group+" "+c.kind+" "+c.description).toLowerCase();if(meta.includes(needle))best=Math.max(best,250);const tokens=needle.split(/\s+/).filter(Boolean);if(tokens.length&&tokens.every(t=>(command+" "+meta+" "+c.aliases.join(" ")).toLowerCase().includes(t)))best=Math.max(best,350+tokens.length*20);return best;}
+function scoreCommand(c:CommandDescriptor,needle:string){if(!needle)return c.toolName==="__composite_report__"?2:1;const complex=needle.split(/\s+/).filter(Boolean).length>=5||/\b(compare|combined|whose|where|below|above|versus|trend|fallen|declined|across)\b/.test(needle);if(c.toolName==="__composite_report__"&&complex)return 850;const command=c.command.toLowerCase();if(command===needle)return 1000;if(command.startsWith(needle))return 800;if(command.includes(needle))return 600;let best=0;for(const a of c.aliases||[]){const x=a.toLowerCase();if(x===needle)best=Math.max(best,900);else if(x.startsWith(needle))best=Math.max(best,700);else if(x.includes(needle))best=Math.max(best,500);}const meta=(c.module+" "+c.group+" "+c.kind+" "+c.description).toLowerCase();if(meta.includes(needle))best=Math.max(best,250);const tokens=needle.split(/\s+/).filter(Boolean);if(tokens.length&&tokens.every(t=>(command+" "+meta+" "+c.aliases.join(" ")).toLowerCase().includes(t)))best=Math.max(best,350+tokens.length*20);return best;}
 
 function exportResult(value:unknown,format:OutputFormat,command:string){
   const rows=rowsFrom(value),filename=safeName(command||"ledgerly-command");
