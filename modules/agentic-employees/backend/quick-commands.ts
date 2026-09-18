@@ -177,12 +177,13 @@ function queryCriteriaFor(tool:LightToolDescriptor):QuickCommandField[]{
   const number=(name:string,label:string,requestKey=name,min=0,max=5000)=>add({name,requestKey,label,control:"number",required:false,location:"query",min,max,integer:true});
   const enumField=(name:string,label:string,values:string[],requestKey=name)=>add({name,requestKey,label,control:"enum",required:false,location:"query",enum:values});
   const detail=/\/:id(?:\/|$)/.test(path);
+  if(detail&&tool.kind!=="report")return[];
   if(!detail){text("q","Search","q","Search by name, number, code or other text supported by this endpoint.");text("status","Status");}
   if(tool.kind==="report"||/report|analytics|dashboard|attendance|fees|finance|payment|receipt|journal|ledger|exam|books|distribution/.test(path)){date("from","From date");date("to","To date");}
   if(/balance|statement|aging|valuation|register|summary/.test(path))date("asOf","As of date");
-  if(/school|student|academic|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("academicYearId","Academic year");
+  if(/student|academic|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("academicYearId","Academic year");
   if(/term|academic|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("termId","Term");
-  if(/student|attendance|fees|exam|book|class|stream|timetable|lesson|scheme/.test(path))ref("classId","Class");
+  if(/student|attendance|fees|exam|book|timetable|lesson|scheme/.test(path))ref("classId","Class");
   if(/student|attendance|fees|exam|book|stream|timetable/.test(path))ref("streamId","Stream");
   if(/student|fees|attendance|exam|book|guardian|family|discipline/.test(path))ref("studentId","Student");
   if(/guardian|family|student/.test(path))ref("guardianId","Guardian");
