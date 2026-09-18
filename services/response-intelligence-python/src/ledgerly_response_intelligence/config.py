@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="RIE_", env_file=".env", extra="ignore")
+
+    host: str = "0.0.0.0"
+    port: int = Field(default=8091, ge=1, le=65535)
+    log_level: str = "INFO"
+    api_token: str = ""
+
+    provider: Literal["none", "openai-compatible", "anthropic"] = "none"
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    timeout_seconds: float = Field(default=45.0, ge=1.0, le=120.0)
+    max_revisions: int = Field(default=2, ge=0, le=5)
+    history_size: int = Field(default=20, ge=0, le=200)
+
+    allow_external_tools: bool = False
+    allow_web_search: bool = False
+
+    @property
+    def provider_enabled(self) -> bool:
+        if self.provider == "none":
+            return False
+        if not self.model:
+            return False
+        if self.provider == "anthropic":
+            return bool(self.api_key)
+        return bool(self.base_url)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
