@@ -18,7 +18,7 @@ import "./command-center.css";
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "2.3.0",
+  version: "2.4.0",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticChatStudioPage },
