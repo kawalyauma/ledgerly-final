@@ -37,9 +37,11 @@ agenticLightRoutes.get("/chat-studio/commands",requireScope("school:read"),async
 });
 
 agenticLightRoutes.get("/chat-studio/reference-options",requireScope("school:read"),async c=>{
- const principal=c.get("principal"),field=String(c.req.query("field")||""),q=String(c.req.query("q")||""),limit=Number(c.req.query("limit")||20);
- if(!field)throw new AppError(422,"VALIDATION_ERROR","Reference field is required");
- return c.json({data:await searchQuickReferenceOptions(c.env.FINANCE_DB,principal.organizationId,field,q,limit)});
+ const principal=c.get("principal"),key=c.req.query("agentKey")||"headteacher",field=String(c.req.query("field")||""),q=String(c.req.query("q")||""),limit=Number(c.req.query("limit")||20);
+ if(!isAgentKey(key))throw new AppError(422,"VALIDATION_ERROR","Unknown AI employee");if(!field)throw new AppError(422,"VALIDATION_ERROR","Reference field is required");
+ const agent=await effectiveLightAgent(c.env.FINANCE_DB,principal.organizationId,key);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const registry=await buildLightToolRegistry(c.env,principal,agent);
+ return c.json({data:await searchQuickReferenceOptions(c.env.FINANCE_DB,principal.organizationId,field,q,limit,{env:c.env,principal,agent,registry})});
 });
 
 agenticLightRoutes.post("/chat-studio/conversations/:id/quick-command",requireScope("school:read"),async c=>{
