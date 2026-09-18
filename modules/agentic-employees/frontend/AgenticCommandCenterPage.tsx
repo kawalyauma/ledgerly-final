@@ -223,13 +223,13 @@ function Field({field,value,onChange,agentKey}:{field:CommandField;value:unknown
 }
 
 function ReferenceField({field,value,onChange,agentKey}:{field:CommandField;value:unknown;onChange:(v:unknown)=>void;agentKey:string}){
-  const[q,setQ]=useState("");const[items,setItems]=useState<Array<{value:string;label:string;subtitle?:string}>>([]);const[open,setOpen]=useState(false);const[loading,setLoading]=useState(false);
+  const[q,setQ]=useState("");const[label,setLabel]=useState("");const[items,setItems]=useState<Array<{value:string;label:string;subtitle?:string}>>([]);const[open,setOpen]=useState(false);const[loading,setLoading]=useState(false);
   useEffect(()=>{const t=window.setTimeout(()=>{void load();},180);return()=>window.clearTimeout(t);},[q,agentKey,field.referenceKey]);
   async function load(){setLoading(true);try{setItems(await get<Array<{value:string;label:string;subtitle?:string}>>("/agentic-employees/chat-studio/reference-options?agentKey="+encodeURIComponent(agentKey)+"&field="+encodeURIComponent(field.referenceKey||field.name)+"&q="+encodeURIComponent(q)+"&limit=20"));}catch{setItems([]);}finally{setLoading(false);}}
-  const shown=String(value??"");
+  const shown=label||String(value??"");
   return <label className="acc-field acc-reference"><span><b>{field.label}{field.required&&" *"}</b><small>{field.notes||"Search and select a record."}</small></span>
-    <div className="acc-ref-input"><Search size={14}/><input value={open?q:shown} onFocus={()=>{setOpen(true);setQ("");}} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder={"Search "+field.label.toLowerCase()+"…"}/>{loading&&<Activity className="spin" size={13}/>}</div>
-    {open&&<div className="acc-ref-menu">{items.map(item=><button type="button" key={item.value} onMouseDown={e=>e.preventDefault()} onClick={()=>{onChange(item.value);setQ(item.label);setOpen(false);}}><b>{item.label}</b><small>{item.subtitle}</small></button>)}{!items.length&&!loading&&<span>No matches yet</span>}</div>}
+    <div className="acc-ref-input"><Search size={14}/><input value={open?q:shown} onFocus={()=>{setOpen(true);setQ("");}} onBlur={()=>window.setTimeout(()=>setOpen(false),120)} onChange={e=>{setQ(e.target.value);setOpen(true);}} placeholder={"Search "+field.label.toLowerCase()+"…"}/>{loading&&<Activity className="spin" size={13}/>}</div>
+    {open&&<div className="acc-ref-menu">{items.map(item=><button type="button" key={item.value} onMouseDown={e=>e.preventDefault()} onClick={()=>{onChange(item.value);setLabel(item.label);setQ(item.label);setOpen(false);}}><b>{item.label}</b><small>{item.subtitle}</small></button>)}{!items.length&&!loading&&<span>No matches yet</span>}</div>}
   </label>;
 }
 
