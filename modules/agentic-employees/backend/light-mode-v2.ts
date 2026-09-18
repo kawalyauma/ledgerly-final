@@ -6,6 +6,8 @@ import { resolveRuntimeProvider } from "./provider-config";
 import { executeTool } from "./memory-tools-v17";
 import { buildLightToolRegistry, toolsForGroups, toolsForKind, toolsForModules, type LightTaskKind, type LightToolDescriptor } from "./light-tool-registry";
 import { resolveLightReferences } from "./light-reference-resolver";
+import { analysisKnowledgeSummary, getAnalysisTopic, suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge";
+import { identifyAnalysisEntity, type AnalysisEntityOption } from "./analysis-entity-resolver";
 
 type ChatMessage={role:"user"|"assistant";content:string};
 type LightRunInput={db:D1Database;env:Env&{AI_PROVIDER_ENCRYPTION_KEY?:string};principal:AuthPrincipal;agent:AgentDefinition;conversationId:string;messages:ChatMessage[]};
@@ -194,4 +196,86 @@ export async function runCompositeReport(input:LightRunInput,prompt:string){
  const compiled=await stage(input,"composite_compile",()=>cheapJson<CompositeCompiled>(runtime,compilePrompt,{title:"Composite Ledgerly Report",joinKey:plan.joinKey,columns:[],rows:fallbackRows,summary:{},appliedFilters:[],calculations:[],missingData:[],notes:[]},5200));
  const data=sanitizeComposite(compiled.value,fallbackRows);
  return{mode:"composite-report",request,needsCriteria:false,questions:[],plan,data,sources:sourceInfo,toolEvents:events,model:runtime.model,provider:runtime.provider};
+}
+
+
+type GuidedAnalysisSection={title?:unknown;analysis?:unknown;evidence?:unknown;metrics?:unknown};
+type GuidedAnalysisCompiled={
+ title?:unknown;summary?:unknown;sections?:unknown;findings?:unknown;metrics?:unknown;relationships?:unknown;
+ limitations?:unknown;unanswered?:unknown;suggestedActions?:unknown;rows?:unknown;confidenceNote?:unknown;
+};
+function analysisArray(value:unknown){return Array.isArray(value)?value:[];}
+function analysisStrings(value:unknown){return analysisArray(value).map(String).map(x=>x.trim()).filter(Boolean);}
+function sanitizeGuidedAnalysis(value:GuidedAnalysisCompiled){
+ const sections=analysisArray(value.sections).filter(x=>x&&typeof x==="object").slice(0,12).map((x:any)=>({
+  title:String(x.title||"Analysis").slice(0,160),analysis:String(x.analysis||"").slice(0,6000),
+  evidence:analysisStrings(x.evidence).slice(0,20),metrics:analysisArray(x.metrics).slice(0,20)
+ }));
+ const rows=analysisArray(value.rows).filter(x=>x&&typeof x==="object"&&!Array.isArray(x)).slice(0,1000);
+ return{
+  title:String(value.title||"Ledgerly Analysis").slice(0,180),summary:String(value.summary||"").slice(0,8000),sections,
+  findings:analysisArray(value.findings).slice(0,30),metrics:analysisArray(value.metrics).slice(0,40),
+  relationships:analysisArray(value.relationships).slice(0,30),limitations:analysisStrings(value.limitations).slice(0,30),
+  unanswered:analysisStrings(value.unanswered).slice(0,30),suggestedActions:analysisArray(value.suggestedActions).slice(0,30),
+  rows,confidenceNote:String(value.confidenceNote||"").slice(0,2000)
+ };
+}
+function guidedCapabilitySearch(prompt:string,topicText:string){return (prompt+" "+topicText).slice(0,12000);}
+
+export async function runGuidedAnalysis(input:LightRunInput,payload:{mode:AnalysisMode;prompt:string;topicId?:string|null;entity?:AnalysisEntityOption|null}){
+ const mode:AnalysisMode=payload.mode==="account-for"?"account-for":"analyse",request=String(payload.prompt||"").trim();
+ if(!request)throw new AppError(422,"VALIDATION_ERROR","Describe what you want Ledgerly to analyse.");
+ const runtime=await resolveRuntimeProvider(input.db,input.env,input.principal.organizationId,"luna");
+ const registry=await stage(input,"analysis_build_registry",()=>buildLightToolRegistry(input.env,input.principal,input.agent));
+ const readable=registry.tools.filter(tool=>tool.readOnly&&(tool.kind==="query"||tool.kind==="report"||tool.kind==="analysis"));
+ if(!readable.length)throw new AppError(409,"ANALYSIS_UNAVAILABLE","No permitted read capabilities are available for this AI employee.");
+
+ let topic=getAnalysisTopic(payload.topicId||null);
+ if(!topic){
+  const suggestions=suggestAnalysisTopics(mode,request,readable.map(tool=>tool.name+" "+tool.description+" "+tool.aliases.join(" ")).join(" ")).slice(0,12);
+  const classified=await stage(input,"analysis_classify_topic",()=>cheapJson<{topicId?:unknown}>(runtime,
+   "Choose the best investigation topic for this request. Return one topicId or an empty string if none is a good fit.\nRequest: "+request+"\nTopics: "+JSON.stringify(suggestions.map(item=>({id:item.id,label:item.label,description:item.description,evidence:item.evidence.slice(0,5)}))),
+   {topicId:suggestions[0]?.id||""},300));
+  topic=getAnalysisTopic(String(classified.value.topicId||""))||suggestions[0]||null;
+ }
+ const knowledge=analysisKnowledgeSummary(topic);
+ let entity=payload.entity||null,entityResolution:any=null;
+ if(!entity){
+  const extracted=await stage(input,"analysis_extract_entity",()=>cheapJson<{mention?:unknown;types?:unknown}>(runtime,
+   "Extract the primary named Ledgerly entity only if the user clearly names one specific person, account, class, stream, subject, department, term, product or contact. Do not treat generic phrases such as P6 learners, all teachers or the school as a named entity. Return {mention:'',types:[]} when there is no specific named entity.\nRequest: "+request+"\nLikely entity types for this topic: "+JSON.stringify(topic?.entityTypes||[]),
+   {mention:"",types:[]},260));
+  const mention=String(extracted.value.mention||"").trim(),types=analysisStrings(extracted.value.types);
+  if(mention.length>=2){
+   entityResolution=await identifyAnalysisEntity(input.db,input.principal.organizationId,mention,types.length?types:topic?.entityTypes);
+   if(entityResolution.status==="resolved")entity=entityResolution.entity;
+   else if(entityResolution.status==="ambiguous")return{mode,request,topic,needsEntity:true,entityQuery:mention,entityOptions:entityResolution.options,needsCriteria:false,questions:[],plan:null,analysis:null,sources:[]};
+  }
+ }
+
+ const topicText=topic?[topic.label,topic.description,...topic.keywords,...topic.evidence].join(" "):knowledge;
+ const candidates=shortlist(guidedCapabilitySearch(request,topicText),readable,72);
+ const plannerPrompt="Build a fresh READ-ONLY evidence investigation for Ledgerly. This is not a report template. Select evidence because it can answer this exact request.\nMode: "+mode+"\nRequest: "+request+"\nResolved entity: "+JSON.stringify(entity)+"\nInvestigation knowledge: "+knowledge+"\nAvailable capabilities: "+JSON.stringify(candidates.map(compositeCandidate))+"\nReturn {steps:[{tool,purpose,instruction}],questions:[],joinKey}. Use 1 to 10 steps. The same read tool may appear more than once for different periods or comparison groups. Use the resolved entity ID/type exactly when present. Include comparison/baseline evidence when it materially helps. For account-for requests, investigate competing explanations and counter-evidence; do not jump from correlation to causation. Never use a write tool. Ask questions only when a required identifier, period or comparison truly cannot be resolved from Ledgerly.";
+ const planned=await stage(input,"analysis_plan",()=>cheapJson<{steps?:unknown;questions?:unknown;joinKey?:unknown}>(runtime,plannerPrompt,{steps:[],questions:[],joinKey:entity?.type==="staff"||entity?.type==="teacher"?"staffId":"studentId"},1800));
+ const rawSteps=Array.isArray(planned.value.steps)?planned.value.steps as Array<Record<string,unknown>>:[],allowed=new Map(candidates.map(tool=>[tool.name,tool]));
+ const steps=rawSteps.map(step=>({tool:String(step.tool||""),purpose:String(step.purpose||""),instruction:String(step.instruction||"")})).filter(step=>allowed.has(step.tool)).slice(0,10);
+ const questions=analysisStrings(planned.value.questions);
+ const plan={joinKey:String(planned.value.joinKey||"studentId"),steps:steps.length?steps:candidates.slice(0,1).map(tool=>({tool:tool.name,purpose:"Retrieve primary evidence",instruction:request}))};
+ if(questions.length)return{mode,request,topic,entity,needsEntity:false,needsCriteria:true,questions,plan,analysis:null,sources:[]};
+
+ const events:Array<Record<string,unknown>>=[],executed:Array<ToolExecution&{purpose:string;instruction:string}>=[];
+ for(const step of plan.steps){
+  const tool=allowed.get(step.tool);if(!tool)continue;
+  const prior=executed.length?"\nVerified results from earlier steps that may provide IDs, dates or baselines: "+JSON.stringify(executed.map(item=>({tool:item.tool.name,purpose:item.purpose,result:item.result}))).slice(0,12000):"";
+  const instruction="Investigation step purpose: "+(step.purpose||"evidence")+"\nStep instruction: "+(step.instruction||request)+"\nOverall request: "+request+"\nResolved entity: "+JSON.stringify(entity)+prior+"\nUse only read operations and never invent an ID, period or record.";
+  const item=await executeSelected(input,runtime,tool,instruction,events);executed.push({...item,purpose:step.purpose,instruction:step.instruction});
+  const v=item.result as any;if(v?.needsClarification)break;
+ }
+ const issues=executed.flatMap(item=>{const v=item.result as any;return v?.needsClarification&&Array.isArray(v.issues)?v.issues.map(String):[];});
+ const sources=executed.map(item=>({tool:item.tool.name,module:item.tool.module,purpose:item.purpose,rowCount:compositeObjectRows(item.result).length}));
+ if(issues.length)return{mode,request,topic,entity,needsEntity:false,needsCriteria:true,questions:[...new Set(issues)],plan,analysis:null,sources,toolEvents:events};
+
+ const verified=executed.map(item=>({tool:item.tool.name,module:item.tool.module,purpose:item.purpose,result:item.result}));
+ const compilePrompt="Perform a genuine evidence-based Ledgerly "+(mode==="account-for"?"explanation/investigation":"analysis")+". Do NOT fill a fixed report template and do NOT force the same headings used in other analyses. Decide the number and titles of sections from the evidence and the user's question.\nRequest: "+request+"\nTopic knowledge (a checklist of evidence to consider, not conclusions): "+knowledge+"\nResolved entity: "+JSON.stringify(entity)+"\nVerified Ledgerly evidence: "+JSON.stringify(verified).slice(0,42000)+"\nReturn JSON {title,summary,sections:[{title,analysis,evidence,metrics}],findings,metrics,relationships,limitations,unanswered,suggestedActions,rows,confidenceNote}.\nRules: every factual claim must be traceable to verified evidence above; distinguish direct facts, calculations, associations and explanations; never invent missing records; never infer private motives; never blame a teacher, learner or guardian from correlation alone; for account-for, identify strongest observed contributors, counter-evidence and alternative explanations, and explicitly say when causation cannot be established; use comparisons and calculations only when their denominators/periods are compatible; suggestedActions are advisory only and must not claim they were executed; rows should be flat supporting data when useful. Vary the analysis structure according to what the evidence actually shows.";
+ const compiled=await stage(input,"analysis_synthesize",()=>cheapJson<GuidedAnalysisCompiled>(runtime,compilePrompt,{title:topic?.label||"Ledgerly Analysis",summary:"",sections:[],findings:[],metrics:[],relationships:[],limitations:[],unanswered:[],suggestedActions:[],rows:[],confidenceNote:""},6200));
+ return{mode,request,topic,entity,needsEntity:false,needsCriteria:false,questions:[],plan,analysis:sanitizeGuidedAnalysis(compiled.value),sources,toolEvents:events,model:runtime.model,provider:runtime.provider};
 }
