@@ -467,8 +467,10 @@ export async function runLightAgent(input: LightInput) {
   const prepared = results.filter(item => item.result?.prepared && item.result?.requiresHumanApproval);
   if (prepared.length) return { text: prepared.length === 1 ? "I prepared the requested Ledgerly action. Review or edit the approval card below, then approve it when ready." : `I prepared ${prepared.length} Ledgerly actions. Review or edit the approval cards below before approving them.`, model: runtime.model, provider: runtime.provider, providerResponseId: null, usage, toolEvents: events, routing };
 
-  const answer = await aiText(input, runtime, usage, "light_write_answer", `Answer using ONLY these verified Ledgerly results. Be concise but complete. Use a markdown table for exact comparisons when useful. Never invent missing values.\nUser request: ${prompt}\nVerified results: ${JSON.stringify(results).slice(0, 22_000)}`, 900);
-  return { text: answer.text || "The Ledgerly lookup completed.", model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing };
+  const recentText=input.messages.filter(message=>message.role==="assistant").slice(-3).map(message=>message.content).join("\n\n").slice(0,12000),languageBrief=buildResponseLanguageBrief({purpose:kinds.includes("analysis")?"analysis":"general",request:prompt,seed:createId("rsp"),topic:modules.join(", "),category:kinds.join(", "),detail:"standard",audience:input.agent.title||input.agent.key,recentText});
+  const answer = await aiText(input, runtime, usage, "light_write_answer", `${languageBrief}\n\nAnswer using ONLY these verified Ledgerly results. Be concise but complete. Use a markdown table for exact comparisons when useful. Never invent missing values.\nUser request: ${prompt}\nVerified results: ${JSON.stringify(results).slice(0, 22_000)}`, 1200);
+  const text=cleanHumanResponse(answer.text||"The Ledgerly lookup completed.");
+  return { text, model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing:{...routing,responseFingerprint:responseFingerprint(text),templateRisk:templateRisk(text).risk} };
 }
 
 
