@@ -2,7 +2,7 @@ name: Agentic Chat Studio Check
 
 on:
   push:
-    branches: [agentic-chat-studio]
+    branches: [agentic-chat-studio, advanced-agentic-employees]
   workflow_dispatch:
 
 jobs:
@@ -21,7 +21,7 @@ jobs:
       - name: Typecheck Node backend
         run: npm run typecheck
       - name: Run Agentic Node regression tests
-        run: npx vitest run src/features/agentic-employees/light-tool-registry.test.ts src/features/agentic-employees/document-service.test.ts src/features/agentic-employees/system-gateway.test.ts
+        run: npx vitest run src/features/agentic-employees/light-tool-registry.test.ts src/features/agentic-employees/quick-commands.test.ts src/features/agentic-employees/document-service.test.ts src/features/agentic-employees/system-gateway.test.ts
       - name: Strict Node build
         run: npm run build:strict
 
@@ -38,6 +38,6 @@ jobs:
       - name: Root typecheck
         run: npm run typecheck
       - name: Run Agentic root regression tests
-        run: npx vitest run modules/agentic-employees/backend/light-tool-registry.test.ts selfhost/document-service.test.ts selfhost/system-gateway.test.ts
+        run: npx vitest run modules/agentic-employees/backend/light-tool-registry.test.ts modules/agentic-employees/backend/quick-commands.test.ts selfhost/document-service.test.ts selfhost/system-gateway.test.ts
       - name: Build web
         run: npm run build:web
