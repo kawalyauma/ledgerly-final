@@ -198,7 +198,7 @@ function queryCriteriaFor(tool:LightToolDescriptor):QuickCommandField[]{
 function outputFormatsFor(tool:LightToolDescriptor){
   if(!tool.readOnly)return["approval"];
   if(tool.kind==="report")return["table","json","csv","xlsx","pdf"];
-  return["table","json","csv","xlsx"];
+  return["table","json","csv","xlsx","pdf"];
 }
 
 function fieldsFor(tool:LightToolDescriptor){
