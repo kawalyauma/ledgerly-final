@@ -134,8 +134,7 @@ function canonicalFor(tool:LightToolDescriptor){
 
 function referenceKey(name:string){
   const key=normalize(name);if(REF_SPECS[key])return name;
-  if(key==="classid"||key==="currentclassid")return name;
-  return undefined;
+  return key!=="id"&&key.endsWith("id")?name:undefined;
 }
 function controlFor(name:string,type:string,enumValues?:string[]):QuickFieldControl{
   if(enumValues?.length)return"enum";if(referenceKey(name))return"reference";const t=type.toLowerCase();
@@ -176,8 +175,33 @@ export function buildQuickCommandCatalog(registry:LightToolRegistry){
 
 function cleanText(value:unknown){return value===undefined||value===null?"":String(value).trim();}
 function displayValue(row:Record<string,unknown>,cols:string[]){return cols.map(c=>cleanText(row[c])).filter(Boolean).join(" ").replace(/\s+/g," ").trim();}
-export async function searchQuickReferenceOptions(db:D1Database,organizationId:string,field:string,q:string,limit=20){
-  const spec=REF_SPECS[normalize(field)];if(!spec)throw new AppError(422,"REFERENCE_UNSUPPORTED",`No searchable reference is configured for ${field}`);
+function referenceTerms(field:string){
+  const raw=human(field.replace(/Id$/i,"")).toLowerCase(),terms=new Set<string>([normalize(raw)]);
+  const withoutPrefix=raw.replace(/^(current|target|selected|source|destination|effective|primary|default|assigned|admission|promotion)\s+/,"");terms.add(normalize(withoutPrefix));
+  const words=withoutPrefix.split(/\s+/).filter(Boolean);if(words.length>1)terms.add(normalize(words.at(-1)!));return[...terms].filter(Boolean);
+}
+function rowsFromPayload(payload:any):Record<string,unknown>[]{
+  const direct=payload?.data??payload?.results??payload?.items??payload;if(Array.isArray(direct))return direct.filter(x=>x&&typeof x==="object"&&!Array.isArray(x));
+  if(direct&&typeof direct==="object"){for(const value of Object.values(direct)){if(Array.isArray(value)&&value.every(x=>!x||typeof x==="object"))return(value as any[]).filter(x=>x&&typeof x==="object"&&!Array.isArray(x));if(value&&typeof value==="object"){const nested=(value as any).items||(value as any).results||(value as any).data;if(Array.isArray(nested))return nested.filter((x:any)=>x&&typeof x==="object"&&!Array.isArray(x));}}}
+  return[];
+}
+function genericOption(row:Record<string,unknown>){
+  const value=cleanText(row.id??row.uuid??row.key);if(!value)return null;
+  const fullName=[row.firstName??row.first_name,row.middleName??row.middle_name,row.lastName??row.last_name].map(cleanText).filter(Boolean).join(" ");
+  const label=cleanText(row.name??row.title??row.displayName??row.display_name??row.label)||fullName||cleanText(row.code??row.number??row.reference)||value;
+  const subtitle=[row.code,row.admissionNumber??row.admission_number,row.studentNumber??row.student_number,row.staffNumber??row.staff_number,row.reference,row.status].map(cleanText).filter(x=>x&&x!==label).slice(0,2).join(" · ");
+  return{value,label,subtitle};
+}
+async function genericReferenceOptions(env:Env,principal:AuthPrincipal,agent:AgentDefinition,registry:LightToolRegistry,field:string,q:string,limit:number){
+  const gateway=env.AGENT_SYSTEM_GATEWAY;if(!gateway)return[];const terms=referenceTerms(field);
+  const candidates=registry.tools.filter(t=>t.source==="route"&&t.readOnly&&t.method==="GET"&&t.pathTemplate&&!t.pathTemplate.includes(":")).map(tool=>{const parts=pathStatic(tool.pathTemplate||"");const collection=singular(parts.at(-1)||"");const normalized=normalize(collection);let score=0;for(const term of terms){if(normalized===term)score=Math.max(score,100);else if(normalized.includes(term)||term.includes(normalized))score=Math.max(score,55);}return{tool,score};}).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+  const safeLimit=Math.max(1,Math.min(30,Math.floor(limit)||20)),needle=q.trim().toLowerCase();
+  for(const candidate of candidates.slice(0,2)){const base=candidate.tool.pathTemplate!;const suffix=q.trim()?`?search=${encodeURIComponent(q.trim())}&limit=${safeLimit}`:`?limit=${safeLimit}`;let response=await gateway.request({agentKey:agent.key,principal,method:"GET",path:`${base}${suffix}`});if(!response.ok&&suffix)response=await gateway.request({agentKey:agent.key,principal,method:"GET",path:base});if(!response.ok)continue;
+    const options=rowsFromPayload(response.data).map(genericOption).filter((x):x is {value:string;label:string;subtitle:string}=>Boolean(x)).filter(x=>!needle||`${x.label} ${x.subtitle} ${x.value}`.toLowerCase().includes(needle)).slice(0,safeLimit);if(options.length)return options;}
+  return[];
+}
+export async function searchQuickReferenceOptions(db:D1Database,organizationId:string,field:string,q:string,limit=20,fallback?:{env:Env;principal:AuthPrincipal;agent:AgentDefinition;registry:LightToolRegistry}){
+  const spec=REF_SPECS[normalize(field)];if(!spec){if(fallback)return genericReferenceOptions(fallback.env,fallback.principal,fallback.agent,fallback.registry,field,q,limit);throw new AppError(422,"REFERENCE_UNSUPPORTED",`No searchable reference is configured for ${field}`);}
   const selected=[spec.valueColumn,...new Set([...spec.searchColumns,...spec.labelColumns,...spec.subtitleColumns])],safeLimit=Math.max(1,Math.min(30,Math.floor(limit)||20)),where=[`organization_id=?`],args:any[]=[organizationId];
   if(spec.activeColumn)where.push(`${spec.activeColumn}=true`);
   const query=q.trim();if(query){where.push(`(${spec.searchColumns.map(c=>`lower(coalesce(${c},'')) LIKE lower(?)`).join(" OR ")})`);for(let i=0;i<spec.searchColumns.length;i++)args.push(`%${query}%`);}
@@ -185,7 +209,6 @@ export async function searchQuickReferenceOptions(db:D1Database,organizationId:s
   const rows=await db.prepare(`SELECT ${selected.join(",")} FROM ${spec.table} WHERE ${where.join(" AND ")} ORDER BY ${spec.labelColumns[0]||spec.searchColumns[0]} LIMIT ?`).bind(...args).all<Record<string,unknown>>();
   return rows.results.map(row=>({value:cleanText(row[spec.valueColumn]),label:displayValue(row,spec.labelColumns)||displayValue(row,spec.searchColumns)||cleanText(row[spec.valueColumn]),subtitle:displayValue(row,spec.subtitleColumns)})).filter(x=>x.value);
 }
-
 function fillPath(template:string,params:Record<string,unknown>){
   const missing:string[]=[];const path=template.replace(/:([A-Za-z0-9_]+)/g,(_m,key)=>{const value=params[key];if(value===undefined||value===null||String(value).trim()===""){missing.push(key);return`:${key}`;}return encodeURIComponent(String(value));});return{path,missing};
 }
