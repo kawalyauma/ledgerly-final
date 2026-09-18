@@ -372,7 +372,7 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   if(value===null||value===undefined)return <div className="acc-empty"><Database size={24}/><b>No result payload</b></div>;
   const composite:any=value;if(composite?.needsCriteria&&Array.isArray(composite.questions))return <div className="acc-ready-card"><Sparkles size={24}/><b>More criteria needed</b><span>{composite.questions.join(" ")}</span></div>;
   if(composite?.needsEntity&&Array.isArray(composite.entityOptions))return <div className="acc-ready-card"><Search size={24}/><b>Select the correct Ledgerly record</b><span>The name matched more than one record. Choose the student, teacher, staff member, account or other entity above and run again.</span></div>;
-  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} topic={composite.topic} entity={composite.entity}/>;
+  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} humanResponse={composite.humanResponse} topic={composite.topic} entity={composite.entity}/>;
   if(format==="json")return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
   const rows=rowsFrom(value);
   if(!rows.length)return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
@@ -381,10 +381,10 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
 }
 
 
-function AnalysisResult({analysis,topic,entity}:{analysis:any;topic?:AnalysisTopic|null;entity?:AnalysisEntity|null}){
+function AnalysisResult({analysis,humanResponse,topic,entity}:{analysis:any;humanResponse?:string;topic?:AnalysisTopic|null;entity?:AnalysisEntity|null}){
   return <div className="acc-analysis-result">
     <header><div><small>{topic?.category||"Evidence analysis"}</small><h3>{analysis.title||topic?.label||"Ledgerly Analysis"}</h3>{entity&&<span>{entity.type}: <b>{entity.label}</b></span>}</div></header>
-    {analysis.summary&&<div className="acc-analysis-summary">{analysis.summary}</div>}
+    {humanResponse?<div className="acc-human-response">{humanResponse}</div>:analysis.summary&&<div className="acc-analysis-summary">{analysis.summary}</div>}
     {Array.isArray(analysis.metrics)&&analysis.metrics.length>0&&<div className="acc-analysis-metrics">{analysis.metrics.slice(0,8).map((m:any,i:number)=><div key={i}>{typeof m==="object"?<><b>{String(m.label||m.name||"Metric")}</b><span>{String(m.value??m.result??JSON.stringify(m))}</span></>:<span>{String(m)}</span>}</div>)}</div>}
     {Array.isArray(analysis.sections)&&analysis.sections.map((section:any,i:number)=><section key={i}><h4>{section.title||"Analysis"}</h4><p>{section.analysis}</p>{Array.isArray(section.evidence)&&section.evidence.length>0&&<div className="acc-evidence-list">{section.evidence.map((e:any,j:number)=><span key={j}>{String(e)}</span>)}</div>}</section>)}
     {Array.isArray(analysis.findings)&&analysis.findings.length>0&&<section><h4>Evidence-backed findings</h4><div className="acc-finding-list">{analysis.findings.map((f:any,i:number)=><div key={i}>{typeof f==="object"?<><b>{String(f.title||f.finding||"Finding")}</b><span>{String(f.detail||f.analysis||f.evidence||JSON.stringify(f))}</span></>:<span>{String(f)}</span>}</div>)}</div></section>}
@@ -414,11 +414,11 @@ function kindInitial(kind:string){return({query:"Q",report:"R",create:"C",update
 function scoreCommand(c:CommandDescriptor,needle:string){if(!needle)return c.toolName==="__guided_analyse__"||c.toolName==="__guided_account_for__"?3:c.toolName==="__composite_report__"?2:1;if(c.toolName==="__guided_analyse__"&&/^(analyse|analyze)(\s|$)/.test(needle))return 1200;if(c.toolName==="__guided_account_for__"&&/^account\s+for(\s|$)/.test(needle))return 1200;const complex=needle.split(/\s+/).filter(Boolean).length>=5||/\b(compare|combined|whose|where|below|above|versus|trend|fallen|declined|across)\b/.test(needle);if(c.toolName==="__composite_report__"&&complex)return 850;const command=c.command.toLowerCase();if(command===needle)return 1000;if(command.startsWith(needle))return 800;if(command.includes(needle))return 600;let best=0;for(const a of c.aliases||[]){const x=a.toLowerCase();if(x===needle)best=Math.max(best,900);else if(x.startsWith(needle))best=Math.max(best,700);else if(x.includes(needle))best=Math.max(best,500);}const meta=(c.module+" "+c.group+" "+c.kind+" "+c.description).toLowerCase();if(meta.includes(needle))best=Math.max(best,250);const tokens=needle.split(/\s+/).filter(Boolean);if(tokens.length&&tokens.every(t=>(command+" "+meta+" "+c.aliases.join(" ")).toLowerCase().includes(t)))best=Math.max(best,350+tokens.length*20);return best;}
 
 function exportResult(value:unknown,format:OutputFormat,command:string){
-  const rows=rowsFrom(value),filename=safeName(command||"ledgerly-command"),analysis:any=(value as any)?.analysis;
+  const rows=rowsFrom(value),filename=safeName(command||"ledgerly-command"),analysis:any=(value as any)?.analysis,humanResponse=String((value as any)?.humanResponse??"");
   if(format==="json"){downloadBlob(JSON.stringify(value,null,2),"application/json",filename+".json");return;}
   if(format==="csv"){
     const csvRows=rows.length?rows:analysis?[
-      {section:"Summary",content:String(analysis.summary||"")},
+      {section:"Human response",content:humanResponse||String(analysis.summary||"")},
       ...(Array.isArray(analysis.sections)?analysis.sections.map((s:any)=>({section:String(s.title||"Analysis"),content:String(s.analysis||"")})):[])
     ]:[];
     const columns=[...new Set(csvRows.flatMap((r:any)=>Object.keys(r)))];const csv=[columns.join(","),...csvRows.map((r:any)=>columns.map(c=>csvCell(r[c])).join(","))].join("\n");downloadBlob(csv,"text/csv;charset=utf-8",filename+".csv");return;
@@ -428,7 +428,7 @@ function exportResult(value:unknown,format:OutputFormat,command:string){
     if(analysis){
       const narrative=[
         {section:"Title",content:String(analysis.title||humanize(command))},
-        {section:"Summary",content:String(analysis.summary||"")},
+        {section:"Human response",content:humanResponse||String(analysis.summary||"")},
         ...(Array.isArray(analysis.sections)?analysis.sections.map((s:any)=>({section:String(s.title||"Analysis"),content:String(s.analysis||"")})):[]),
         ...(Array.isArray(analysis.limitations)&&analysis.limitations.length?[{section:"Limits of evidence",content:analysis.limitations.join("\n")}]:[]),
         ...(analysis.confidenceNote?[{section:"Confidence",content:String(analysis.confidenceNote)}]:[])
@@ -443,7 +443,7 @@ function exportResult(value:unknown,format:OutputFormat,command:string){
       const doc=new jsPDF({orientation:"portrait"});let y=16;const margin=14,width=182;
       doc.setFontSize(16);doc.text(String(analysis.title||humanize(command)),margin,y);y+=9;
       const addText=(text:string,size=9,bold=false)=>{if(!text)return;doc.setFontSize(size);doc.setFont("helvetica",bold?"bold":"normal");const lines=doc.splitTextToSize(text,width);for(const line of lines){if(y>278){doc.addPage();y=16;}doc.text(line,margin,y);y+=size*.48+2;}};
-      addText(String(analysis.summary||""),10);y+=3;
+      addText(humanResponse||String(analysis.summary||""),10);y+=3;
       for(const section of Array.isArray(analysis.sections)?analysis.sections:[]){if(y>260){doc.addPage();y=16;}addText(String(section.title||"Analysis"),11,true);addText(String(section.analysis||""),9);y+=3;}
       if(Array.isArray(analysis.limitations)&&analysis.limitations.length){addText("Limits of the evidence",10,true);addText(analysis.limitations.map((x:string)=>"• "+x).join("\n"),8);}
       if(analysis.confidenceNote){y+=2;addText(String(analysis.confidenceNote),8);}
