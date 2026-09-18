@@ -109,16 +109,29 @@ function verbsFor(kind:string){
   if(kind==="analysis")return["analyze","analyse","compare","review","inspect","explain","summarize"];
   return["run","perform","execute","apply","start","open"];
 }
+function queryNoun(tool:LightToolDescriptor){
+  const list=tool.name.match(/^list_([a-z0-9_]+)$/);if(list)return human(list[1]!);
+  const search=tool.name.match(/^search_([a-z0-9_]+)$/);if(search)return human(search[1]!);
+  return entityFor(tool);
+}
 function aliasesFor(tool:LightToolDescriptor){
-  const entity=entityFor(tool),values=new Set<string>();
-  const canonical=human(tool.name).replace(/^(route|get|list) /,"").trim();
+  const entity=entityFor(tool),noun=tool.kind==="query"?queryNoun(tool):entity,values=new Set<string>();
+  const canonical=human(tool.name).replace(/^route /,"").trim();
   values.add(canonical);for(const a of tool.aliases||[])values.add(human(a));
-  for(const verb of verbsFor(tool.kind))values.add(`${verb} ${entity}`);
+  const queryIsCollection=tool.kind==="query"&&!/:([A-Za-z0-9_]+)/.test(tool.pathTemplate||"")&&(/^list_/.test(tool.name)||!/^get_/.test(tool.name));
+  const verbs=queryIsCollection?["view","show","find","search","list","get","check","browse","see"]:verbsFor(tool.kind);
+  for(const verb of verbs)values.add(`${verb} ${noun}`);
   if(tool.kind==="create"){values.add(`add new ${entity}`);values.add(`create new ${entity}`);}
-  if(tool.kind==="query"){values.add(`open ${entity} record`);values.add(`search ${entity} records`);}
+  if(tool.kind==="query"&&!queryIsCollection){values.add(`open ${entity} record`);values.add(`search ${entity} records`);}
   return[...values].map(v=>v.toLowerCase().replace(/\s+/g," ").trim()).filter(v=>v.length>1&&v.length<100).slice(0,18);
 }
-function canonicalFor(tool:LightToolDescriptor){const entity=entityFor(tool);const verb=tool.kind==="query"?"open":tool.kind==="report"?"report":tool.kind==="analysis"?"analyze":tool.kind==="communication"?"send":tool.kind==="document"?"document":tool.kind==="action"?"run":tool.kind;return `${verb} ${entity}`.trim();}
+function canonicalFor(tool:LightToolDescriptor){
+  const entity=entityFor(tool);
+  const list=tool.name.match(/^list_([a-z0-9_]+)$/);if(tool.kind==="query"&&list)return `list ${human(list[1]!)}`;
+  const search=tool.name.match(/^search_([a-z0-9_]+)$/);if(tool.kind==="query"&&search)return `search ${human(search[1]!)}`;
+  const verb=tool.kind==="query"?"open":tool.kind==="report"?"report":tool.kind==="analysis"?"analyze":tool.kind==="communication"?"send":tool.kind==="document"?"document":tool.kind==="action"?"run":tool.kind;
+  return `${verb} ${entity}`.trim();
+}
 
 function referenceKey(name:string){
   const key=normalize(name);if(REF_SPECS[key])return name;
@@ -158,7 +171,7 @@ function fieldsFor(tool:LightToolDescriptor){
 
 export function buildQuickCommandCatalog(registry:LightToolRegistry){
   const commands:QuickCommandDescriptor[]=registry.tools.map(tool=>{const built=fieldsFor(tool),aliases=aliasesFor(tool),command=canonicalFor(tool);if(!aliases.includes(command))aliases.unshift(command);return{toolName:tool.name,command,aliases,description:tool.description,module:tool.module,group:tool.group,kind:tool.kind,source:tool.source,readOnly:tool.readOnly,method:tool.method,pathTemplate:tool.pathTemplate,schemaCoverage:built.coverage,fields:built.fields};});
-  const commandCount=commands.reduce((sum,item)=>sum+item.aliases.length,0);
+  const commandCount=new Set(commands.flatMap(item=>item.aliases)).size;
   return{commands,stats:{toolCount:registry.stats.total,commandCount,routeTools:registry.stats.routeTools,nativeTools:registry.stats.nativeTools,writes:registry.stats.writes,reads:registry.stats.reads}};
 }
 
