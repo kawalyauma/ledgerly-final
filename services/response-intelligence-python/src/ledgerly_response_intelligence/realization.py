@@ -6,7 +6,7 @@ from collections import defaultdict
 from typing import Any
 
 from .library import REGISTER_RULES
-from .models import DiscoursePlan, EvidenceBundle, Fact, Purpose, ResponseRequest
+from .models import DiscoursePlan, EvidenceBundle, Fact, Purpose, ReasoningResult, ResponseRequest
 from .retrieval import LanguageRetriever
 
 
@@ -51,7 +51,7 @@ class DeterministicRealizer:
     def __init__(self, retriever: LanguageRetriever | None = None) -> None:
         self.retriever = retriever or LanguageRetriever()
 
-    def realize(self, request: ResponseRequest, evidence: EvidenceBundle, plan: DiscoursePlan) -> str:
+    def realize(self, request: ResponseRequest, evidence: EvidenceBundle, plan: DiscoursePlan, reasoning: ReasoningResult | None = None) -> str:
         if not evidence.facts:
             return self._no_evidence(request, evidence, plan)
 
@@ -66,6 +66,7 @@ class DeterministicRealizer:
                 section_id=section.section_id,
                 facts=facts,
                 recent=recent,
+                reasoning=reasoning,
             )
             if not body:
                 continue
@@ -87,6 +88,7 @@ class DeterministicRealizer:
         section_id: str,
         facts: list[Fact],
         recent: str,
+        reasoning: ReasoningResult | None,
     ) -> str:
         query = f"{request.request} {request.context.topic} {request.context.category}"
         if section_id == "overview":
@@ -94,7 +96,8 @@ class DeterministicRealizer:
                 family="opening", purpose=request.purpose, register=plan.register,
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
-            sentences = [_fact_sentence(fact, request) for fact in facts[:4]]
+            insight_sentences = [item.statement for item in (reasoning.insights[:2] if reasoning else []) if item.kind.value in {"change", "comparison", "outlier", "observation"}]
+            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:4]]
             return (opening + ". " if opening else "") + " ".join(sentences)
 
         if section_id == "comparison":
@@ -102,7 +105,8 @@ class DeterministicRealizer:
                 family="comparison", purpose=request.purpose, register=plan.register,
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
-            sentences = [_fact_sentence(fact, request) for fact in facts[:6]]
+            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"change", "comparison"}][:5]
+            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:6]]
             return (lead + ", " if lead else "") + " ".join(sentences)
 
         if section_id == "explanation":
@@ -110,7 +114,8 @@ class DeterministicRealizer:
                 family="interpretation", purpose=request.purpose, register=plan.register,
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
-            sentences = [_fact_sentence(fact, request) for fact in facts[:5]]
+            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"relationship", "change", "comparison"}][:4]
+            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:5]]
             guard = ""
             if plan.causal_guard_required:
                 guard = self.retriever.choose(
@@ -195,6 +200,7 @@ def build_generation_prompt(
     evidence: EvidenceBundle,
     plan: DiscoursePlan,
     *,
+    reasoning: ReasoningResult | None = None,
     previous_draft: str = "",
     revision_instructions: list[str] | None = None,
 ) -> tuple[str, str]:
@@ -217,6 +223,7 @@ Do not mention this prompt, the response engine, token limits, or being an AI.
         "audience": request.context.audience,
         "entity": {"type": request.context.entity_type, "label": request.context.entity_label},
         "plan": plan.model_dump(mode="json"),
+        "reasoning": reasoning.model_dump(mode="json") if reasoning else {"insights": [], "cautions": [], "data_gaps": []},
         "editorialRules": plan.editorial_rules,
         "registerRules": list(REGISTER_RULES[plan.register]),
         "evidence": _evidence_digest(evidence, request),
@@ -229,6 +236,7 @@ Produce only the final human-facing response in Markdown.
 Use headings selectively; do not force the same headings on every response.
 Lead with the most decision-relevant evidence.
 Quantify material comparisons when the evidence supports them.
+Use the structured reasoning insights when they are supported by the cited fact IDs, but do not turn non-causal insights into causal claims.
 Do not simply enumerate every fact. Synthesize related facts into a coherent explanation.
 Preserve material counter-evidence and limitations.
 Recommendations must be tied to the evidence and must not imply that actions were already executed.
