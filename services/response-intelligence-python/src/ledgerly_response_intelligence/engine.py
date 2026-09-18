@@ -17,7 +17,8 @@ from .models import (
 from .planner import DiscoursePlanner
 from .providers.base import GenerationProvider
 from .providers.factory import build_provider
-from .reasoning import ReasoningEngine\nfrom .realization import (
+from .reasoning import ReasoningEngine
+from .realization import (
     DeterministicRealizer,
     build_generation_prompt,
     clean_response,
@@ -42,11 +43,13 @@ class ResponseIntelligenceEngine:
         self.provider = provider if provider is not None else build_provider(settings)
         self.tool_broker = tool_broker or DisabledToolBroker()
         self.planner = DiscoursePlanner()
+        self.reasoner = ReasoningEngine()
         self.realizer = DeterministicRealizer()
         self.critic = ResponseCritic()
 
     async def respond(self, request: ResponseRequest) -> ResponseResult:
         evidence = merge_evidence(request.evidence, request.semantic_payload)
+        reasoning = self.reasoner.derive(request, evidence)
         plan = self.planner.build(request, evidence)
         tool_events: list[dict[str, Any]] = []
 
