@@ -8,6 +8,7 @@ import { buildLightToolRegistry } from "./light-tool-registry.js";
 import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOptions } from "./quick-commands.js";
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
+import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -30,6 +31,8 @@ agenticLightRoutes.get("/chat-studio/reference-options",requireScope("school:rea
  return c.json({data:await searchQuickReferenceOptions(c.env.FINANCE_DB,p.organizationId,field,q,limit,{env:c.env,principal:p,agent,registry})});
 });
 
+
+agenticLightRoutes.get("/chat-studio/response-intelligence",requireScope("school:read"),async c=>c.json({data:{stats:responseLibraryStats(),registers:Object.keys(RESPONSE_LIBRARY.registers),paragraphPatterns:RESPONSE_LIBRARY.paragraphPatterns.length,bannedBoilerplate:RESPONSE_LIBRARY.bannedBoilerplate.length}}));
 
 agenticLightRoutes.get("/chat-studio/analysis-guidance",requireScope("school:read"),async c=>{
  const p=c.get("principal"),key=c.req.query("agentKey")||"headteacher",mode=(c.req.query("mode")==="account-for"?"account-for":"analyse") as AnalysisMode,q=String(c.req.query("q")||"");
