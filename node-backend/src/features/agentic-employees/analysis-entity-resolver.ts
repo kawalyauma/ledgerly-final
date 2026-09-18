@@ -30,7 +30,7 @@ export async function searchAnalysisEntities(db:D1Database,organizationId:string
   if(allowed&&!allowed.has(spec.type)&&!(spec.type==="staff"&&allowed.has("teacher")))continue;
   try{
    const expressions=spec.whereColumns.map(column=>`lower(coalesce(${column},'')) LIKE lower(?)`);
-   if(spec.fullNameColumns?.length)expressions.push(`lower(trim(${spec.fullNameColumns.map(column=>`coalesce(${column},'')`).join(" || ' ' || ")})) LIKE lower(?)`);
+   if(spec.fullNameColumns?.length){const joined=spec.fullNameColumns.map(column=>`coalesce(${column},'')`).join(" || ' ' || ");expressions.push(`lower(trim(replace(${joined},'  ',' '))) LIKE lower(?)`);}
    const conditions=expressions.join(" OR ");
    const args=expressions.map(()=>`%${needle}%`);
    const rows=await db.prepare(`SELECT ${spec.select} FROM ${spec.table} WHERE organization_id=? AND (${conditions}) LIMIT 6`).bind(organizationId,...args).all<any>();
