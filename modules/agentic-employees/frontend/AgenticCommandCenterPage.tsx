@@ -18,6 +18,10 @@ type CommandCatalog={commands:CommandDescriptor[];stats:{toolCount:number;comman
 type RunResponse={prepared:boolean;result:unknown;assistantMessage?:{content:string};command:CommandDescriptor};
 type OutputFormat="table"|"json"|"csv"|"xlsx"|"pdf"|"approval";
 type HistoryItem={id:string;command:string;agent:string;format:string;when:string;prepared:boolean;result:unknown};
+type AnalysisMode="analyse"|"account-for";
+type AnalysisTopic={id:string;label:string;category:string;description:string;entityTypes:string[];evidence:string[];questions:string[];examples:string[];supported?:boolean;supportHits?:number};
+type AnalysisEntity={id:string;type:string;label:string;subtitle:string;referenceKey:string;score:number;metadata?:Record<string,unknown>};
+type AnalysisGuidance={mode:AnalysisMode;topics:AnalysisTopic[];categories:string[];entityTypes:string[];stats:{knowledgeTopics:number;readCapabilities:number}};
 
 const FORMAT_META:Record<string,{label:string;icon:typeof Table2;hint:string}>={
   table:{label:"Interactive table",icon:Table2,hint:"Best for browsing records on screen"},
@@ -26,6 +30,25 @@ const FORMAT_META:Record<string,{label:string;icon:typeof Table2;hint:string}>={
   xlsx:{label:"Excel",icon:FileSpreadsheet,hint:"Formatted workbook download"},
   pdf:{label:"PDF",icon:FileText,hint:"Printable report snapshot"},
   approval:{label:"Approval workflow",icon:ShieldCheck,hint:"Write commands are reviewed before execution"},
+};
+
+const ANALYSE_COMMAND:CommandDescriptor={
+  toolName:"__guided_analyse__",
+  command:"analyse",
+  aliases:["analyze","analysis","investigate","study pattern","compare evidence","find causes","diagnose trend"],
+  description:"Guided evidence analysis across Ledgerly. The system suggests supported investigation areas, resolves entities and builds a fresh evidence plan.",
+  module:"agentic",group:"guided analysis",kind:"analysis",source:"native",readOnly:true,schemaCoverage:"dynamic-evidence-planner",
+  fields:[{name:"prompt",requestKey:"prompt",label:"What should Ledgerly analyse?",control:"textarea",required:true,location:"meta",notes:"Choose a suggested area or describe your own question. The investigation plan is built from live evidence."}],
+  outputFormats:["table","json","csv","xlsx","pdf"],
+};
+const ACCOUNT_FOR_COMMAND:CommandDescriptor={
+  toolName:"__guided_account_for__",
+  command:"account for",
+  aliases:["explain","explain why","account for","investigate why","why did","reason for","explain outcome"],
+  description:"Evidence-based explanation of an outcome. Ledgerly tests competing explanations, counter-evidence and missing evidence instead of inventing causes.",
+  module:"agentic",group:"guided explanation",kind:"analysis",source:"native",readOnly:true,schemaCoverage:"dynamic-evidence-explanation",
+  fields:[{name:"prompt",requestKey:"prompt",label:"What outcome should Ledgerly account for?",control:"textarea",required:true,location:"meta",notes:"Name the outcome or problem. Add a person, class, account or other entity when relevant."}],
+  outputFormats:["table","json","csv","xlsx","pdf"],
 };
 
 const COMPOSITE_COMMAND:CommandDescriptor={
@@ -85,7 +108,7 @@ export function AgenticCommandCenterPage(){
   const kinds=useMemo(()=>[...new Set((catalog?.commands||[]).map(c=>c.kind))].sort(),[catalog]);
   const matches=useMemo(()=>{
     const needle=search.trim().replace(/^\//,"").toLowerCase();
-    return [COMPOSITE_COMMAND,...(catalog?.commands||[])]
+    return [ANALYSE_COMMAND,ACCOUNT_FOR_COMMAND,COMPOSITE_COMMAND,...(catalog?.commands||[])]
       .filter(c=>moduleFilter==="all"||c.module===moduleFilter)
       .filter(c=>kindFilter==="all"||c.kind===kindFilter)
       .map(c=>({c,score:scoreCommand(c,needle)}))
@@ -99,6 +122,10 @@ export function AgenticCommandCenterPage(){
     const defaults:Record<string,unknown>={};
     for(const field of command.fields)if(field.defaultValue!==undefined)defaults[field.name]=field.defaultValue==="$today"?new Date().toISOString().slice(0,10):field.defaultValue;
     if(command.toolName==="__composite_report__")defaults.prompt=search.trim().replace(/^\//,"");
+    if(command.toolName==="__guided_analyse__"||command.toolName==="__guided_account_for__"){
+      const raw=search.trim().replace(/^\//,"");
+      defaults.prompt=raw.replace(command.toolName==="__guided_analyse__"?/^analy[sz]e\s*/i:/^account\s+for\s*/i,"");
+    }
     setValues(defaults);
     setFormat((command.outputFormats?.[0]||(command.readOnly?"table":"approval")) as OutputFormat);
   }
@@ -122,7 +149,19 @@ export function AgenticCommandCenterPage(){
     setRunning(true);setError("");setResult(null);setPrepared(false);
     try{
       const conversation=await ensureConversation();
-      if(selected.toolName==="__composite_report__"){
+      if(selected.toolName==="__guided_analyse__"||selected.toolName==="__guided_account_for__"){
+        const mode:AnalysisMode=selected.toolName==="__guided_account_for__"?"account-for":"analyse";
+        const guided=await post<any>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/guided-analysis",{
+          mode,prompt:String(values.prompt||""),topicId:values.topicId||null,entity:values.entity||null,outputFormat:format
+        });
+        setResult(guided);setPrepared(false);
+        if(guided?.needsEntity){
+          setValues(v=>({...v,entityQuery:guided.entityQuery||v.entityQuery,serverEntityOptions:guided.entityOptions||[]}));
+          setStep(1);
+        }else setStep(3);
+        setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:false,result:guided},...h].slice(0,20));
+        if(!guided?.needsEntity&&!guided?.needsCriteria&&["csv","xlsx","pdf"].includes(format))exportResult(guided,format,selected.command);
+      }else if(selected.toolName==="__composite_report__"){
         const composite=await post<any>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/composite-report",{prompt:String(values.prompt||""),outputFormat:format});
         setResult(composite);setPrepared(false);setStep(3);
         setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:false,result:composite},...h].slice(0,20));
@@ -189,7 +228,9 @@ export function AgenticCommandCenterPage(){
 
           {step===1&&<div className="acc-panel">
             {criteria.length>0&&<section><div className="acc-section-title"><Search size={16}/><div><b>Query criteria</b><small>Optional filters narrow the data before Ledgerly runs the query.</small></div></div><div className="acc-fields">{criteria.map(f=><Field key={f.name} field={f} value={values[f.name]} agentKey={agentKey} onChange={v=>setValues(x=>({...x,[f.name]:v}))}/>)}</div></section>}
-            {inputs.length>0&&<section><div className="acc-section-title"><Database size={16}/><div><b>{selected.readOnly?"Command inputs":"Validated action details"}</b><small>{selected.readOnly?"Choose any records or required context.":"Writes are validated now and still require approval before Ledgerly changes data."}</small></div></div><div className="acc-fields">{inputs.map(f=><Field key={f.name} field={f} value={values[f.name]} agentKey={agentKey} onChange={v=>setValues(x=>({...x,[f.name]:v}))}/>)}</div></section>}
+            {(selected.toolName==="__guided_analyse__"||selected.toolName==="__guided_account_for__")?
+              <GuidedAnalysisBuilder mode={selected.toolName==="__guided_account_for__"?"account-for":"analyse"} agentKey={agentKey} values={values} onChange={patch=>setValues(x=>({...x,...patch}))}/>:
+              inputs.length>0&&<section><div className="acc-section-title"><Database size={16}/><div><b>{selected.readOnly?"Command inputs":"Validated action details"}</b><small>{selected.readOnly?"Choose any records or required context.":"Writes are validated now and still require approval before Ledgerly changes data."}</small></div></div><div className="acc-fields">{inputs.map(f=><Field key={f.name} field={f} value={values[f.name]} agentKey={agentKey} onChange={v=>setValues(x=>({...x,[f.name]:v}))}/>)}</div></section>}
             {!criteria.length&&!inputs.length&&<div className="acc-ready-card"><Sparkles size={24}/><b>No extra criteria required</b><span>This command can run immediately using your current organization and permissions.</span></div>}
             <div className="acc-actions"><button className="acc-primary" onClick={()=>setStep(2)}>Continue to output <ArrowRight size={15}/></button></div>
           </div>}
@@ -234,7 +275,7 @@ function Welcome({catalog}:{catalog:CommandCatalog|null}){return <div className=
   <span className="acc-welcome-icon"><Command size={30}/></span>
   <p>COMMAND-DRIVEN OPERATIONS</p><h2>Start with <code>/</code> and tell Ledgerly what you want to do.</h2>
   <span>This is not a raw developer shell. It discovers permitted business capabilities, asks for safe criteria and inputs, validates references, lets you choose the output, and routes writes through approval.</span>
-  <div className="acc-example-grid">{["/create student","/open class","/report fee balances","/find staff attendance","/list subjects","/composite report"].map(x=><code key={x}>{x}</code>)}</div>
+  <div className="acc-example-grid">{["/analyse","/account for","/composite report","/create student","/report fee balances","/find staff attendance"].map(x=><code key={x}>{x}</code>)}</div>
   <div className="acc-welcome-stats"><b>{catalog?.stats.toolCount??"Hundreds of"} live tools</b><span>expanded into {catalog?.stats.commandCount??"many"} searchable command phrases.</span></div>
 </div>;}
 
