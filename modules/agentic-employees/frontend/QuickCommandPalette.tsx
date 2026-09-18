@@ -71,7 +71,7 @@ export const QuickCommandPalette=forwardRef<QuickCommandPaletteHandle,Props>(fun
       <div className="acs-command-results">{matches.map((match,index)=><button key={match.command.toolName} className={index===0?"active":""} onMouseDown={e=>e.preventDefault()} onClick={()=>choose(match)}>
         <span className="acs-command-slash">/</span><span className="acs-command-copy"><b>{match.alias}</b><small>{match.command.module} · {match.command.group} · {match.command.readOnly?"read":"approval required"}</small></span><span className="acs-command-kind">{match.command.kind}</span><ChevronRight size={14}/>
       </button>)}</div>
-      <div className="acs-command-help"><span>↑↓ browse</span><span>Enter select</span><span>Esc close</span><span>Fuzzy search works after /</span></div>
+      <div className="acs-command-help"><span>Enter selects the first match</span><span>Click any result</span><span>Fuzzy search works after /</span></div>
     </div>}
 
     {selected&&<div className="acs-command-backdrop" role="dialog" aria-modal="true" aria-label={`Quick command /${chosenAlias||selected.command}`}>
