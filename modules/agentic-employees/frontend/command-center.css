@@ -43,3 +43,6 @@
 .acc-confidence{font-size:9px;line-height:1.5;color:#6b7788;border-left:3px solid #d8dee8;padding:5px 8px}.acc-supporting-title{margin-top:4px}
 @media(max-width:900px){.acc-topic-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.acc-analysis-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.acc-topic-grid,.acc-entity-options,.acc-analysis-metrics{grid-template-columns:1fr}}
+
+.acc-human-response{white-space:pre-wrap;font-size:11px;line-height:1.68;color:#2f3c4f;background:#fff;border:1px solid #dfe6ee;border-radius:11px;padding:13px 14px}
+.acc-human-response::first-line{font-weight:600}
