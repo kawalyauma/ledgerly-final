@@ -79,6 +79,11 @@ const NOUN_OVERRIDES:Record<string,string>={
   students:"student",guardians:"guardian",staff:"staff member",positions:"staff position",classes:"class",streams:"stream",subjects:"subject",
   departments:"department",terms:"term",accounts:"account",journals:"journal",contacts:"contact",products:"product",documents:"document",
 };
+const ENTITY_SYNONYMS:Record<string,string[]>={
+  student:["student","learner","pupil"],guardian:["guardian","parent"],"academic year":["academic year","school year","year"],
+  "staff member":["staff member","staff","employee","worker"],"class level":["class level","grade level"],stream:["stream","section"],
+  subject:["subject","school subject"],department:["department","unit"],term:["term","school term"],class:["class"],
+};
 const PATH_REFERENCE:Record<string,string>={
   students:"studentId",guardians:"guardianId",staff:"staffId",classes:"classId",classlevels:"classLevelId",streams:"streamId",subjects:"subjectId",
   academicyears:"academicYearId",terms:"termId",departments:"departmentId",positions:"positionId",accounts:"accountId",contacts:"contactId",products:"productId",
@@ -119,10 +124,11 @@ function aliasesFor(tool:LightToolDescriptor){
   values.add(canonical);for(const a of tool.aliases||[])values.add(human(a));
   const queryIsCollection=tool.kind==="query"&&!/:([A-Za-z0-9_]+)/.test(tool.pathTemplate||"")&&(/^list_/.test(tool.name)||!/^get_/.test(tool.name));
   const verbs=queryIsCollection?["view","show","find","search","list","get","check","browse","see"]:verbsFor(tool.kind);
-  for(const verb of verbs)values.add(`${verb} ${noun}`);
-  if(tool.kind==="create"){values.add(`add new ${entity}`);values.add(`create new ${entity}`);}
-  if(tool.kind==="query"&&!queryIsCollection){values.add(`open ${entity} record`);values.add(`search ${entity} records`);}
-  return[...values].map(v=>v.toLowerCase().replace(/\s+/g," ").trim()).filter(v=>v.length>1&&v.length<100).slice(0,18);
+  const variants=ENTITY_SYNONYMS[entity]||ENTITY_SYNONYMS[noun]||[noun];
+  for(const variant of variants)for(const verb of verbs)values.add(`${verb} ${variant}`);
+  if(tool.kind==="create")for(const variant of ENTITY_SYNONYMS[entity]||[entity]){values.add(`add new ${variant}`);values.add(`create new ${variant}`);}
+  if(tool.kind==="query"&&!queryIsCollection)for(const variant of ENTITY_SYNONYMS[entity]||[entity]){values.add(`open ${variant} record`);values.add(`search ${variant} records`);}
+  return[...values].map(v=>v.toLowerCase().replace(/\s+/g," ").trim()).filter(v=>v.length>1&&v.length<100).slice(0,30);
 }
 function canonicalFor(tool:LightToolDescriptor){
   const entity=entityFor(tool);
