@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.4.0",
-  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, output selection, governed writes and professional exports.",
+  "version": "2.5.0",
+  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, response intelligence, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -166,7 +166,21 @@
       "counter-evidence-analysis",
       "non-template-analysis-synthesis",
       "analysis-suggested-follow-up",
-      "43-domain-analysis-knowledge-base"
+      "43-domain-analysis-knowledge-base",
+      "response-intelligence-engine",
+      "separate-language-realization-layer",
+      "300-plus-curated-language-fragments",
+      "million-scale-compositional-response-space",
+      "seeded-discourse-variation",
+      "human-report-realization",
+      "human-analysis-realization",
+      "human-light-mode-replies",
+      "response-fingerprinting",
+      "anti-template-risk-detection",
+      "causal-uncertainty-language",
+      "register-aware-writing",
+      "conversation-aware-anti-repetition",
+      "python-response-library-auditor"
     ]
   }
 }
