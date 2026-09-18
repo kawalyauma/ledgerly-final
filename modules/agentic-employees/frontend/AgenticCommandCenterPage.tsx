@@ -279,6 +279,76 @@ function Welcome({catalog}:{catalog:CommandCatalog|null}){return <div className=
   <div className="acc-welcome-stats"><b>{catalog?.stats.toolCount??"Hundreds of"} live tools</b><span>expanded into {catalog?.stats.commandCount??"many"} searchable command phrases.</span></div>
 </div>;}
 
+
+function GuidedAnalysisBuilder({mode,agentKey,values,onChange}:{mode:AnalysisMode;agentKey:string;values:Record<string,unknown>;onChange:(patch:Record<string,unknown>)=>void}){
+  const[guidance,setGuidance]=useState<AnalysisGuidance|null>(null);
+  const[topicSearch,setTopicSearch]=useState("");
+  const[entitySearch,setEntitySearch]=useState(String(values.entityQuery||""));
+  const[entityOptions,setEntityOptions]=useState<AnalysisEntity[]>(Array.isArray(values.serverEntityOptions)?values.serverEntityOptions as AnalysisEntity[]:[]);
+  const[loadingTopics,setLoadingTopics]=useState(false);
+  const[loadingEntities,setLoadingEntities]=useState(false);
+  const selectedTopic=guidance?.topics.find(t=>t.id===String(values.topicId||""))||null;
+  useEffect(()=>{const t=window.setTimeout(()=>{void loadGuidance();},120);return()=>window.clearTimeout(t);},[mode,agentKey,topicSearch]);
+  useEffect(()=>{if(Array.isArray(values.serverEntityOptions))setEntityOptions(values.serverEntityOptions as AnalysisEntity[]);},[values.serverEntityOptions]);
+  useEffect(()=>{const t=window.setTimeout(()=>{if(entitySearch.trim().length>=2)void loadEntities();else if(!values.serverEntityOptions)setEntityOptions([]);},180);return()=>window.clearTimeout(t);},[entitySearch,selectedTopic?.id,agentKey]);
+
+  async function loadGuidance(){
+    setLoadingTopics(true);
+    try{
+      const data=await get<AnalysisGuidance>("/agentic-employees/chat-studio/analysis-guidance?agentKey="+encodeURIComponent(agentKey)+"&mode="+encodeURIComponent(mode)+"&q="+encodeURIComponent(topicSearch));
+      setGuidance(data);
+      if(!values.topicId&&topicSearch&&data.topics.length===1)onChange({topicId:data.topics[0]!.id});
+    }catch{}finally{setLoadingTopics(false);}
+  }
+  async function loadEntities(){
+    setLoadingEntities(true);
+    try{
+      const types=selectedTopic?.entityTypes?.join(",")||"";
+      const data=await get<AnalysisEntity[]>("/agentic-employees/chat-studio/entity-options?q="+encodeURIComponent(entitySearch)+"&types="+encodeURIComponent(types)+"&limit=24");
+      setEntityOptions(data);
+    }catch{setEntityOptions([]);}finally{setLoadingEntities(false);}
+  }
+  function chooseTopic(topic:AnalysisTopic){
+    onChange({topicId:topic.id,entity:null,entityQuery:"",serverEntityOptions:[]});
+    setEntitySearch("");setEntityOptions([]);
+  }
+  function chooseEntity(entity:AnalysisEntity){
+    onChange({entity,entityQuery:entity.label,serverEntityOptions:[]});
+    setEntitySearch(entity.label);setEntityOptions([]);
+  }
+  const topics=guidance?.topics||[];
+  return <section className="acc-analysis-builder">
+    <div className="acc-section-title"><Sparkles size={16}/><div><b>{mode==="account-for"?"Guided explanation":"Guided analysis"}</b><small>{mode==="account-for"?"Choose what kind of outcome you want explained. Ledgerly will test evidence and competing explanations.":"Choose an investigation area so Ledgerly knows which evidence families to consider before planning the analysis."}</small></div></div>
+
+    <div className="acc-analysis-search">
+      <Search size={14}/><input value={topicSearch} onChange={e=>setTopicSearch(e.target.value)} placeholder="Search supported analysis: attendance, fees, lesson delivery, payroll, cash, books…"/>
+      {loadingTopics&&<Activity className="spin" size={14}/>}
+    </div>
+
+    <div className="acc-topic-grid">
+      {topics.slice(0,18).map(topic=><button type="button" key={topic.id} className={String(values.topicId||"")===topic.id?"active":""} onClick={()=>chooseTopic(topic)}>
+        <b>{topic.label}</b><small>{topic.category}</small><span>{topic.description}</span>
+      </button>)}
+    </div>
+    {guidance&&<div className="acc-analysis-count">{guidance.stats.knowledgeTopics} guided topics matched · {guidance.stats.readCapabilities} live read capabilities available</div>}
+
+    {selectedTopic&&<div className="acc-topic-detail">
+      <div><b>{selectedTopic.label}</b><span>{selectedTopic.description}</span></div>
+      <div className="acc-evidence-cloud">{selectedTopic.evidence.slice(0,10).map(item=><span key={item}>{item}</span>)}</div>
+      <div className="acc-example-row">{selectedTopic.examples.slice(0,3).map(example=><button type="button" key={example} onClick={()=>onChange({prompt:example})}>{example}</button>)}</div>
+    </div>}
+
+    <div className="acc-analysis-entity">
+      <label><b>Entity / record <em>optional</em></b><small>Enter a person, account, class, subject, department or other Ledgerly record. The resolver identifies its actual type instead of guessing.</small></label>
+      <div className="acc-analysis-search"><Search size={14}/><input value={entitySearch} onChange={e=>{setEntitySearch(e.target.value);onChange({entity:null,entityQuery:e.target.value,serverEntityOptions:[]});}} placeholder="e.g. Mukisa Abraham, Mathematics, P6, School Fees Receivable…"/>{loadingEntities&&<Activity className="spin" size={14}/>}</div>
+      {values.entity&&<div className="acc-resolved-entity"><Check size={14}/><span><b>{(values.entity as AnalysisEntity).label}</b><small>{(values.entity as AnalysisEntity).type} · {(values.entity as AnalysisEntity).subtitle}</small></span><button type="button" onClick={()=>{onChange({entity:null,entityQuery:""});setEntitySearch("");}}>Change</button></div>}
+      {!values.entity&&entityOptions.length>0&&<div className="acc-entity-options">{entityOptions.slice(0,10).map(entity=><button type="button" key={entity.type+":"+entity.id} onClick={()=>chooseEntity(entity)}><b>{entity.label}</b><span>{entity.type}</span><small>{entity.subtitle}</small></button>)}</div>}
+    </div>
+
+    <label className="acc-field acc-field-wide"><span><b>{mode==="account-for"?"Outcome / explanation request":"Analysis request"} *</b><small>Write naturally. The evidence plan and final structure are generated from the request and the data actually found.</small></span><textarea rows={4} value={String(values.prompt||"")} onChange={e=>onChange({prompt:e.target.value})} placeholder={mode==="account-for"?"e.g. Account for Mukisa Abraham failing to achieve Division 1":"e.g. Analyse chronic absenteeism among P6 learners this term"}/></label>
+  </section>;
+}
+
 function Field({field,value,onChange,agentKey}:{field:CommandField;value:unknown;onChange:(v:unknown)=>void;agentKey:string}){
   if(field.control==="reference")return <ReferenceField field={field} value={value} onChange={onChange} agentKey={agentKey}/>;
   if(field.control==="boolean")return <label className="acc-field acc-check"><span><b>{field.label}{field.required&&" *"}</b><small>{field.notes}</small></span><input type="checkbox" checked={Boolean(value)} onChange={e=>onChange(e.target.checked)}/></label>;
@@ -301,6 +371,8 @@ function ReferenceField({field,value,onChange,agentKey}:{field:CommandField;valu
 function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   if(value===null||value===undefined)return <div className="acc-empty"><Database size={24}/><b>No result payload</b></div>;
   const composite:any=value;if(composite?.needsCriteria&&Array.isArray(composite.questions))return <div className="acc-ready-card"><Sparkles size={24}/><b>More criteria needed</b><span>{composite.questions.join(" ")}</span></div>;
+  if(composite?.needsEntity&&Array.isArray(composite.entityOptions))return <div className="acc-ready-card"><Search size={24}/><b>Select the correct Ledgerly record</b><span>The name matched more than one record. Choose the student, teacher, staff member, account or other entity above and run again.</span></div>;
+  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} topic={composite.topic} entity={composite.entity}/>;
   if(format==="json")return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
   const rows=rowsFrom(value);
   if(!rows.length)return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
@@ -308,8 +380,25 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   return <div className="acc-table-wrap"><table><thead><tr>{columns.map(c=><th key={c}>{humanize(c)}</th>)}</tr></thead><tbody>{rows.slice(0,100).map((r,i)=><tr key={i}>{columns.map(c=><td key={c}>{cell(r[c])}</td>)}</tr>)}</tbody></table>{rows.length>100&&<div className="acc-table-note">Showing first 100 of {rows.length} rows. Export to see the complete result.</div>}</div>;
 }
 
+
+function AnalysisResult({analysis,topic,entity}:{analysis:any;topic?:AnalysisTopic|null;entity?:AnalysisEntity|null}){
+  return <div className="acc-analysis-result">
+    <header><div><small>{topic?.category||"Evidence analysis"}</small><h3>{analysis.title||topic?.label||"Ledgerly Analysis"}</h3>{entity&&<span>{entity.type}: <b>{entity.label}</b></span>}</div></header>
+    {analysis.summary&&<div className="acc-analysis-summary">{analysis.summary}</div>}
+    {Array.isArray(analysis.metrics)&&analysis.metrics.length>0&&<div className="acc-analysis-metrics">{analysis.metrics.slice(0,8).map((m:any,i:number)=><div key={i}>{typeof m==="object"?<><b>{String(m.label||m.name||"Metric")}</b><span>{String(m.value??m.result??JSON.stringify(m))}</span></>:<span>{String(m)}</span>}</div>)}</div>}
+    {Array.isArray(analysis.sections)&&analysis.sections.map((section:any,i:number)=><section key={i}><h4>{section.title||"Analysis"}</h4><p>{section.analysis}</p>{Array.isArray(section.evidence)&&section.evidence.length>0&&<div className="acc-evidence-list">{section.evidence.map((e:any,j:number)=><span key={j}>{String(e)}</span>)}</div>}</section>)}
+    {Array.isArray(analysis.findings)&&analysis.findings.length>0&&<section><h4>Evidence-backed findings</h4><div className="acc-finding-list">{analysis.findings.map((f:any,i:number)=><div key={i}>{typeof f==="object"?<><b>{String(f.title||f.finding||"Finding")}</b><span>{String(f.detail||f.analysis||f.evidence||JSON.stringify(f))}</span></>:<span>{String(f)}</span>}</div>)}</div></section>}
+    {Array.isArray(analysis.relationships)&&analysis.relationships.length>0&&<section><h4>Observed relationships</h4><div className="acc-finding-list">{analysis.relationships.map((f:any,i:number)=><div key={i}><span>{typeof f==="object"?String(f.analysis||f.relationship||JSON.stringify(f)):String(f)}</span></div>)}</div></section>}
+    {Array.isArray(analysis.limitations)&&analysis.limitations.length>0&&<section className="muted"><h4>Limits of the evidence</h4>{analysis.limitations.map((x:string,i:number)=><p key={i}>• {x}</p>)}</section>}
+    {Array.isArray(analysis.unanswered)&&analysis.unanswered.length>0&&<section className="muted"><h4>Still unanswered</h4>{analysis.unanswered.map((x:string,i:number)=><p key={i}>• {x}</p>)}</section>}
+    {Array.isArray(analysis.suggestedActions)&&analysis.suggestedActions.length>0&&<section><h4>Suggested follow-up</h4><div className="acc-finding-list">{analysis.suggestedActions.map((a:any,i:number)=><div key={i}>{typeof a==="object"?<><b>{String(a.title||a.action||"Follow-up")}</b><span>{String(a.reason||a.detail||JSON.stringify(a))}</span></>:<span>{String(a)}</span>}</div>)}</div></section>}
+    {analysis.confidenceNote&&<div className="acc-confidence">{analysis.confidenceNote}</div>}
+    {Array.isArray(analysis.rows)&&analysis.rows.length>0&&<><h4 className="acc-supporting-title">Supporting data</h4><ResultView value={{data:{rows:analysis.rows}}} format="table"/></>}
+  </div>;
+}
+
 function rowsFrom(value:unknown):Record<string,unknown>[]{
-  const v:any=value;const direct=v?.data??v?.results??v?.items??v;
+  const v:any=value;if(Array.isArray(v?.analysis?.rows)&&v.analysis.rows.length)return v.analysis.rows.map(objectRow);const direct=v?.data??v?.results??v?.items??v;
   if(Array.isArray(direct))return direct.map(objectRow);
   if(direct&&typeof direct==="object"&&Array.isArray(direct.rows))return direct.rows.map(objectRow);
   if(direct&&typeof direct==="object"){
