@@ -15,7 +15,7 @@ from .models import (
     SectionPlan,
 )
 from .retrieval import LanguageRetriever
-from .semantic import numeric_facts
+from .semantic import numeric_facts\nfrom .strategies import select_strategy
 
 
 DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -94,6 +94,14 @@ class DiscoursePlanner:
         include_recommendations = request.purpose in {
             Purpose.analysis, Purpose.account_for, Purpose.recommendation, Purpose.warning
         } and request.detail != "brief"
+        strategy = select_strategy(
+            request.purpose,
+            seed=seed,
+            has_comparison=has_comparison,
+            has_relationships=bool(relationships),
+            has_limits=include_limits,
+            deep=request.detail == "deep",
+        )
 
         sections: list[SectionPlan] = []
         top_fact_ids = [fact.fact_id for fact in facts[:12]]
@@ -166,8 +174,13 @@ class DiscoursePlanner:
                 )
             )
 
+        order_index = {section_id: index for index, section_id in enumerate(strategy.section_order)}
+        sections.sort(key=lambda section: (order_index.get(section.section_id, 999), -section.priority))
+
         rules = list(REGISTER_RULES[register])
         rules.extend(DOMAIN_RULES.get(domain, ()))
+        rules.extend(strategy.notes)
+        rules.append("Response strategy emphasis: " + ", ".join(strategy.emphasis) + ".")
         if causal_guard:
             rules.append("Do not convert association or timing into a causal claim.")
         if request.purpose == Purpose.report:
@@ -179,8 +192,9 @@ class DiscoursePlanner:
         return DiscoursePlan(
             purpose=request.purpose,
             register=register,
+            strategy_id=strategy.strategy_id,
             thesis=thesis,
-            sections=sorted(sections, key=lambda section: section.priority, reverse=True),
+            sections=sections,
             include_table=request.purpose in {Purpose.report, Purpose.comparison} and len(facts) >= 8,
             include_bullets=request.detail != "deep",
             include_limitations=include_limits,
