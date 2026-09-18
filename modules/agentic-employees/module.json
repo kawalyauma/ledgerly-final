@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.1.0",
-  "description": "Tenant-safe AI school employees with a professional Chat Studio, searchable slash quick commands, schema-driven validated forms, governed Ledgerly actions and professional PDF, DOCX, XLSX and PPTX reporting.",
+  "version": "2.2.0",
+  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -141,7 +141,16 @@
       "searchable-reference-pickers",
       "deterministic-command-validation",
       "direct-read-quick-commands",
-      "governed-write-quick-commands"
+      "governed-write-quick-commands",
+      "dedicated-agentic-command-center",
+      "query-criteria-builder",
+      "command-output-format-selector",
+      "interactive-command-results",
+      "command-csv-export",
+      "command-xlsx-export",
+      "command-pdf-export",
+      "expanded-command-synonyms",
+      "5000-route-node-capability-ceiling"
     ]
   }
 }
