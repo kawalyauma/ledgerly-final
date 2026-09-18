@@ -7,6 +7,7 @@ import { createId } from "../../../src/lib/ids";
 import { AGENTS, allowedTools, isAgentKey, type AgentDefinition, type AgentKey, type ModelTier } from "./policy";
 import { runLightAgent } from "./light-mode";
 import { buildLightToolRegistry } from "./light-tool-registry";
+import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOptions } from "./quick-commands";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 
@@ -26,6 +27,28 @@ agenticLightRoutes.get("/chat-studio/light-registry",requireScope("school:read")
  const agent=await effectiveLightAgent(c.env.FINANCE_DB,principal.organizationId,key);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
  const registry=await buildLightToolRegistry(c.env,principal,agent);
  return c.json({data:{agentKey:key,stats:registry.stats,kinds:registry.kinds,modules:registry.modules,groupsByModule:registry.groupsByModule}});
+});
+
+agenticLightRoutes.get("/chat-studio/commands",requireScope("school:read"),async c=>{
+ const principal=c.get("principal"),key=c.req.query("agentKey")||"headteacher";if(!isAgentKey(key))throw new AppError(422,"VALIDATION_ERROR","Unknown AI employee");
+ const agent=await effectiveLightAgent(c.env.FINANCE_DB,principal.organizationId,key);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const registry=await buildLightToolRegistry(c.env,principal,agent);
+ return c.json({data:buildQuickCommandCatalog(registry)});
+});
+
+agenticLightRoutes.get("/chat-studio/reference-options",requireScope("school:read"),async c=>{
+ const principal=c.get("principal"),field=String(c.req.query("field")||""),q=String(c.req.query("q")||""),limit=Number(c.req.query("limit")||20);
+ if(!field)throw new AppError(422,"VALIDATION_ERROR","Reference field is required");
+ return c.json({data:await searchQuickReferenceOptions(c.env.FINANCE_DB,principal.organizationId,field,q,limit)});
+});
+
+agenticLightRoutes.post("/chat-studio/conversations/:id/quick-command",requireScope("school:read"),async c=>{
+ const principal=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,principal.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");
+ const agent=await effectiveLightAgent(c.env.FINANCE_DB,principal.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,toolName=String(raw.toolName||"").trim(),values=raw.values&&typeof raw.values==="object"&&!Array.isArray(raw.values)?raw.values as Record<string,unknown>:{};
+ if(!toolName)throw new AppError(422,"VALIDATION_ERROR","Quick command tool is required");
+ const registry=await buildLightToolRegistry(c.env,principal,agent);
+ return c.json({data:await executeQuickCommand({db:c.env.FINANCE_DB,env:c.env,principal,agent,conversationId:thread.id,registry,toolName,values,commandText:String(raw.commandText||"")})});
 });
 
 agenticLightRoutes.post("/conversations/:id/light-messages",requireScope("school:read"),async c=>{
