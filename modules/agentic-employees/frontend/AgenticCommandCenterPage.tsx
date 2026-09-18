@@ -83,7 +83,7 @@ export function AgenticCommandCenterPage(){
     const defaults:Record<string,unknown>={};
     for(const field of command.fields)if(field.defaultValue!==undefined)defaults[field.name]=field.defaultValue==="$today"?new Date().toISOString().slice(0,10):field.defaultValue;
     setValues(defaults);
-    setFormat((command.outputFormats?.[0]||command.readOnly?"table":"approval") as OutputFormat);
+    setFormat((command.outputFormats?.[0]||(command.readOnly?"table":"approval")) as OutputFormat);
   }
 
   const criteria=selected?.fields.filter(f=>f.location==="query")||[];
