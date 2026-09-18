@@ -5,6 +5,7 @@ import {
   RefreshCcw, Send, ShieldCheck, Sparkles, X,
 } from "lucide-react";
 import { downloadFile, errorText, get, patch, post } from "../../../web/api";
+import { QuickCommandPalette, type QuickCommandPaletteHandle } from "./QuickCommandPalette";
 
 type Agent={key:string;name:string;title:string;description:string;modelTier:"luna"|"terra"|"sol";enabled:boolean;configuredTools:string[]};
 type Conversation={id:string;agentKey:string;title:string;status:string;lastMessageAt?:string;createdAt?:string};
@@ -53,6 +54,7 @@ export function AgenticChatStudioPage(){
   const[actionBusy,setActionBusy]=useState(""),[editing,setEditing]=useState(""),[drafts,setDrafts]=useState<Record<string,string>>({});
   const[liveStatus,setLiveStatus]=useState<LiveStatus|null>(null),[mode,setMode]=useState<ChatMode>("light"),[lightRegistry,setLightRegistry]=useState<LightRegistryInfo|null>(null);
   const baselineToolIds=useRef<Set<string>>(new Set());
+  const commandPaletteRef=useRef<QuickCommandPaletteHandle>(null);
   const agent=useMemo(()=>agents.find(item=>item.key===selected)||agents[0],[agents,selected]);
   const meta=agent?(AGENT_META[agent.key]||{label:"Ledgerly AI employee",initials:"AI",prompts:["What needs attention today?"]}):AGENT_META.headteacher;
   const pending=useMemo(()=>actions.filter(item=>["suggested","prepared","awaiting_approval","approved"].includes(item.status)),[actions]);
@@ -171,6 +173,8 @@ export function AgenticChatStudioPage(){
 
   function quickArtifact(format:"pdf"|"xlsx"|"pptx"){const label=format==="pdf"?"PDF report":format==="xlsx"?"Excel workbook":"PowerPoint presentation";setText(`Create a professional ${label} for me. Use a clean white background and professional black/dark text unless I specify otherwise. Include useful tables and charts where the verified Ledgerly data supports them. `);}
 
+  async function refreshAfterQuickCommand(){if(conversation)await loadConversation(conversation);}
+
   const capabilityLabel=mode==="light"?(lightRegistry?`${lightRegistry.stats.total} routed capabilities`:"Loading routed capabilities…"):`${agent?.configuredTools.length||0} advanced tools`;
 
   return <div className="acs-page">
@@ -211,9 +215,12 @@ export function AgenticChatStudioPage(){
       </section>
 
       {conversation&&conversation.status!=="closed"&&<footer className="acs-composer-wrap">
-        <div className="acs-quick"><button onClick={()=>quickArtifact("pdf")}><FileText size={14}/> PDF report</button><button onClick={()=>quickArtifact("xlsx")}><FileSpreadsheet size={14}/> Excel</button><button onClick={()=>quickArtifact("pptx")}><Presentation size={14}/> Presentation</button><button onClick={()=>setText("Analyze this using verified Ledgerly data and show the comparison in a clear table: ")}><BarChart3 size={14}/> Analyze</button></div>
-        <div className="acs-composer"><textarea value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();void send();}}} placeholder={`Message ${agent?.name||"Ledgerly AI"} in ${mode==="light"?"Light":"Advanced"} Mode…`} rows={2}/><button disabled={busy||!text.trim()} onClick={()=>void send()}><Send size={18}/><span>Send</span></button></div>
-        <div className="acs-composer-note"><ShieldCheck size={12}/>{mode==="light"?"Light Mode uses low-cost staged routing. It has the same governed Ledgerly capabilities as Advanced Mode.":"Advanced Mode uses deeper reasoning. Writes still require the same review and approval."}</div>
+        <div className="acs-quick"><button onClick={()=>quickArtifact("pdf")}><FileText size={14}/> PDF report</button><button onClick={()=>quickArtifact("xlsx")}><FileSpreadsheet size={14}/> Excel</button><button onClick={()=>quickArtifact("pptx")}><Presentation size={14}/> Presentation</button><button onClick={()=>setText("Analyze this using verified Ledgerly data and show the comparison in a clear table: ")}><BarChart3 size={14}/> Analyze</button><button onClick={()=>setText("/")}><Sparkles size={14}/> Commands</button></div>
+        <div className="acs-command-host">
+          <QuickCommandPalette ref={commandPaletteRef} agentKey={agent?.key} conversationId={conversation.id} value={text} disabled={busy||Boolean(actionBusy)} onChange={setText} onExecuted={()=>void refreshAfterQuickCommand()} onError={setError}/>
+          <div className="acs-composer"><textarea value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){if(commandPaletteRef.current?.handleEnter()){e.preventDefault();return;}e.preventDefault();void send();}}} placeholder={`Message ${agent?.name||"Ledgerly AI"} or type / for quick commands…`} rows={2}/><button disabled={busy||!text.trim()} onClick={()=>{if(text.startsWith("/")&&commandPaletteRef.current?.handleEnter())return;void send();}}><Send size={18}/><span>Send</span></button></div>
+        </div>
+        <div className="acs-composer-note"><ShieldCheck size={12}/>{mode==="light"?"Light Mode uses low-cost staged routing. Type / for validated quick commands and searchable Ledgerly pickers.":"Advanced Mode uses deeper reasoning. Type / for validated quick commands; writes still require the same review and approval."}</div>
       </footer>}
     </main>
   </div>;
