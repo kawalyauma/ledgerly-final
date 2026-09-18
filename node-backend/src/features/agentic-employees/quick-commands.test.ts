@@ -57,11 +57,24 @@ describe("Node quick command catalog",()=>{
     ]));
     const list=catalog.commands.find(item=>item.toolName==="list_classes")!,command=catalog.commands.find(item=>item.toolName==="get_class")!;
     expect(list.command).toBe("list classes");
-    expect(list.fields).toHaveLength(0);
+    expect(list.fields.find(f=>f.name==="q")).toMatchObject({location:"query",control:"text"});
+    expect(list.fields.find(f=>f.name==="limit")).toMatchObject({location:"query",control:"number"});
+    expect(list.outputFormats).toContain("xlsx");
     expect(command.command).toBe("open class");
     expect(command.aliases).toContain("open class");
-    expect(command.fields).toHaveLength(1);
-    expect(command.fields[0]).toMatchObject({name:"classId",requestKey:"id",control:"reference",required:true});
+    expect(command.fields.find(f=>f.location==="path")).toMatchObject({name:"classId",requestKey:"id",control:"reference",required:true});
+  });
+
+  it("adds school-aware query criteria and professional report output choices",()=>{
+    const command=buildQuickCommandCatalog(registry([route({
+      name:"attendance_report",kind:"report",module:"attendance",group:"reports",method:"GET",
+      pathTemplate:"/api/v1/school/attendance/reports/class",readOnly:true,aliases:["attendance report"],
+    })])).commands[0]!;
+    expect(command.fields.find(f=>f.name==="from")).toMatchObject({location:"query",control:"date"});
+    expect(command.fields.find(f=>f.name==="to")).toMatchObject({location:"query",control:"date"});
+    expect(command.fields.find(f=>f.name==="classId")).toMatchObject({location:"query",control:"reference"});
+    expect(command.fields.find(f=>f.name==="academicYearId")).toMatchObject({location:"query",control:"reference"});
+    expect(command.outputFormats).toEqual(expect.arrayContaining(["table","json","csv","xlsx","pdf"]));
   });
 
   it("turns future entity ID inputs into searchable reference controls without a hard-coded form",()=>{
