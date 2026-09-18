@@ -372,14 +372,18 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   if(value===null||value===undefined)return <div className="acc-empty"><Database size={24}/><b>No result payload</b></div>;
   const composite:any=value;if(composite?.needsCriteria&&Array.isArray(composite.questions))return <div className="acc-ready-card"><Sparkles size={24}/><b>More criteria needed</b><span>{composite.questions.join(" ")}</span></div>;
   if(composite?.needsEntity&&Array.isArray(composite.entityOptions))return <div className="acc-ready-card"><Search size={24}/><b>Select the correct Ledgerly record</b><span>The name matched more than one record. Choose the student, teacher, staff member, account or other entity above and run again.</span></div>;
-  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} humanResponse={composite.humanResponse} topic={composite.topic} entity={composite.entity}/>;
   if(format==="json")return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
+  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} humanResponse={composite.humanResponse} topic={composite.topic} entity={composite.entity}/>;
+  if(composite?.humanResponse)return <div className="acc-human-report"><div className="acc-human-response">{String(composite.humanResponse)}</div><TableResult value={value}/></div>;
+  return <TableResult value={value}/>;
+}
+
+function TableResult({value}:{value:unknown}){
   const rows=rowsFrom(value);
   if(!rows.length)return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
   const columns=[...new Set(rows.flatMap(r=>Object.keys(r)))].slice(0,14);
   return <div className="acc-table-wrap"><table><thead><tr>{columns.map(c=><th key={c}>{humanize(c)}</th>)}</tr></thead><tbody>{rows.slice(0,100).map((r,i)=><tr key={i}>{columns.map(c=><td key={c}>{cell(r[c])}</td>)}</tr>)}</tbody></table>{rows.length>100&&<div className="acc-table-note">Showing first 100 of {rows.length} rows. Export to see the complete result.</div>}</div>;
 }
-
 
 function AnalysisResult({analysis,humanResponse,topic,entity}:{analysis:any;humanResponse?:string;topic?:AnalysisTopic|null;entity?:AnalysisEntity|null}){
   return <div className="acc-analysis-result">
@@ -420,7 +424,7 @@ function exportResult(value:unknown,format:OutputFormat,command:string){
     const csvRows=rows.length?rows:analysis?[
       {section:"Human response",content:humanResponse||String(analysis.summary||"")},
       ...(Array.isArray(analysis.sections)?analysis.sections.map((s:any)=>({section:String(s.title||"Analysis"),content:String(s.analysis||"")})):[])
-    ]:[];
+    ]:humanResponse?[{section:"Report",content:humanResponse}]:[];
     const columns=[...new Set(csvRows.flatMap((r:any)=>Object.keys(r)))];const csv=[columns.join(","),...csvRows.map((r:any)=>columns.map(c=>csvCell(r[c])).join(","))].join("\n");downloadBlob(csv,"text/csv;charset=utf-8",filename+".csv");return;
   }
   if(format==="xlsx"){
@@ -435,18 +439,21 @@ function exportResult(value:unknown,format:OutputFormat,command:string){
       ];
       XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(narrative),"Analysis");
       if(rows.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Supporting Data");
+    }else if(humanResponse){
+      XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet([{section:"Report",content:humanResponse}]),"Report");
+      if(rows.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Data");
     }else XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),"Results");
     XLSX.writeFile(wb,filename+".xlsx");return;
   }
   if(format==="pdf"){
-    if(analysis){
+    if(analysis||humanResponse){
       const doc=new jsPDF({orientation:"portrait"});let y=16;const margin=14,width=182;
-      doc.setFontSize(16);doc.text(String(analysis.title||humanize(command)),margin,y);y+=9;
+      doc.setFontSize(16);doc.text(String(analysis?.title||humanize(command)),margin,y);y+=9;
       const addText=(text:string,size=9,bold=false)=>{if(!text)return;doc.setFontSize(size);doc.setFont("helvetica",bold?"bold":"normal");const lines=doc.splitTextToSize(text,width);for(const line of lines){if(y>278){doc.addPage();y=16;}doc.text(line,margin,y);y+=size*.48+2;}};
-      addText(humanResponse||String(analysis.summary||""),10);y+=3;
-      for(const section of Array.isArray(analysis.sections)?analysis.sections:[]){if(y>260){doc.addPage();y=16;}addText(String(section.title||"Analysis"),11,true);addText(String(section.analysis||""),9);y+=3;}
-      if(Array.isArray(analysis.limitations)&&analysis.limitations.length){addText("Limits of the evidence",10,true);addText(analysis.limitations.map((x:string)=>"• "+x).join("\n"),8);}
-      if(analysis.confidenceNote){y+=2;addText(String(analysis.confidenceNote),8);}
+      addText(humanResponse||String(analysis?.summary||""),10);y+=3;
+      if(analysis)for(const section of Array.isArray(analysis.sections)?analysis.sections:[]){if(y>260){doc.addPage();y=16;}addText(String(section.title||"Analysis"),11,true);addText(String(section.analysis||""),9);y+=3;}
+      if(analysis&&Array.isArray(analysis.limitations)&&analysis.limitations.length){addText("Limits of the evidence",10,true);addText(analysis.limitations.map((x:string)=>"• "+x).join("\n"),8);}
+      if(analysis?.confidenceNote){y+=2;addText(String(analysis.confidenceNote),8);}
       if(rows.length){if(y>220){doc.addPage();y=16;}const columns=[...new Set(rows.flatMap(r=>Object.keys(r)))].slice(0,10);autoTable(doc,{head:[columns.map(humanize)],body:rows.slice(0,300).map(r=>columns.map(c=>cell(r[c]).slice(0,140))),startY:y+4,styles:{fontSize:6}});}
       doc.save(filename+".pdf");return;
     }
