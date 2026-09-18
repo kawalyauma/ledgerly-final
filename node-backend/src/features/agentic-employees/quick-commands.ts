@@ -157,7 +157,7 @@ function collectionSchema(path:string){
 }
 function pathFields(tool:LightToolDescriptor):QuickCommandField[]{
   const path=tool.pathTemplate||"",parts=path.split("?")[0]!.split("/").filter(Boolean),out:QuickCommandField[]=[];
-  for(let i=0;i<parts.length;i++){const part=parts[i]!;if(!part.startsWith(":"))continue;const requestKey=part.slice(1),prev=normalize(parts[i-1]||""),inferred=requestKey.toLowerCase().endsWith("id")?requestKey:(PATH_REFERENCE[prev]||`${singular(parts[i-1]||"record").replace(/\s+(.)/g,(_,x)=>x.toUpperCase())}Id`),ref=referenceKey(inferred);
+  for(let i=0;i<parts.length;i++){const part=parts[i]!;if(!part.startsWith(":"))continue;const requestKey=part.slice(1),prev=normalize(parts[i-1]||""),descriptive=requestKey.toLowerCase().endsWith("id")&&requestKey.toLowerCase()!=="id",inferred=descriptive?requestKey:(PATH_REFERENCE[prev]||`${singular(parts[i-1]||"record").replace(/\s+(.)/g,(_,x)=>x.toUpperCase())}Id`),ref=referenceKey(inferred);
     out.push({name:inferred,requestKey,label:title(inferred.replace(/Id$/,"")),control:ref?"reference":"text",required:true,location:"path",referenceKey:ref,notes:`Select the ${singular(parts[i-1]||"record")} to use.`});}
   return out;
 }
