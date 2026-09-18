@@ -5,7 +5,7 @@ import { AppError } from "../../../src/lib/errors";
 import { requireScope } from "../../../src/lib/auth";
 import { createId } from "../../../src/lib/ids";
 import { AGENTS, allowedTools, isAgentKey, type AgentDefinition, type AgentKey, type ModelTier } from "./policy";
-import { runLightAgent } from "./light-mode";
+import { runLightAgent, runCompositeReport } from "./light-mode";
 import { buildLightToolRegistry } from "./light-tool-registry";
 import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOptions } from "./quick-commands";
 
@@ -51,6 +51,21 @@ agenticLightRoutes.post("/chat-studio/conversations/:id/quick-command",requireSc
  if(!toolName)throw new AppError(422,"VALIDATION_ERROR","Quick command tool is required");
  const registry=await buildLightToolRegistry(c.env,principal,agent);
  return c.json({data:await executeQuickCommand({db:c.env.FINANCE_DB,env:c.env,principal,agent,conversationId:thread.id,registry,toolName,values,commandText:String(raw.commandText||"")})});
+});
+
+
+agenticLightRoutes.post("/chat-studio/conversations/:id/composite-report",requireScope("school:read"),async c=>{
+ const principal=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,principal.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");
+ const agent=await effectiveLightAgent(c.env.FINANCE_DB,principal.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,prompt=String(raw.prompt||"").trim();if(!prompt)throw new AppError(422,"VALIDATION_ERROR","Describe the composite report you want Ledgerly to build.");
+ const userMessageId=createId("aam");await c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'user',?,?,?)").bind(userMessageId,principal.organizationId,thread.id,prompt,principal.userId,JSON.stringify({mode:"composite-report"})).run();
+ let result;try{result=await runCompositeReport({db:c.env.FINANCE_DB,env:c.env as Env&{AI_PROVIDER_ENCRYPTION_KEY?:string},principal,agent,conversationId:thread.id,messages:[{role:"user",content:prompt}]},prompt);}catch(error){await c.env.FINANCE_DB.prepare("DELETE FROM ae_messages WHERE id=? AND organization_id=? AND conversation_id=?").bind(userMessageId,principal.organizationId,thread.id).run();throw error;}
+ const assistantMessageId=createId("aam"),summary=result.needsCriteria?"Composite report needs criteria: "+result.questions.join(" "):"Composite report completed with "+result.data.rows.length+" row(s).";
+ await c.env.FINANCE_DB.batch([
+  c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?)").bind(assistantMessageId,principal.organizationId,thread.id,summary,principal.userId,result.model||"composite-report",JSON.stringify({mode:"composite-report",plan:result.plan,sources:result.sources})),
+  c.env.FINANCE_DB.prepare("UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(thread.id,principal.organizationId),
+ ]);
+ return c.json({data:result});
 });
 
 agenticLightRoutes.post("/conversations/:id/light-messages",requireScope("school:read"),async c=>{
