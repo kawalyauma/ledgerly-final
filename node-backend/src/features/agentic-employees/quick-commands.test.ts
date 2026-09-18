@@ -39,6 +39,8 @@ describe("Node quick command catalog",()=>{
     expect(command.command).toBe("create student");
     expect(command.aliases).toContain("add student");
     expect(command.aliases).toContain("register student");
+    expect(command.aliases).toContain("create learner");
+    expect(command.aliases).toContain("add pupil");
     expect(command.aliases).toContain("create new student");
     expect(command.fields.find(f=>f.name==="firstName")?.required).toBe(true);
     expect(command.fields.find(f=>f.name==="lastName")?.required).toBe(true);
@@ -60,6 +62,15 @@ describe("Node quick command catalog",()=>{
     expect(command.aliases).toContain("open class");
     expect(command.fields).toHaveLength(1);
     expect(command.fields[0]).toMatchObject({name:"classId",requestKey:"id",control:"reference",required:true});
+  });
+
+  it("turns future entity ID inputs into searchable reference controls without a hard-coded form",()=>{
+    const tool:LightToolDescriptor={
+      name:"inspect_timetable",description:"Inspect a timetable",kind:"query",module:"academics",group:"timetable",source:"native",readOnly:true,nativeName:"inspect_timetable",aliases:["inspect timetable"],
+      parameters:{type:"object",properties:{timetableId:{type:"string"},date:{type:"string"}},required:["timetableId"]},
+    };
+    const command=buildQuickCommandCatalog(registry([tool])).commands[0]!;
+    expect(command.fields.find(f=>f.name==="timetableId")).toMatchObject({control:"reference",required:true,referenceKey:"timetableId"});
   });
 
   it("generates comfortably more than 500 searchable command phrases from a modest live route catalog",()=>{
