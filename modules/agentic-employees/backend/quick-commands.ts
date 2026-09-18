@@ -210,7 +210,7 @@ function markdown(data:any){
 async function recordQuickMessages(db:D1Database,principal:AuthPrincipal,conversationId:string,commandText:string,assistantText:string){
   const userId=createId("aam"),assistantId=createId("aam"),now=new Date().toISOString();await db.batch([
     db.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'user',?,?,?)`).bind(userId,principal.organizationId,conversationId,commandText,principal.userId,JSON.stringify({mode:"quick-command"})),
-    db.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?,?)`).bind(assistantId,principal.organizationId,conversationId,assistantText,principal.userId,"quick-command",JSON.stringify({mode:"quick-command"})),
+    db.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?)`).bind(assistantId,principal.organizationId,conversationId,assistantText,principal.userId,"quick-command",JSON.stringify({mode:"quick-command"})),
     db.prepare("UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(conversationId,principal.organizationId),
   ]);return{userMessage:{id:userId,role:"user" as const,content:commandText,createdAt:now},assistantMessage:{id:assistantId,role:"assistant" as const,content:assistantText,model:"quick-command",createdAt:now}};
 }
