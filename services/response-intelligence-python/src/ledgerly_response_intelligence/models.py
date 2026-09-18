@@ -160,6 +160,7 @@ class SectionPlan(BaseModel):
 class DiscoursePlan(BaseModel):
     purpose: Purpose
     register: Register
+    strategy_id: str = "evidence-first"
     thesis: str = ""
     sections: list[SectionPlan] = Field(default_factory=list)
     include_table: bool = False
