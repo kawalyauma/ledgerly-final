@@ -63,7 +63,7 @@ const schema = z.object({
   OPENAI_MODEL_LUNA: emptyToUndefined(z.string().min(1).optional()),
   OPENAI_MODEL_TERRA: emptyToUndefined(z.string().min(1).optional()),
   OPENAI_MODEL_SOL: emptyToUndefined(z.string().min(1).optional()),
-  AI_PROVIDER_ENCRYPTION_KEY: emptyToUndefined(z.string().min(24).optional()),
+  AI_PROVIDER_ENCRYPTION_KEY: emptyToUndefined(z.string().min(24).optional()),\n  RESPONSE_INTELLIGENCE_URL: emptyToUndefined(z.string().url().optional()),\n  RESPONSE_INTELLIGENCE_TOKEN: emptyToUndefined(z.string().min(16).optional()),\n  RESPONSE_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
 }).superRefine((value, ctx) => {
   if (value.STORAGE_DRIVER === "minio") {
     for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
