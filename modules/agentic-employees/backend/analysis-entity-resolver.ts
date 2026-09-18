@@ -1,10 +1,10 @@
 export type AnalysisEntityOption={id:string;type:string;label:string;subtitle:string;referenceKey:string;score:number;metadata?:Record<string,unknown>};
 
-type Spec={type:string;table:string;referenceKey:string;select:string;whereColumns:string[];label:(row:any)=>string;subtitle:(row:any)=>string;classify?:(row:any)=>string};
+type Spec={type:string;table:string;referenceKey:string;select:string;whereColumns:string[];fullNameColumns?:string[];label:(row:any)=>string;subtitle:(row:any)=>string;classify?:(row:any)=>string};
 const SPECS:Spec[]=[
- {type:"student",table:"school_students",referenceKey:"studentId",select:"id,admission_number AS admissionNumber,student_number AS studentNumber,first_name AS firstName,middle_name AS middleName,last_name AS lastName",whereColumns:["admission_number","student_number","first_name","middle_name","last_name"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>["Student",r.admissionNumber||r.studentNumber].filter(Boolean).join(" · ")},
- {type:"staff",table:"school_staff_profiles",referenceKey:"staffId",select:"id,staff_number AS staffNumber,first_name AS firstName,middle_name AS middleName,last_name AS lastName,is_teacher AS isTeacher",whereColumns:["staff_number","first_name","middle_name","last_name"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>[(Number(r.isTeacher)===1||r.isTeacher===true)?"Teacher":"Staff",r.staffNumber].filter(Boolean).join(" · "),classify:r=>(Number(r.isTeacher)===1||r.isTeacher===true)?"teacher":"staff"},
- {type:"guardian",table:"school_guardians",referenceKey:"guardianId",select:"id,first_name AS firstName,middle_name AS middleName,last_name AS lastName,phone_primary AS phone,email",whereColumns:["first_name","middle_name","last_name","phone_primary","email"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>["Guardian",r.phone||r.email].filter(Boolean).join(" · ")},
+ {type:"student",table:"school_students",referenceKey:"studentId",select:"id,admission_number AS admissionNumber,student_number AS studentNumber,first_name AS firstName,middle_name AS middleName,last_name AS lastName",whereColumns:["admission_number","student_number","first_name","middle_name","last_name"],fullNameColumns:["first_name","middle_name","last_name"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>["Student",r.admissionNumber||r.studentNumber].filter(Boolean).join(" · ")},
+ {type:"staff",table:"school_staff_profiles",referenceKey:"staffId",select:"id,staff_number AS staffNumber,first_name AS firstName,middle_name AS middleName,last_name AS lastName,is_teacher AS isTeacher",whereColumns:["staff_number","first_name","middle_name","last_name"],fullNameColumns:["first_name","middle_name","last_name"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>[(Number(r.isTeacher)===1||r.isTeacher===true)?"Teacher":"Staff",r.staffNumber].filter(Boolean).join(" · "),classify:r=>(Number(r.isTeacher)===1||r.isTeacher===true)?"teacher":"staff"},
+ {type:"guardian",table:"school_guardians",referenceKey:"guardianId",select:"id,first_name AS firstName,middle_name AS middleName,last_name AS lastName,phone_primary AS phone,email",whereColumns:["first_name","middle_name","last_name","phone_primary","email"],fullNameColumns:["first_name","middle_name","last_name"],label:r=>[r.firstName,r.middleName,r.lastName].filter(Boolean).join(" "),subtitle:r=>["Guardian",r.phone||r.email].filter(Boolean).join(" · ")},
  {type:"account",table:"accounts",referenceKey:"accountId",select:"id,code,name",whereColumns:["code","name"],label:r=>r.name||r.code,subtitle:r=>["Account",r.code].filter(Boolean).join(" · ")},
  {type:"class",table:"school_classes",referenceKey:"classId",select:"id,code,name",whereColumns:["code","name"],label:r=>r.name||r.code,subtitle:r=>["Class",r.code].filter(Boolean).join(" · ")},
  {type:"stream",table:"school_streams",referenceKey:"streamId",select:"id,code,name",whereColumns:["code","name"],label:r=>r.name||r.code,subtitle:r=>["Stream",r.code].filter(Boolean).join(" · ")},
@@ -18,10 +18,10 @@ const SPECS:Spec[]=[
 ];
 
 function score(q:string,row:any,spec:Spec){
- const needle=q.toLowerCase().trim(),values=spec.whereColumns.map(column=>String(row[column.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]??row[column]??"").toLowerCase()).filter(Boolean);
- if(values.some(value=>value===needle))return 100;
- if(values.some(value=>value.startsWith(needle)))return 75;
- return values.some(value=>value.includes(needle))?50:20;
+ const needle=q.toLowerCase().trim(),values=spec.whereColumns.map(column=>String(row[column.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]??row[column]??"").toLowerCase()).filter(Boolean),label=spec.label(row).toLowerCase();
+ if(label===needle||values.some(value=>value===needle))return 100;
+ if(label.startsWith(needle)||values.some(value=>value.startsWith(needle)))return 75;
+ return label.includes(needle)||values.some(value=>value.includes(needle))?50:20;
 }
 export async function searchAnalysisEntities(db:D1Database,organizationId:string,q:string,limit=24,types?:string[]){
  const needle=q.trim();if(needle.length<2)return[] as AnalysisEntityOption[];
@@ -29,8 +29,10 @@ export async function searchAnalysisEntities(db:D1Database,organizationId:string
  for(const spec of SPECS){
   if(allowed&&!allowed.has(spec.type)&&!(spec.type==="staff"&&allowed.has("teacher")))continue;
   try{
-   const conditions=spec.whereColumns.map(column=>`lower(coalesce(${column},'')) LIKE lower(?)`).join(" OR ");
-   const args=spec.whereColumns.map(()=>`%${needle}%`);
+   const expressions=spec.whereColumns.map(column=>`lower(coalesce(${column},'')) LIKE lower(?)`);
+   if(spec.fullNameColumns?.length)expressions.push(`lower(trim(${spec.fullNameColumns.map(column=>`coalesce(${column},'')`).join(" || ' ' || ")})) LIKE lower(?)`);
+   const conditions=expressions.join(" OR ");
+   const args=expressions.map(()=>`%${needle}%`);
    const rows=await db.prepare(`SELECT ${spec.select} FROM ${spec.table} WHERE organization_id=? AND (${conditions}) LIMIT 6`).bind(organizationId,...args).all<any>();
    for(const row of rows.results){
     const type=spec.classify?spec.classify(row):spec.type;
