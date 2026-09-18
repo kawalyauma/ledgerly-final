@@ -150,7 +150,7 @@ function nativeFields(tool:LightToolDescriptor):QuickCommandField[]{
 function fieldsFor(tool:LightToolDescriptor){
   if(tool.source==="native")return{fields:nativeFields(tool),coverage:"native" as const};
   const fields=pathFields(tool),schema=collectionSchema(tool.pathTemplate||"");
-  if(schema){const requiredOverride=tool.method==="POST"?undefined:false;for(const field of schema.fields){if(fields.some(x=>x.name===field.name))continue;fields.push(fieldFromSchema(field,requiredOverride));}return{fields,coverage:"curated" as const};}
+  if(schema){if(["POST","PUT","PATCH"].includes(tool.method||"")){const requiredOverride=tool.method==="POST"?undefined:false;for(const field of schema.fields){if(fields.some(x=>x.name===field.name))continue;fields.push(fieldFromSchema(field,requiredOverride));}}return{fields,coverage:"curated" as const};}
   if(!tool.readOnly)fields.push({name:"bodyJson",requestKey:"bodyJson",label:"Additional Details (JSON)",control:"json",required:false,location:"meta",notes:"Optional JSON body for routes that do not yet have a curated form schema."});
   return{fields,coverage:"generic" as const};
 }
@@ -165,7 +165,7 @@ function cleanText(value:unknown){return value===undefined||value===null?"":Stri
 function displayValue(row:Record<string,unknown>,cols:string[]){return cols.map(c=>cleanText(row[c])).filter(Boolean).join(" ").replace(/\s+/g," ").trim();}
 export async function searchQuickReferenceOptions(db:D1Database,organizationId:string,field:string,q:string,limit=20){
   const spec=REF_SPECS[normalize(field)];if(!spec)throw new AppError(422,"REFERENCE_UNSUPPORTED",`No searchable reference is configured for ${field}`);
-  const selected=[spec.valueColumn,...new Set([...spec.searchColumns,...spec.labelColumns,...spec.subtitleColumns])],safeLimit=Math.max(1,Math.min(30,Math.floor(limit)||20)),where=[`organization_id=?`],args:unknown[]=[organizationId];
+  const selected=[spec.valueColumn,...new Set([...spec.searchColumns,...spec.labelColumns,...spec.subtitleColumns])],safeLimit=Math.max(1,Math.min(30,Math.floor(limit)||20)),where=[`organization_id=?`],args:any[]=[organizationId];
   if(spec.activeColumn)where.push(`${spec.activeColumn}=true`);
   const query=q.trim();if(query){where.push(`(${spec.searchColumns.map(c=>`lower(coalesce(${c},'')) LIKE lower(?)`).join(" OR ")})`);for(let i=0;i<spec.searchColumns.length;i++)args.push(`%${query}%`);}
   args.push(safeLimit);
