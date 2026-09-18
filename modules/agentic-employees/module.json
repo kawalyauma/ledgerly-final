@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.2.0",
-  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, output selection, governed writes and professional exports.",
+  "version": "2.3.0",
+  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -150,7 +150,13 @@
       "command-xlsx-export",
       "command-pdf-export",
       "expanded-command-synonyms",
-      "5000-route-node-capability-ceiling"
+      "5000-route-node-capability-ceiling",
+      "composite-report-planner",
+      "multi-tool-read-plans",
+      "cross-module-student-joins",
+      "repeated-tool-period-comparisons",
+      "composite-report-criteria-prompts",
+      "composite-report-export"
     ]
   }
 }
