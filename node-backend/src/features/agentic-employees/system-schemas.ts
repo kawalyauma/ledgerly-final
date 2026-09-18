@@ -10,6 +10,20 @@ export type SchemaField = { name: string; type: string; required: boolean; enum?
 export type EndpointSchema = { method: string; fields: SchemaField[] };
 
 export const SYSTEM_ACTION_SCHEMAS: Record<string, EndpointSchema> = {
+  "/api/v1/school/staff-management/positions": {
+    method: "POST",
+    fields: [
+      { name: "code", type: "string", required: true, notes: "Short unique position code, e.g. STOREKEEPER." },
+      { name: "name", type: "string", required: true },
+      { name: "departmentId", type: "string (department id)", required: false },
+      { name: "campusId", type: "string (campus id)", required: false },
+      { name: "description", type: "string", required: false },
+      { name: "jobGrade", type: "string", required: false },
+      { name: "isTeaching", type: "boolean", required: false, notes: "Defaults to false." },
+      { name: "isManagement", type: "boolean", required: false, notes: "Defaults to false." },
+      { name: "active", type: "boolean", required: false, notes: "Defaults to true." },
+    ],
+  },
   "/api/v1/school/staff-management/staff": {
     method: "POST",
     fields: [
@@ -28,7 +42,25 @@ export const SYSTEM_ACTION_SCHEMAS: Record<string, EndpointSchema> = {
       { name: "isTeacher", type: "boolean", required: false, notes: "Set true to mark this staff member as a teacher. Defaults to false." },
       { name: "hireDate", type: "date (YYYY-MM-DD)", required: true, notes: "Required — there is no default. Use today's date unless told otherwise." },
       { name: "payType", type: "enum", required: false, enum: ["salary", "hourly"] },
-      { name: "basePayMinor", type: "integer (minor currency units)", required: false },
+      { name: "basePayMinor", type: "integer (minor currency units)", required: false, notes: "To change base pay for an EXISTING staff member (e.g. a raise), use PATCH /api/v1/school/staff-management/staff/:id instead — never POST /api/v1/payroll/employees, which creates an unrelated separate payroll record." },
+      { name: "notes", type: "string", required: false },
+    ],
+  },
+  "/api/v1/school/staff-management/staff/:id": {
+    method: "PATCH",
+    fields: [
+      { name: "firstName", type: "string", required: false },
+      { name: "lastName", type: "string", required: false },
+      { name: "phone", type: "string", required: false },
+      { name: "email", type: "string", required: false },
+      { name: "departmentId", type: "string (department id)", required: false },
+      { name: "positionId", type: "string (position id)", required: false },
+      { name: "campusId", type: "string (campus id)", required: false },
+      { name: "employmentType", type: "enum", required: false, enum: ["permanent", "contract", "part_time", "casual", "intern", "volunteer"] },
+      { name: "employmentStatus", type: "enum", required: false, enum: ["active", "on_leave", "suspended", "terminated", "resigned", "retired", "inactive"] },
+      { name: "isTeacher", type: "boolean", required: false },
+      { name: "payType", type: "enum", required: false, enum: ["salary", "hourly"] },
+      { name: "basePayMinor", type: "integer (minor currency units)", required: false, notes: "This is the correct field and endpoint for changing an existing staff member's base pay/salary — include only the fields being changed, not the whole record." },
       { name: "notes", type: "string", required: false },
     ],
   },
@@ -141,7 +173,16 @@ export const SYSTEM_ACTION_SCHEMAS: Record<string, EndpointSchema> = {
   },
 };
 
+function pathMatchesTemplate(template: string, actual: string) {
+  const a = template.split("/"), b = actual.split("/");
+  if (a.length !== b.length) return false;
+  return a.every((segment, i) => segment.startsWith(":") || segment === b[i]);
+}
 export function lookupSystemSchema(path: string): EndpointSchema | null {
   const clean = path.split("?")[0]!.replace(/\/$/, "");
-  return SYSTEM_ACTION_SCHEMAS[clean] || null;
+  if (SYSTEM_ACTION_SCHEMAS[clean]) return SYSTEM_ACTION_SCHEMAS[clean]!;
+  for (const [template, schema] of Object.entries(SYSTEM_ACTION_SCHEMAS)) {
+    if (template.includes(":") && pathMatchesTemplate(template, clean)) return schema;
+  }
+  return null;
 }

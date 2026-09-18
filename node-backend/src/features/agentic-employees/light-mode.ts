@@ -57,7 +57,7 @@ function parseObject<T extends Record<string, unknown>>(value: string, fallback:
   } catch { return fallback; }
 }
 
-async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number) {
+async function fetchJsonOnce<T>(url: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -66,8 +66,17 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number) {
     return { response, payload };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") throw new AppError(504, "AI_PROVIDER_TIMEOUT", "Light AI request timed out");
-    throw error;
+    const causeMessage = error instanceof Error && (error as any).cause?.message;
+    throw new AppError(502, "AI_PROVIDER_ERROR", `Could not reach the AI provider: ${causeMessage || (error instanceof Error ? error.message : String(error))}`);
   } finally { clearTimeout(timer); }
+}
+async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number) {
+  try {
+    return await fetchJsonOnce<T>(url, init, timeoutMs);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "AI_PROVIDER_ERROR") return fetchJsonOnce<T>(url, init, timeoutMs);
+    throw error;
+  }
 }
 function responseText(payload: any) {
   if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text.trim();
@@ -190,6 +199,28 @@ function requestedFormat(prompt: string): "pdf" | "docx" | "xlsx" | "pptx" | nul
   return null;
 }
 function documentNeedsData(prompt: string) { return /\b(report|statement|summary|balance|arrears|attendance|student|learner|staff|teacher|fees?|finance|academic|inventory|stock|payroll|class|collection|performance|budget|bank|journal)\b/i.test(prompt); }
+const MAX_BULK_ITEMS = 25;
+function splitNumberedItems(prompt: string): { shared: string; items: string[] } | null {
+  const lines = prompt.split(/\r?\n/);
+  const items: string[] = [], rest: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^\s*\d{1,3}[.)]\s+(.*)$/);
+    const captured = match?.[1]?.trim();
+    if (captured) items.push(captured);
+    else if (line.trim()) rest.push(line.trim());
+  }
+  if (items.length < 2) return null;
+  return { shared: rest.join("\n"), items: items.slice(0, MAX_BULK_ITEMS) };
+}
+const ACTION_SIGNAL = /\b(create|add|register|new|make|update|edit|change|rename|modify|move|delete|remove|report|statement|summary|analytics|pdf|excel|xlsx|spreadsheet|workbook|presentation|powerpoint|pptx|word|docx|print|send|message|sms|whatsapp|notify|analy[sz]e|compare|trend|check|show|find|get|list|balance|student|staff|teacher|class|fee|invoice|payment|attendance|arrears|timetable|leave|book|stock)\b/i;
+const SMALL_TALK = /^(hi|hello|hey|hiya|yo+|sup|good\s?morning|good\s?afternoon|good\s?evening|howdy|greetings|thanks?(\s?you)?|ok(ay)?|cool|nice|great|bye|goodbye|see\s?you|what'?s\s?up|how\s?are\s?you|how'?s\s?it\s?going|test)\b/i;
+function isSmallTalk(prompt: string) {
+  const value = prompt.trim().replace(/[!?.]+$/g, "");
+  if (!value) return true;
+  if (value.length > 40) return false;
+  if (ACTION_SIGNAL.test(value)) return false;
+  return SMALL_TALK.test(value);
+}
 function formatTools(tools: LightToolDescriptor[]) {
   return tools.map(tool => ({ name: tool.name, kind: tool.kind, module: tool.module, group: tool.group, source: tool.source, description: tool.description.slice(0, 220), aliases: tool.aliases.slice(0, 5) }));
 }
@@ -298,11 +329,19 @@ function validateCuratedSchema(tool: LightToolDescriptor, body: Record<string, u
   return issues;
 }
 async function prepareRouteAction(input: LightInput, tool: LightToolDescriptor, path: string, body: unknown, title: string, summary: string) {
-  const method = tool.method || "POST", payload = { agentKey: input.agent.key, method, path, body }, key = `conversation:${input.conversationId}:light:${method}:${path}:${hashText(JSON.stringify(body))}`, id = createId("aea");
+  const method = tool.method || "POST", payload = { agentKey: input.agent.key, method, path, body }, id = createId("aea");
+  let key = `conversation:${input.conversationId}:light:${method}:${path}:${hashText(JSON.stringify(body))}`;
   await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`)
     .bind(id, input.principal.organizationId, input.agent.key, "system.api.request", title.slice(0, 240), summary.slice(0, 600), scopeFor(path), JSON.stringify(payload), key).run();
-  const action = await input.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?")
-    .bind(input.principal.organizationId, key).first();
+  let action = await input.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?")
+    .bind(input.principal.organizationId, key).first<any>();
+  if (action && ["failed", "dismissed", "executed"].includes(action.status)) {
+    key = `${key}:retry:${id}`;
+    await input.db.prepare(`INSERT INTO ae_actions(id,organization_id,agent_key,action_type,title,summary,required_scope,payload_json,idempotency_key,status) VALUES(?,?,?,?,?,?,?,?,?,'suggested') ON CONFLICT(organization_id,idempotency_key) DO NOTHING`)
+      .bind(id, input.principal.organizationId, input.agent.key, "system.api.request", title.slice(0, 240), summary.slice(0, 600), scopeFor(path), JSON.stringify(payload), key).run();
+    action = await input.db.prepare("SELECT id,status,title,action_type AS actionType,required_scope AS requiredScope FROM ae_actions WHERE organization_id=? AND idempotency_key=?")
+      .bind(input.principal.organizationId, key).first<any>();
+  }
   return { prepared: true, executed: false, requiresHumanApproval: true, approvalSurface: "chat", action };
 }
 
@@ -400,6 +439,11 @@ export async function runLightAgent(input: LightInput) {
   if (!prompt) throw new AppError(422, "VALIDATION_ERROR", "A user message is required");
   const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, "luna");
   const usage = emptyUsage();
+  if (isSmallTalk(prompt)) {
+    const reply = await stage(input, "light_small_talk", () => cheapText(runtime, `You are ${input.agent.name}, ${input.agent.title} at this school, replying in Ledgerly's AI Chat. The user just sent a greeting or small talk, not a specific request: "${prompt}". Reply briefly and warmly in 1-2 sentences, and invite them to ask for a specific task. Do not claim to have done any work.`, 120));
+    addUsage(usage, "light_small_talk", reply.usage);
+    return { text: reply.text, model: runtime.model, provider: runtime.provider, providerResponseId: reply.id, usage, toolEvents: [], routing: { mode: "light", kinds: [], modules: [], selected: [] } };
+  }
   const registry = await stage(input, "light_build_registry", () => buildLightToolRegistry(input.env, input.principal, input.agent));
   let kinds = await stage(input, "light_route_type", async () => inferKinds(prompt));
   const format = requestedFormat(prompt);
@@ -446,6 +490,23 @@ export async function runLightAgent(input: LightInput) {
   }
 
   const events: Array<Record<string, unknown>> = [], executed: ToolExecution[] = [];
+
+  const bulk = kinds.includes("create") && selected.length === 1 && selected[0]!.source === "route" && selected[0]!.method === "POST" ? splitNumberedItems(prompt) : null;
+  if (bulk) {
+    const tool = selected[0]!;
+    const prepared: any[] = [];
+    const bulkIssues: string[] = [];
+    for (const item of bulk.items) {
+      const itemPrompt = `${bulk.shared}\nCreate this one specific record now: ${item}`;
+      const result = await executeSelected(input, runtime, tool, itemPrompt, [], events, usage);
+      if (result.result?.needsClarification) bulkIssues.push(...(result.result.issues || []).map((issue: string) => `"${item}": ${issue}`));
+      else prepared.push(result.result);
+    }
+    const routing = { mode: "light", kinds, modules, selected: [tool.name], registry: registry.stats, bulkCount: bulk.items.length };
+    if (bulkIssues.length) return { text: `I prepared ${prepared.length} of ${bulk.items.length} approval cards. The rest need a detail: ${[...new Set(bulkIssues)].join(" ")}`, model: runtime.model, provider: runtime.provider, providerResponseId: null, usage, toolEvents: events, routing };
+    return { text: `I've prepared ${prepared.length} approval card${prepared.length === 1 ? "" : "s"} below — one per record. Review and approve each to create them.`, model: runtime.model, provider: runtime.provider, providerResponseId: null, usage, toolEvents: events, routing };
+  }
+
   for (const tool of selected) {
     const item = await executeSelected(input, runtime, tool, prompt, executed, events, usage);
     executed.push(item);

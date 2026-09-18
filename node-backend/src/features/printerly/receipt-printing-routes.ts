@@ -26,7 +26,7 @@ const settingsSchema=z.object({
 
 export function createReceiptPrintingRoutes(runtime:Runtime){
   const r=new Hono<AppEnv>();
-  r.use('*',requireScope('documents:read'));
+  r.use('*',async(c,next)=>{if(c.req.path.includes('/node/'))return next();return requireScope('documents:read')(c,next);});
 
   r.get('/receipt-printing/settings',async c=>{
     const p=c.get('principal');

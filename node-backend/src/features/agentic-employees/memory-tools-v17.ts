@@ -1,5 +1,5 @@
 import type { ToolContext } from "./tools-v14.js";
-import { executeTool as baseExecute,openAiTools as baseTools } from "./system-tools-v16.js";
+import { executeTool as baseExecute,openAiTools as baseTools } from "./hr-native-tools.js";
 import { listRelevantMemories,saveMemory } from "./memory-service.js";
 import {generateDraft,lessonPeriodContext,listRules,matrix,validateTimetable,weekView} from "./stubs.js";
 import {syncCurriculumLoadRules} from "./stubs.js";
