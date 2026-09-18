@@ -270,6 +270,7 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
 function rowsFrom(value:unknown):Record<string,unknown>[]{
   const v:any=value;const direct=v?.data??v?.results??v?.items??v;
   if(Array.isArray(direct))return direct.map(objectRow);
+  if(direct&&typeof direct==="object"&&Array.isArray(direct.rows))return direct.rows.map(objectRow);
   if(direct&&typeof direct==="object"){
     for(const key of Object.keys(direct)){if(Array.isArray(direct[key]))return direct[key].map(objectRow);}
     return[objectRow(direct)];
