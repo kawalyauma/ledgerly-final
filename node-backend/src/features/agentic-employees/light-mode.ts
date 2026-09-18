@@ -15,7 +15,7 @@ import {
 import { resolveLightReferences } from "./light-reference-resolver.js";
 import { analysisKnowledgeSummary, getAnalysisTopic, suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { identifyAnalysisEntity, type AnalysisEntityOption } from "./analysis-entity-resolver.js";
-import { buildResponseLanguageBrief,buildResponseRealizationPrompt,cleanHumanResponse,composeFallbackHumanResponse,responseFingerprint,templateRisk } from "./response-intelligence/engine.js";
+import { buildResponseLanguageBrief,buildResponseRealizationPrompt,cleanHumanResponse,composeFallbackHumanResponse,responseFingerprint,templateRisk } from "./response-intelligence/engine.js";\nimport { realizeWithPythonResponseIntelligence } from "./response-intelligence/python-client.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type LightInput = {
@@ -467,10 +467,35 @@ export async function runLightAgent(input: LightInput) {
   const prepared = results.filter(item => item.result?.prepared && item.result?.requiresHumanApproval);
   if (prepared.length) return { text: prepared.length === 1 ? "I prepared the requested Ledgerly action. Review or edit the approval card below, then approve it when ready." : `I prepared ${prepared.length} Ledgerly actions. Review or edit the approval cards below before approving them.`, model: runtime.model, provider: runtime.provider, providerResponseId: null, usage, toolEvents: events, routing };
 
-  const recentText=input.messages.filter(message=>message.role==="assistant").slice(-3).map(message=>message.content).join("\n\n").slice(0,12000),languageBrief=buildResponseLanguageBrief({purpose:kinds.includes("analysis")?"analysis":"general",request:prompt,seed:createId("rsp"),topic:modules.join(", "),category:kinds.join(", "),detail:"standard",audience:input.agent.title||input.agent.key,recentText});
+  const recentResponses=input.messages.filter(message=>message.role==="assistant").slice(-5).map(message=>message.content),recentText=recentResponses.join("\n\n").slice(0,12000);
+  const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+    requestId:createId("rsp"),
+    purpose:kinds.includes("analysis")?"analysis":"general",
+    request:prompt,
+    semanticPayload:{results},
+    context:{
+      organizationId:input.principal.organizationId,
+      conversationId:input.conversationId,
+      actor:input.principal.role,
+      audience:input.agent.title||input.agent.key,
+      topic:modules.join(", "),
+      category:kinds.join(", "),
+      recentResponses,
+      locale:"en-UG",
+      currency:"UGX",
+    },
+    detail:"standard",
+    providerMode:"auto",
+    maxWords:900,
+  });
+  if(pythonResponse){
+    const text=cleanHumanResponse(pythonResponse.text);
+    return { text, model: pythonResponse.model||runtime.model, provider: "response-intelligence-python", providerResponseId:null, usage, toolEvents:events, routing:{...routing,responseFingerprint:pythonResponse.response_fingerprint||responseFingerprint(text),templateRisk:false,responseQuality:pythonResponse.quality,responseEngine:"python"} };
+  }
+  const languageBrief=buildResponseLanguageBrief({purpose:kinds.includes("analysis")?"analysis":"general",request:prompt,seed:createId("rsp"),topic:modules.join(", "),category:kinds.join(", "),detail:"standard",audience:input.agent.title||input.agent.key,recentText});
   const answer = await aiText(input, runtime, usage, "light_write_answer", `${languageBrief}\n\nAnswer using ONLY these verified Ledgerly results. Be concise but complete. Use a markdown table for exact comparisons when useful. Never invent missing values.\nUser request: ${prompt}\nVerified results: ${JSON.stringify(results).slice(0, 22_000)}`, 1200);
   const text=cleanHumanResponse(answer.text||"The Ledgerly lookup completed.");
-  return { text, model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing:{...routing,responseFingerprint:responseFingerprint(text),templateRisk:templateRisk(text).risk} };
+  return { text, model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing:{...routing,responseFingerprint:responseFingerprint(text),templateRisk:templateRisk(text).risk,responseEngine:"typescript-fallback"} };
 }
 
 
@@ -552,9 +577,20 @@ export async function runCompositeReport(input: LightInput, prompt: string) {
   const fallbackRows = sourcePayload.length === 1 ? compositeObjectRows(sourcePayload[0]!.result) : [];
   const compilePrompt = "Compile a structured composite report using ONLY the verified Ledgerly source results below.\nUser request: " + request + "\nPreferred join key: " + plan.joinKey + "\nVerified sources: " + JSON.stringify(sourcePayload).slice(0, 36000) + "\nReturn JSON {title,joinKey,columns,rows,summary,appliedFilters,calculations,missingData,notes}. Never invent a learner, ID, amount, mark, attendance count, date or other source fact. Join learner data by studentId whenever available; never merge people merely by matching names. Apply every numeric/comparison condition exactly. For attendance percentage calculate only from verified counts and state the formula. For academic trend compare verified current and previous performance values and state the measure. Values ending in Minor are minor-unit values; do not silently reinterpret currency scale. If a human-currency threshold cannot be compared safely, put that in missingData instead of guessing. Keep rows flat and export-friendly. Include studentId plus a human identifier/name when available. If a requested field cannot be derived, list it in missingData. Rows must contain only records satisfying the requested filters.";
   const compiled = await aiJson<CompositeCompiled>(input, runtime, usage, "composite_compile", compilePrompt, { title: "Composite Ledgerly Report", joinKey: plan.joinKey, columns: [], rows: fallbackRows, summary: {}, appliedFilters: [], calculations: [], missingData: [], notes: [] }, 5200);
-  const data = sanitizeComposite(compiled, fallbackRows),summaryText=typeof data.summary==="string"?data.summary:(data.summary&&typeof data.summary==="object"?JSON.stringify(data.summary):""),reportSemantic={title:data.title,summary:summaryText,sections:data.calculations.length?[{title:"How the result was derived",analysis:data.calculations.join(". ")}]:[],findings:data.notes,limitations:data.missingData,rows:data.rows},recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 3").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),responseInput={purpose:"report" as const,request,seed:createId("rsp"),topic:"composite report",category:"report",detail:"standard" as const,audience:input.agent.title||input.agent.key,recentText:recentRows.results.map(row=>row.content).join("\n\n").slice(0,12000)};
-  let humanResponse=composeFallbackHumanResponse(reportSemantic,responseInput);try{const realized=await aiText(input,runtime,usage,"composite_response_realize",buildResponseRealizationPrompt(responseInput,reportSemantic,sourcePayload),2400);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}
-  return { mode: "composite-report", request, needsCriteria: false, questions: [], plan, data, humanResponse, responseMeta:{fingerprint:responseFingerprint(humanResponse),templateRisk:templateRisk(humanResponse).risk}, sources: sourceInfo, toolEvents: events, model: runtime.model, provider: runtime.provider, usage };
+  const data = sanitizeComposite(compiled, fallbackRows),summaryText=typeof data.summary==="string"?data.summary:(data.summary&&typeof data.summary==="object"?JSON.stringify(data.summary):""),reportSemantic={title:data.title,summary:summaryText,sections:data.calculations.length?[{title:"How the result was derived",analysis:data.calculations.join(". ")}]:[],findings:data.notes,limitations:data.missingData,rows:data.rows},recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 5").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),recentResponses=recentRows.results.map(row=>row.content),responseInput={purpose:"report" as const,request,seed:createId("rsp"),topic:"composite report",category:"report",detail:"standard" as const,audience:input.agent.title||input.agent.key,recentText:recentResponses.join("\n\n").slice(0,12000)};
+  const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+    requestId:createId("rsp"),
+    purpose:"report",
+    request,
+    semanticPayload:{...data,sources:sourceInfo},
+    context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:"composite report",category:"report",recentResponses,locale:"en-UG",currency:"UGX"},
+    detail:"standard",
+    providerMode:"auto",
+    maxWords:1400,
+  });
+  let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(reportSemantic,responseInput);
+  if(!pythonResponse){try{const realized=await aiText(input,runtime,usage,"composite_response_realize",buildResponseRealizationPrompt(responseInput,reportSemantic,sourcePayload),2400);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}}
+  return { mode: "composite-report", request, needsCriteria: false, questions: [], plan, data, humanResponse, responseMeta:{fingerprint:pythonResponse?.response_fingerprint||responseFingerprint(humanResponse),templateRisk:pythonResponse?false:templateRisk(humanResponse).risk,responseQuality:pythonResponse?.quality,responseEngine:pythonResponse?"python":"typescript-fallback"}, sources: sourceInfo, toolEvents: events, model: pythonResponse?.model||runtime.model, provider: pythonResponse?"response-intelligence-python":runtime.provider, usage };
 }
 
 
@@ -636,8 +672,19 @@ export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisM
  const verified=executed.map(item=>({tool:item.tool.name,module:item.tool.module,purpose:item.purpose,result:item.result}));
  const compilePrompt="Perform a genuine evidence-based Ledgerly "+(mode==="account-for"?"explanation/investigation":"analysis")+". Do NOT fill a fixed report template and do NOT force the same headings used in other analyses. Decide the number and titles of sections from the evidence and the user's question.\nRequest: "+request+"\nTopic knowledge (a checklist of evidence to consider, not conclusions): "+knowledge+"\nResolved entity: "+JSON.stringify(entity)+"\nVerified Ledgerly evidence: "+JSON.stringify(verified).slice(0,42000)+"\nReturn JSON {title,summary,sections:[{title,analysis,evidence,metrics}],findings,metrics,relationships,limitations,unanswered,suggestedActions,rows,confidenceNote}. Rules: every factual claim must be traceable to verified evidence above; distinguish direct facts, calculations, associations and explanations; never invent missing records; never infer private motives; never blame a teacher, learner or guardian from correlation alone; for account-for, identify strongest observed contributors, counter-evidence and alternative explanations, and explicitly say when causation cannot be established; use comparisons and calculations only when denominators/periods are compatible; suggestedActions are advisory only and must not claim they were executed; rows should be flat supporting data when useful. Vary the analysis structure according to what the evidence actually shows.";
  const compiled=await aiJson<GuidedAnalysisCompiled>(input,runtime,usage,"analysis_synthesize",compilePrompt,{title:topic?.label||"Ledgerly Analysis",summary:"",sections:[],findings:[],metrics:[],relationships:[],limitations:[],unanswered:[],suggestedActions:[],rows:[],confidenceNote:""},6200);
- const analysis=sanitizeGuidedAnalysis(compiled),recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 3").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),recentText=recentRows.results.map(row=>row.content).join("\n\n").slice(0,12000),responseInput={purpose:(mode==="account-for"?"account-for":"analysis") as const,request,seed:createId("rsp"),topic:topic?.label||null,category:topic?.category||null,entityType:entity?.type||null,detail:"deep" as const,audience:input.agent.title||input.agent.key,recentText};
- let humanResponse=composeFallbackHumanResponse(analysis,responseInput),responseModel=runtime.model;try{const realized=await aiText(input,runtime,usage,"analysis_response_realize",buildResponseRealizationPrompt(responseInput,analysis,verified.map(item=>({tool:item.tool,module:item.module,purpose:item.purpose,result:item.result}))),3200);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}
+ const analysis=sanitizeGuidedAnalysis(compiled),recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 5").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),recentResponses=recentRows.results.map(row=>row.content),recentText=recentResponses.join("\n\n").slice(0,12000),responseInput={purpose:(mode==="account-for"?"account-for":"analysis") as const,request,seed:createId("rsp"),topic:topic?.label||null,category:topic?.category||null,entityType:entity?.type||null,detail:"deep" as const,audience:input.agent.title||input.agent.key,recentText};
+ const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+   requestId:createId("rsp"),
+   purpose:mode==="account-for"?"account-for":"analysis",
+   request,
+   semanticPayload:{rows:analysis.rows,summary:{summary:analysis.summary},relationships:analysis.relationships,limitations:analysis.limitations,sources,findings:analysis.findings,metrics:analysis.metrics},
+   context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:topic?.label||"",category:topic?.category||"",entityType:entity?.type||"",entityLabel:entity?.label||"",recentResponses,locale:"en-UG",currency:"UGX"},
+   detail:"deep",
+   providerMode:"auto",
+   maxWords:1800,
+ });
+ let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(analysis,responseInput),responseModel=pythonResponse?.model||runtime.model;
+ if(!pythonResponse){try{const realized=await aiText(input,runtime,usage,"analysis_response_realize",buildResponseRealizationPrompt(responseInput,analysis,verified.map(item=>({tool:item.tool,module:item.module,purpose:item.purpose,result:item.result}))),3200);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}}
  const responseQuality=templateRisk(humanResponse);
- return{mode,request,topic,entity,needsEntity:false,needsCriteria:false,questions:[],plan,analysis,humanResponse,responseMeta:{fingerprint:responseFingerprint(humanResponse),templateRisk:responseQuality.risk,registerBrief:buildResponseLanguageBrief(responseInput).split("\n").slice(0,5),model:responseModel},sources,toolEvents:events,model:runtime.model,provider:runtime.provider,usage};
+ return{mode,request,topic,entity,needsEntity:false,needsCriteria:false,questions:[],plan,analysis,humanResponse,responseMeta:{fingerprint:pythonResponse?.response_fingerprint||responseFingerprint(humanResponse),templateRisk:pythonResponse?false:responseQuality.risk,responseQuality:pythonResponse?.quality,responseEngine:pythonResponse?"python":"typescript-fallback",registerBrief:buildResponseLanguageBrief(responseInput).split("\n").slice(0,5),model:responseModel},sources,toolEvents:events,model:responseModel,provider:pythonResponse?"response-intelligence-python":runtime.provider,usage};
 }
