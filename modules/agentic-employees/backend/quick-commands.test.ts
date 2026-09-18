@@ -48,12 +48,14 @@ describe("Quick command catalog",()=>{
     expect(command.fields.find(f=>f.name==="currentStreamId")?.control).toBe("reference");
   });
 
-  it("makes open class a focused command with a searchable class selector",()=>{
-    const catalog=buildQuickCommandCatalog(registry([route({
-      name:"get_class",kind:"query",module:"school setup",group:"classes",method:"GET",
-      pathTemplate:"/api/v1/school/setup/classes/:id",readOnly:true,aliases:["get class"],
-    })]));
-    const command=catalog.commands[0]!;
+  it("keeps list classes separate while open class uses a searchable class selector",()=>{
+    const catalog=buildQuickCommandCatalog(registry([
+      route({name:"list_classes",kind:"query",module:"school setup",group:"classes",method:"GET",pathTemplate:"/api/v1/school/setup/classes",readOnly:true,aliases:["list classes"]}),
+      route({name:"get_class",kind:"query",module:"school setup",group:"classes",method:"GET",pathTemplate:"/api/v1/school/setup/classes/:id",readOnly:true,aliases:["get class"]}),
+    ]));
+    const list=catalog.commands.find(item=>item.toolName==="list_classes")!,command=catalog.commands.find(item=>item.toolName==="get_class")!;
+    expect(list.command).toBe("list classes");
+    expect(list.fields).toHaveLength(0);
     expect(command.command).toBe("open class");
     expect(command.aliases).toContain("open class");
     expect(command.fields).toHaveLength(1);
