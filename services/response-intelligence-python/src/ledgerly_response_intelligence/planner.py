@@ -15,7 +15,8 @@ from .models import (
     SectionPlan,
 )
 from .retrieval import LanguageRetriever
-from .semantic import numeric_facts\nfrom .strategies import select_strategy
+from .semantic import numeric_facts
+from .strategies import select_strategy
 
 
 DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
