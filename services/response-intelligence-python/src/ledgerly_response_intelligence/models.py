@@ -74,6 +74,36 @@ class Limitation(BaseModel):
     material: bool = True
 
 
+class InsightKind(str, Enum):
+    change = "change"
+    comparison = "comparison"
+    outlier = "outlier"
+    concentration = "concentration"
+    relationship = "relationship"
+    evidence_gap = "evidence-gap"
+    observation = "observation"
+
+
+class Insight(BaseModel):
+    insight_id: str
+    kind: InsightKind
+    statement: str
+    fact_ids: list[str] = Field(default_factory=list)
+    magnitude: float | None = None
+    unit: str | None = None
+    confidence: Confidence = Confidence.moderate
+    causal: bool = False
+    tags: list[str] = Field(default_factory=list)
+
+
+class ReasoningResult(BaseModel):
+    insights: list[Insight] = Field(default_factory=list)
+    strongest_insight_ids: list[str] = Field(default_factory=list)
+    cautions: list[str] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class EvidenceBundle(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
     relationships: list[Relationship] = Field(default_factory=list)
@@ -165,6 +195,7 @@ class ResponseResult(BaseModel):
     plan: DiscoursePlan
     quality: QualityReport
     evidence: EvidenceBundle
+    reasoning: ReasoningResult
     provider: str = "deterministic"
     model: str = ""
     revision_count: int = 0
