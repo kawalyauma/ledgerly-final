@@ -3,7 +3,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
-RUN useradd --create-home --uid 10001 --shell /bin/bash ledgerly-ai
-USER ledgerly-ai
+RUN mkdir -p /home/ledgerly-ai/.claude && chown -R node:node /home/ledgerly-ai
+USER node
 WORKDIR /workspace
 ENTRYPOINT ["claude"]

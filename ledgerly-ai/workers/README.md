@@ -19,6 +19,17 @@ Authentication is never baked into an image. The backend mounts dedicated persis
 
 Authenticate those private homes administratively and protect them like password stores. Normal Ledgerly users never receive provider names, raw provider event logs, or credentials.
 
+## Host preparation
+
+The API container and provider workers intentionally run as the non-root Node user (UID 1000). Create the same-path host directories before starting the stack:
+
+```bash
+sudo install -d -o 1000 -g 1000 /var/lib/ledgerly-ai/sessions
+sudo install -d -o 1000 -g 1000 /var/lib/ledgerly-ai/workspaces
+sudo install -d -o 1000 -g 1000 /var/lib/ledgerly-ai/sessions/codex
+sudo install -d -o 1000 -g 1000 /var/lib/ledgerly-ai/sessions/claude-code
+```
+
 ## Docker execution
 
 Production defaults to `LEDGERLY_AI_EXECUTION_MODE=docker`. Each job receives:
