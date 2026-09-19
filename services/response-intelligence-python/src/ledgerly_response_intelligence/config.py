@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     api_token: str = ""
 
-    provider: Literal["none", "openai-compatible", "anthropic"] = "none"
+    provider: Literal["none", "openai-compatible", "responses", "anthropic"] = "none"
     model: str = ""
     base_url: str = ""
     api_key: str = ""
