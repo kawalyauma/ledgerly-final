@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from ..config import Settings
+from ..models import GenerationConfig
 from .anthropic import AnthropicProvider
 from .base import GenerationProvider
 from .openai_compatible import OpenAICompatibleProvider
+from .responses import ResponsesProvider
 
 
 def build_provider(settings: Settings) -> GenerationProvider | None:
@@ -24,3 +26,30 @@ def build_provider(settings: Settings) -> GenerationProvider | None:
             timeout_seconds=settings.timeout_seconds,
         )
     return None
+
+
+def build_delegated_provider(config: GenerationConfig | None) -> GenerationProvider | None:
+    if config is None or not config.model or not config.base_url:
+        return None
+    if config.api_style == "anthropic":
+        if not config.api_key:
+            return None
+        return AnthropicProvider(
+            api_key=config.api_key,
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+            base_url=config.base_url,
+        )
+    if config.api_style == "responses":
+        return ResponsesProvider(
+            base_url=config.base_url,
+            api_key=config.api_key,
+            model=config.model,
+            timeout_seconds=config.timeout_seconds,
+        )
+    return OpenAICompatibleProvider(
+        base_url=config.base_url,
+        api_key=config.api_key,
+        model=config.model,
+        timeout_seconds=config.timeout_seconds,
+    )
