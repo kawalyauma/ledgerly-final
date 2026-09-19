@@ -303,7 +303,16 @@ export async function executeQuickCommand(input:{db:D1Database;env:Env;principal
   if(tool.source==="native"){
     const args:Record<string,unknown>={};for(const field of descriptor.fields.filter(f=>f.location==="native"))if(typed[field.name]!==undefined)args[field.requestKey]=typed[field.name];
     const resolved=await resolveLightReferences(input.db,input.principal.organizationId,args);if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));
-    result=await executeTool({db:input.db,env:input.env,principal:input.principal,agent:input.agent,conversationId:input.conversationId,requestedTools:null},tool.nativeName||tool.name,resolved.value);prepared=Boolean(result?.prepared||result?.requiresHumanApproval||result?.action);
+    result=await executeTool({db:input.db,env:input.env,principal:input.principal,agent:input.agent,conversationId:input.conversationId,requestedTools:null},tool.nativeName||tool.name,resolved.value);
+    const actionId=result?.action?.id;
+    if(actionId){
+      // Same reasoning as the route branch below: a quick command is something
+      // the human just composed and validated themselves, so it runs immediately
+      // instead of sitting as a suggested approval card.
+      const{action:executedAction,result:apiResult}=await approveAndExecuteAction(input.env,input.principal,actionId);
+      result={...result,...apiResult,action:executedAction};
+    }
+    prepared=Boolean(result?.prepared||result?.requiresHumanApproval)&&!actionId;
   }else{
     if(!input.env.AGENT_SYSTEM_GATEWAY)throw new AppError(503,"GATEWAY_UNAVAILABLE","Ledgerly command gateway is unavailable.");
     const pathParams:Record<string,unknown>={};for(const field of descriptor.fields.filter(f=>f.location==="path")){let value=typed[field.name];if(field.referenceKey&&typeof value==="string"){const resolved=await resolveLightReferences(input.db,input.principal.organizationId,{[field.referenceKey]:value});if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));value=(resolved.value as any)[field.referenceKey];}pathParams[field.requestKey]=value;}
