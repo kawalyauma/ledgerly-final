@@ -20,7 +20,7 @@ import "./learning-center.css";
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
   name: "Agentic Employees",
-  version: "2.7.0",
+  version: "2.7.1",
   order: 75,
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticChatStudioPage },
