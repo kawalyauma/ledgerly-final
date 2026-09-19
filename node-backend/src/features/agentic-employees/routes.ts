@@ -146,9 +146,14 @@ agenticEmployeeRoutes.get("/conversations/:id/messages", requireScope("school:re
   `).bind(principal.organizationId, c.req.param("id")).all<Record<string, unknown>>();
   const data = result.results.map(row => {
     const { metadataJson, ...rest } = row as Record<string, unknown>;
-    let toolEvents: unknown[] | undefined;
-    try { toolEvents = metadataJson ? JSON.parse(String(metadataJson)).toolEvents : undefined; } catch { toolEvents = undefined; }
-    return { ...rest, toolEvents };
+    let metadata: Record<string, unknown> = {};
+    try { metadata = metadataJson ? JSON.parse(String(metadataJson)) as Record<string, unknown> : {}; } catch { metadata = {}; }
+    return {
+      ...rest,
+      toolEvents: Array.isArray(metadata.toolEvents) ? metadata.toolEvents : undefined,
+      routing: metadata.routing && typeof metadata.routing === "object" ? metadata.routing : undefined,
+      responseMeta: metadata.responseMeta && typeof metadata.responseMeta === "object" ? metadata.responseMeta : undefined,
+    };
   });
   return c.json({ data });
 });
