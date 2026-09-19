@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     training_retrieval_limit: int = Field(default=4, ge=0, le=12)
     training_min_sft_examples: int = Field(default=25, ge=2, le=100000)
     training_min_preference_examples: int = Field(default=20, ge=2, le=100000)
+    training_prefer_active_adapter: bool = False
+    local_adapter_device_map: str = "auto"
+    local_adapter_temperature: float = Field(default=0.55, ge=0.0, le=2.0)
 
     @property
     def provider_enabled(self) -> bool:
