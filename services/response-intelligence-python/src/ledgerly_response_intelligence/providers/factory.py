@@ -31,11 +31,12 @@ def build_provider(settings: Settings) -> GenerationProvider | None:
 def build_delegated_provider(config: GenerationConfig | None) -> GenerationProvider | None:
     if config is None or not config.model or not config.base_url:
         return None
+    api_key = config.api_key.get_secret_value()
     if config.api_style == "anthropic":
-        if not config.api_key:
+        if not api_key:
             return None
         return AnthropicProvider(
-            api_key=config.api_key,
+            api_key=api_key,
             model=config.model,
             timeout_seconds=config.timeout_seconds,
             base_url=config.base_url,
@@ -43,13 +44,13 @@ def build_delegated_provider(config: GenerationConfig | None) -> GenerationProvi
     if config.api_style == "responses":
         return ResponsesProvider(
             base_url=config.base_url,
-            api_key=config.api_key,
+            api_key=api_key,
             model=config.model,
             timeout_seconds=config.timeout_seconds,
         )
     return OpenAICompatibleProvider(
         base_url=config.base_url,
-        api_key=config.api_key,
+        api_key=api_key,
         model=config.model,
         timeout_seconds=config.timeout_seconds,
     )
