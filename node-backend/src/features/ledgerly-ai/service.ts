@@ -13,6 +13,7 @@ import { LedgerlyAiIncidentService } from "./incidents/service.js";
 import { LedgerlyAiGitService } from "./git/service.js";
 import { LedgerlyAiMonitoringService } from "./monitoring/service.js";
 import { LedgerlyAiPolicyService } from "./policy/service.js";
+import { LedgerlyAiConsoleService } from "./console/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -44,6 +45,7 @@ export class LedgerlyAiFoundationService {
   readonly incidents: LedgerlyAiIncidentService;
   readonly git: LedgerlyAiGitService;
   readonly monitoring: LedgerlyAiMonitoringService;
+  readonly console: LedgerlyAiConsoleService;
   private readonly logger: LedgerlyAiLogger;
   private startPromise: Promise<void> | null = null;
 
@@ -82,6 +84,7 @@ export class LedgerlyAiFoundationService {
     this.git = new LedgerlyAiGitService(runtime,this.config);
     this.incidents = new LedgerlyAiIncidentService(runtime,this.config,this.providers,this.employees,this.logger,this.git,this.policy);
     this.monitoring = new LedgerlyAiMonitoringService(runtime,this.config,this.incidents,this.git);
+    this.console = new LedgerlyAiConsoleService(runtime,this);
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,
