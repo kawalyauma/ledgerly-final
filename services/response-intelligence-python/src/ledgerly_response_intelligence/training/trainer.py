@@ -65,6 +65,13 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
     if len(dataset)<2:
         raise ValueError(f"At least two approved {config.objective.upper()} examples are required for adapter training.")
 
+    train_dataset=dataset
+    eval_dataset=None
+    if config.eval_ratio>0 and len(dataset)>=10:
+        split=dataset.train_test_split(test_size=config.eval_ratio,seed=config.seed,shuffle=True)
+        train_dataset=split["train"]
+        eval_dataset=split["test"]
+
     tokenizer=AutoTokenizer.from_pretrained(config.base_model)
     if tokenizer.pad_token_id is None:
         if tokenizer.eos_token_id is None:
@@ -117,6 +124,8 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
         "report_to":"none",
         "seed":config.seed,
         "gradient_checkpointing":True,
+        "eval_strategy":"epoch" if eval_dataset is not None else "no",
+        "evaluation_strategy":"epoch" if eval_dataset is not None else "no",
         "bf16":bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported()),
         "fp16":bool(torch.cuda.is_available() and not torch.cuda.is_bf16_supported()),
     }
@@ -132,7 +141,8 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
         trainer_values:dict[str,Any]={
             "model":model,
             "args":args,
-            "train_dataset":dataset,
+            "train_dataset":train_dataset,
+            "eval_dataset":eval_dataset,
             "peft_config":lora,
             "processing_class":tokenizer,
             "tokenizer":tokenizer,
@@ -148,7 +158,8 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
         trainer_values={
             "model":model,
             "args":args,
-            "train_dataset":dataset,
+            "train_dataset":train_dataset,
+            "eval_dataset":eval_dataset,
             "peft_config":lora,
             "processing_class":tokenizer,
             "tokenizer":tokenizer,
@@ -165,6 +176,8 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
         "objective":config.objective,
         "mode":config.mode,
         "examples":len(dataset),
+        "train_examples":len(train_dataset),
+        "eval_examples":len(eval_dataset) if eval_dataset is not None else 0,
         "metrics":metrics,
         "config":config.model_dump(mode="json"),
     },ensure_ascii=False,indent=2,default=str),encoding="utf-8")
