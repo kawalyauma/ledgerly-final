@@ -14,6 +14,8 @@ export function createLedgerlyAiLogger(base: Logger, context: LedgerlyAiLogConte
   return base.child({ subsystem: "ledgerly-ai", ...context });
 }
 
+export type LedgerlyAiLogger = ReturnType<typeof createLedgerlyAiLogger>;
+
 export function createLedgerlyAiCorrelationId(prefix = "lai") {
   return `${prefix}_${randomUUID().replaceAll("-", "")}`;
 }

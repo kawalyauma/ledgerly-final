@@ -1,6 +1,6 @@
 import type { Runtime } from "../../runtime.js";
 import { parseLedgerlyAiConfig, type LedgerlyAiConfig } from "./config.js";
-import { createLedgerlyAiLogger } from "./logger.js";
+import { createLedgerlyAiLogger, type LedgerlyAiLogger } from "./logger.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -19,7 +19,7 @@ export type LedgerlyAiHealth = {
 export class LedgerlyAiFoundationService {
   readonly config: LedgerlyAiConfig;
   readonly startedAt = new Date().toISOString();
-  private readonly logger;
+  private readonly logger: LedgerlyAiLogger;
 
   constructor(
     private readonly runtime: Runtime,
