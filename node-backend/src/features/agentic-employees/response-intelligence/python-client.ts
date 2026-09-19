@@ -76,3 +76,18 @@ export async function realizeWithPythonResponseIntelligence(env:Env,input:Python
     return payload&&typeof payload.text==="string"&&payload.text.trim()?payload:null;
   }catch{return null;}finally{clearTimeout(timer);}
 }
+
+
+export async function checkPythonResponseIntelligence(env:Env):Promise<Record<string,unknown>>{
+  const base=String(env.RESPONSE_INTELLIGENCE_URL||"").trim().replace(/\/$/,"");
+  if(!base)return{configured:false,reachable:false,status:"not-configured"};
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Math.min(Math.max(Number(env.RESPONSE_INTELLIGENCE_TIMEOUT_MS||30000),1000),15000));
+  try{
+    const response=await fetch(base+"/health",{signal:controller.signal});
+    if(!response.ok)return{configured:true,reachable:true,status:"unhealthy",httpStatus:response.status};
+    const payload=await response.json().catch(()=>({})) as Record<string,unknown>;
+    return{configured:true,reachable:true,...payload};
+  }catch(error){
+    return{configured:true,reachable:false,status:"unreachable",error:error instanceof Error?error.message:String(error)};
+  }finally{clearTimeout(timer);}
+}
