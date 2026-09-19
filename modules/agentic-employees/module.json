@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.6.0",
-  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, Python Response Intelligence, output selection, governed writes and professional exports.",
+  "version": "2.7.0",
+  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, trainable Python Response Intelligence, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -215,7 +215,30 @@
       "future-web-search-capability",
       "python-response-service-health-monitor",
       "node-to-python-response-bridge",
-      "typescript-response-safety-fallback"
+      "typescript-response-safety-fallback",
+      "trainable-response-intelligence",
+      "controlled-response-learning",
+      "automatic-training-candidates",
+      "trusted-reviewer-training-governance",
+      "tenant-scoped-learning-memory",
+      "privacy-redacted-training-data",
+      "approved-example-retrieval-learning",
+      "organization-style-profile-learning",
+      "learned-discourse-strategy-preferences",
+      "human-response-correction-learning",
+      "command-center-response-teaching",
+      "chat-studio-response-teaching",
+      "sft-jsonl-dataset-export",
+      "trusted-dpo-preference-export",
+      "lora-adapter-training",
+      "qlora-adapter-training",
+      "training-run-registry",
+      "model-adapter-registry",
+      "organization-active-adapter",
+      "local-peft-adapter-inference",
+      "trained-adapter-provider-fallback",
+      "configurable-training-readiness",
+      "persistent-training-sqlite"
     ]
   }
 }
