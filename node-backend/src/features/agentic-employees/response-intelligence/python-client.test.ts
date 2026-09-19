@@ -90,6 +90,7 @@ it("sends tenant-scoped human corrections to the learning service", async () => 
     expect(body.response_fingerprint).toBe("fp_123");
     expect(body.rating).toBe(-1);
     expect(body.correction_text).toContain("better");
+    expect(body.trusted_reviewer).toBe(false);
     return new Response(JSON.stringify({feedback_id:"fb_1"}),{status:200,headers:{"Content-Type":"application/json"}});
   });
   vi.stubGlobal("fetch",fetchMock);
