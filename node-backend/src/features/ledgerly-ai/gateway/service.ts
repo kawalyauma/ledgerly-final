@@ -3,6 +3,7 @@ import { AppError } from "../../../http/errors.js";
 import type { AuthPrincipal } from "../../../http/types.js";
 import type { LedgerlyAiConfig } from "../config.js";
 import { createLedgerlyAiCorrelationId, type LedgerlyAiLogger } from "../logger.js";
+import type { LedgerlyAiMemoryService } from "../memory/service.js";
 import type { LedgerlyAiProviderRuntime } from "../providers/runtime.js";
 import type { LedgerlyAiTaskKind } from "../providers/types.js";
 import { LedgerlyAiContextBuilder } from "./context.js";
@@ -43,6 +44,11 @@ function titleFromMessage(message: string) {
   return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
 }
 
+function projectIdFromMetadata(metadata: Record<string, unknown> | undefined) {
+  const value = metadata?.projectId;
+  return typeof value === "string" && value.trim() ? value.trim().slice(0, 160) : null;
+}
+
 export class LedgerlyAiGatewayService {
   private readonly context: LedgerlyAiContextBuilder;
   private readonly rateLimiter: LedgerlyAiRateLimiter;
@@ -51,11 +57,12 @@ export class LedgerlyAiGatewayService {
   constructor(
     private readonly repository: LedgerlyAiGatewayRepository,
     private readonly providers: LedgerlyAiProviderRuntime,
+    private readonly memory: LedgerlyAiMemoryService,
     private readonly config: LedgerlyAiConfig,
     db: Pool,
     private readonly logger: LedgerlyAiLogger,
   ) {
-    this.context = new LedgerlyAiContextBuilder(repository, config);
+    this.context = new LedgerlyAiContextBuilder(repository, memory, config);
     this.rateLimiter = new LedgerlyAiRateLimiter(db, config);
     this.idempotency = new LedgerlyAiIdempotency(db);
   }
@@ -95,7 +102,11 @@ export class LedgerlyAiGatewayService {
             metadata: input.activeModule ? { activeModule: input.activeModule } : {},
           });
       if (chat.status !== "active") throw new AppError(409, "LEDGERLY_AI_CHAT_INACTIVE", "This Ledgerly AI chat is not active.");
-      const agentId = input.agentId ?? chat.agentId;
+      if (chat.agentId && input.agentId && chat.agentId !== input.agentId) {
+        throw new AppError(409, "LEDGERLY_AI_AGENT_MISMATCH", "This chat belongs to a different Ledgerly AI employee.");
+      }
+      const agentId = chat.agentId ?? input.agentId ?? null;
+      const projectId = projectIdFromMetadata(input.metadata);
 
       await progress?.({ type: "accepted", at: new Date().toISOString(), data: { chatId: chat.id, correlationId } });
       const userMessage = await this.repository.appendMessage({
@@ -118,6 +129,7 @@ export class LedgerlyAiGatewayService {
           messageId: userMessage.id,
           messageLength: input.message.length,
           activeModule: input.activeModule ?? null,
+          projectId,
           metadata: redactLedgerlyAiValue(input.metadata ?? {}),
         },
       });
@@ -127,8 +139,11 @@ export class LedgerlyAiGatewayService {
       const providerPrompt = await this.context.build({
         principal: input.principal,
         chatId: chat.id,
+        query: input.message,
         activeModule: input.activeModule,
         agentId,
+        projectId,
+        correlationId,
       });
       if (this.config.LEDGERLY_AI_LOG_PROMPTS) {
         this.logger.info(
@@ -167,6 +182,25 @@ export class LedgerlyAiGatewayService {
           usage: redactLedgerlyAiValue(providerResult.usage ?? {}),
         },
       });
+
+      try {
+        await this.memory.captureConversationTurn({
+          principal: input.principal,
+          chatId: chat.id,
+          agentId,
+          userMessageId: userMessage.id,
+          assistantMessageId: assistantMessage.id,
+          userText: input.message,
+          assistantText: normalized.content,
+          correlationId,
+        });
+      } catch (memoryError) {
+        this.logger.warn(
+          { correlationId, chatId: chat.id, err: memoryError instanceof Error ? memoryError.message : String(memoryError) },
+          "Ledgerly AI short-term memory capture failed",
+        );
+      }
+
       const response: LedgerlyAiGatewayResponse = {
         chat: { id: chat.id, title: chat.title, agentId },
         message: {
@@ -198,6 +232,7 @@ export class LedgerlyAiGatewayService {
           responseChars: normalized.content.length,
           activeModule: input.activeModule ?? null,
           agentId,
+          projectId,
         },
       });
       await this.idempotency.complete({

@@ -105,14 +105,21 @@ export type LedgerlyAiMemory = {
   organizationId: string;
   scopeType: "chat" | "user" | "agent" | "organization" | "project";
   scopeId: string;
+  kind: "fact" | "preference" | "instruction" | "task" | "summary" | "observation" | "operational";
   title?: string | null;
   content: string;
   importance: number;
   confidence: number;
   sourceType: string;
   sourceId?: string | null;
+  requiredScope?: string | null;
+  pinned: boolean;
+  correctionOfId?: string | null;
   status: "active" | "expired" | "deleted";
   metadata: Record<string, unknown>;
+  expiresAt?: string | null;
+  lastUsedAt?: string | null;
+  useCount: number;
 };
 
 export type LedgerlyAiProviderExecution = {

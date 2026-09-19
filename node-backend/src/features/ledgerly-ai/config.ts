@@ -36,6 +36,9 @@ const schema = z.object({
   LEDGERLY_AI_ORG_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(200),
   LEDGERLY_AI_AGENT_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(60),
   LEDGERLY_AI_CHAT_HISTORY_MESSAGES: z.coerce.number().int().min(2).max(200).default(30),
+  LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS: z.coerce.number().int().min(1).max(365).default(7),
+  LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT: z.coerce.number().int().min(1).max(30).default(12),
+  LEDGERLY_AI_MEMORY_CONTEXT_CHARS: z.coerce.number().int().min(1000).max(100_000).default(12_000),
   LEDGERLY_AI_LOG_PROMPTS: envBoolean(false),
   LEDGERLY_AI_STARTUP_HEALTHCHECK: envBoolean(true),
 }).superRefine((value, ctx) => {

@@ -3,6 +3,7 @@ import { parseLedgerlyAiConfig, type LedgerlyAiConfig } from "./config.js";
 import { LedgerlyAiGatewayRepository } from "./gateway/repository.js";
 import { LedgerlyAiGatewayService } from "./gateway/service.js";
 import { createLedgerlyAiLogger, type LedgerlyAiLogger } from "./logger.js";
+import { LedgerlyAiMemoryService } from "./memory/service.js";
 import { LedgerlyAiProviderRuntime } from "./providers/runtime.js";
 
 export type LedgerlyAiHealth = {
@@ -25,6 +26,7 @@ export class LedgerlyAiFoundationService {
   readonly startedAt = new Date().toISOString();
   readonly providers: LedgerlyAiProviderRuntime;
   readonly repository: LedgerlyAiGatewayRepository;
+  readonly memory: LedgerlyAiMemoryService;
   readonly gateway: LedgerlyAiGatewayService;
   private readonly logger: LedgerlyAiLogger;
 
@@ -36,7 +38,15 @@ export class LedgerlyAiFoundationService {
     this.logger = createLedgerlyAiLogger(runtime.logger);
     this.providers = new LedgerlyAiProviderRuntime(runtime, this.config);
     this.repository = new LedgerlyAiGatewayRepository(runtime.db);
-    this.gateway = new LedgerlyAiGatewayService(this.repository, this.providers, this.config, runtime.db, this.logger);
+    this.memory = new LedgerlyAiMemoryService(runtime.db, this.repository, this.config);
+    this.gateway = new LedgerlyAiGatewayService(
+      this.repository,
+      this.providers,
+      this.memory,
+      this.config,
+      runtime.db,
+      this.logger,
+    );
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,
@@ -77,12 +87,25 @@ export class LedgerlyAiFoundationService {
     const schemaStarted = performance.now();
     let schema: LedgerlyAiHealth["components"]["schema"];
     try {
-      const result = await this.runtime.db.query<{ chats: string | null; audit: string | null }>(
-        "SELECT to_regclass('public.lai_chats')::text AS chats, to_regclass('public.lai_audit_events')::text AS audit",
+      const result = await this.runtime.db.query<{
+        chats: string | null;
+        audit: string | null;
+        memories: string | null;
+        memoryAudit: string | null;
+      }>(
+        `SELECT
+           to_regclass('public.lai_chats')::text AS chats,
+           to_regclass('public.lai_audit_events')::text AS audit,
+           to_regclass('public.lai_memories')::text AS memories,
+           to_regclass('public.lai_memory_audit')::text AS "memoryAudit"`,
       );
       const row = result.rows[0];
-      schema = !row?.chats || !row.audit
-        ? { status: "error", latencyMs: Math.round(performance.now() - schemaStarted), error: "Ledgerly AI database migration is not applied." }
+      schema = !row?.chats || !row.audit || !row.memories || !row.memoryAudit
+        ? {
+            status: "error",
+            latencyMs: Math.round(performance.now() - schemaStarted),
+            error: "Ledgerly AI database migrations are not fully applied.",
+          }
         : { status: "ok", latencyMs: Math.round(performance.now() - schemaStarted) };
     } catch (error) {
       schema = {
