@@ -14,6 +14,7 @@ from .models import (
     DiscoursePlan,
     EvaluationRequest,
     QualityReport,
+    ReasoningResult,
     ResponseRequest,
     ResponseResult,
 )
@@ -106,6 +107,15 @@ async def library_stats() -> dict[str, object]:
 async def plan_response(request: ResponseRequest, engine: ResponseIntelligenceEngine = Depends(get_engine)) -> DiscoursePlan:
     evidence = merge_evidence(request.evidence, request.semantic_payload)
     return engine.planner.build(request, evidence)
+
+
+@app.post("/v1/reason", response_model=ReasoningResult, dependencies=[Depends(authorize)])
+async def reason(
+    request: ResponseRequest,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> ReasoningResult:
+    evidence = merge_evidence(request.evidence, request.semantic_payload)
+    return engine.reasoner.derive(request, evidence)
 
 
 @app.post("/v1/evaluate", response_model=QualityReport, dependencies=[Depends(authorize)])
