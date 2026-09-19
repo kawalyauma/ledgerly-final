@@ -15,7 +15,7 @@ from .models import (
 )
 from .planner import DiscoursePlanner
 from .providers.base import GenerationProvider
-from .providers.factory import build_provider
+from .providers.factory import build_delegated_provider, build_provider
 from .reasoning import ReasoningEngine
 from .realization import (
     DeterministicRealizer,
@@ -57,11 +57,9 @@ class ResponseIntelligenceEngine:
         if request.tool_policy:
             tool_events = await self._tool_policy_events(request.tool_policy)
 
-        use_provider = (
-            request.provider_mode != "disabled"
-            and self.provider is not None
-            and self.settings.provider_enabled
-        )
+        delegated_provider = build_delegated_provider(request.generation)
+        active_provider = delegated_provider or self.provider
+        use_provider = request.provider_mode != "disabled" and active_provider is not None
         if request.provider_mode == "required" and not use_provider:
             raise RuntimeError("A generation provider is required for this request but none is configured.")
 
@@ -73,7 +71,8 @@ class ResponseIntelligenceEngine:
         if use_provider:
             try:
                 system, prompt = build_generation_prompt(request, evidence, plan, reasoning=reasoning)
-                response = await self.provider.generate(
+                assert active_provider is not None
+                response = await active_provider.generate(
                     system=system,
                     prompt=prompt,
                     max_tokens=self._token_budget(request.max_words),
@@ -96,6 +95,7 @@ class ResponseIntelligenceEngine:
                 reasoning=reasoning,
                 draft=draft,
                 quality=quality,
+                provider=active_provider,
             )
 
         # If provider output still contains unsupported factual claims, deterministic output
@@ -125,7 +125,8 @@ class ResponseIntelligenceEngine:
             response_fingerprint=fingerprint(draft),
             tool_events=tool_events,
             metadata={
-                "providerConfigured": self.settings.provider_enabled,
+                "providerConfigured": bool(active_provider),
+                "providerDelegated": delegated_provider is not None,
                 "externalToolsEnabled": self.settings.allow_external_tools,
                 "webSearchEnabled": self.settings.allow_web_search,
                 "factCount": len(evidence.facts),
@@ -156,8 +157,9 @@ class ResponseIntelligenceEngine:
         reasoning: Any,
         draft: str,
         quality: QualityReport,
+        provider: GenerationProvider | None,
     ) -> tuple[str, QualityReport, int]:
-        if not self.provider:
+        if provider is None:
             return draft, quality, 0
         revisions = 0
         current = draft
@@ -173,7 +175,7 @@ class ResponseIntelligenceEngine:
                 revision_instructions=current_quality.revision_instructions,
             )
             try:
-                response = await self.provider.generate(
+                response = await provider.generate(
                     system=system,
                     prompt=prompt,
                     max_tokens=self._token_budget(request.max_words),
