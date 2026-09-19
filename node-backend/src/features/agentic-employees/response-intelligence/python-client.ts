@@ -128,6 +128,7 @@ async function trainingRequest<T>(
 
 export async function submitPythonResponseFeedback(env:Env,input:{
   organizationId:string;
+  exampleId?:string;
   responseFingerprint:string;
   rating:-1|0|1;
   comment?:string;
@@ -140,6 +141,7 @@ export async function submitPythonResponseFeedback(env:Env,input:{
     method:"POST",
     body:JSON.stringify({
       organization_id:input.organizationId,
+      example_id:input.exampleId||"",
       response_fingerprint:input.responseFingerprint,
       rating:input.rating,
       comment:input.comment||"",
