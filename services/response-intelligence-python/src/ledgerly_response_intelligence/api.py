@@ -97,6 +97,9 @@ async def capabilities(engine: ResponseIntelligenceEngine = Depends(get_engine))
         "learningRetrievalEnabled": settings.learning_retrieval_enabled,
         "trainingPrivacyMode": settings.training_privacy_mode,
         "preferActiveAdapter": settings.training_prefer_active_adapter,
+        "knowledgeEnabled": settings.knowledge_enabled,
+        "knowledgeRetrievalEnabled": settings.knowledge_retrieval_enabled,
+        "knowledgeIncludeGlobal": settings.knowledge_include_global,
         "tools": tools,
         "qualityDimensions": [
             "grounding",
@@ -147,6 +150,108 @@ async def respond(
         return await engine.respond(request)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def require_knowledge(engine: ResponseIntelligenceEngine) -> None:
+    if engine.knowledge_store is None:
+        raise HTTPException(status_code=503, detail="Institutional knowledge is disabled.")
+
+
+@app.get("/v1/knowledge/stats", response_model=KnowledgeStats, dependencies=[Depends(authorize)])
+async def knowledge_stats(
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> KnowledgeStats:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    return engine.knowledge_store.stats(organization_id)
+
+
+@app.get("/v1/knowledge/sources", response_model=list[KnowledgeSource], dependencies=[Depends(authorize)])
+async def knowledge_sources(
+    organization_id: str,
+    approved_only: bool = False,
+    limit: int = 200,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[KnowledgeSource]:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    return engine.knowledge_store.list_sources(organization_id,approved_only,limit)
+
+
+@app.post("/v1/knowledge/sources", response_model=KnowledgeSource, dependencies=[Depends(authorize)])
+async def create_knowledge_source(
+    item: KnowledgeSourceCreate,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> KnowledgeSource:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    return engine.knowledge_store.add_source(item)
+
+
+@app.post("/v1/knowledge/sources/{source_id}/approve", response_model=KnowledgeSource, dependencies=[Depends(authorize)])
+async def approve_knowledge_source(
+    source_id: str,
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> KnowledgeSource:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    try:
+        return engine.knowledge_store.set_approved(source_id,True,organization_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,detail="Knowledge source not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403,detail=str(exc)) from exc
+
+
+@app.post("/v1/knowledge/sources/{source_id}/reject", response_model=KnowledgeSource, dependencies=[Depends(authorize)])
+async def reject_knowledge_source(
+    source_id: str,
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> KnowledgeSource:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    try:
+        return engine.knowledge_store.set_approved(source_id,False,organization_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,detail="Knowledge source not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403,detail=str(exc)) from exc
+
+
+@app.delete("/v1/knowledge/sources/{source_id}", dependencies=[Depends(authorize)])
+async def delete_knowledge_source(
+    source_id: str,
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> dict[str,object]:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    try:
+        engine.knowledge_store.delete_source(source_id,organization_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404,detail="Knowledge source not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403,detail=str(exc)) from exc
+    return {"deleted":True,"source_id":source_id}
+
+
+@app.post("/v1/knowledge/search", response_model=list[KnowledgeSearchHit], dependencies=[Depends(authorize)])
+async def search_knowledge(
+    item: KnowledgeSearchRequest,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[KnowledgeSearchHit]:
+    require_knowledge(engine)
+    assert engine.knowledge_retriever is not None
+    return engine.knowledge_retriever.search(
+        organization_id=item.organization_id,
+        query=item.query,
+        limit=item.limit,
+        include_global=item.include_global,
+        source_types=item.source_types,
+    )
 
 
 def require_training(engine: ResponseIntelligenceEngine) -> None:
