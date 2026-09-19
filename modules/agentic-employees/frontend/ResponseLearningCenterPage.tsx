@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Brain, Check, CheckCircle2, Database, RefreshCcw, ShieldCheck,
-  Sparkles, ThumbsDown, TrendingUp, X, XCircle,
+  Sparkles, TrendingUp, X, XCircle,
 } from "lucide-react";
 import { errorText, get, post } from "../../../web/api";
 
