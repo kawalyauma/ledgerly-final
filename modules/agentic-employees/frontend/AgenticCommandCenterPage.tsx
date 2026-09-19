@@ -391,7 +391,7 @@ function LearningFeedback({result,entityLabel=""}:{result:any;entityLabel?:strin
         responseFingerprint:fingerprint,rating,approveOriginal,
         correctionText:rating<0?correction.trim():"",entityLabel,
       });
-      setMessage(rating>0?"Approved for learning.":"Feedback saved. Your correction will teach future responses.");
+      setMessage(rating>0?"Feedback saved. Trusted reviewers can approve it for learning.":"Correction saved. It will be reviewed before it becomes training material.");
       setState("sent");
     }catch(error){setMessage(errorText(error));setState(rating<0?"correct":"idle");}
   }
