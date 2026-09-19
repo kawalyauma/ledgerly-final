@@ -82,7 +82,7 @@ function when(value?:string){if(!value)return "—";const date=new Date(value);r
 function readinessLabel(value:string){return value.replace(/-/g," ").replace(/\b\w/g,c=>c.toUpperCase());}
 
 export function ResponseLearningCenterPage(){
-  const[data,setData]=useState<LearningCenterData>(EMPTY),[loading,setLoading]=useState(true),[error,setError]=useState(""),[busyId,setBusyId]=useState("");
+  const[data,setData]=useState<LearningCenterData>(EMPTY),[loading,setLoading]=useState(true),[error,setError]=useState(""),[notice,setNotice]=useState(""),[busyId,setBusyId]=useState("");
 
   const load=useCallback(async()=>{
     setLoading(true);setError("");
@@ -94,9 +94,29 @@ export function ResponseLearningCenterPage(){
   useEffect(()=>{void load();},[load]);
 
   async function review(example:TrainingExample,status:"approve"|"reject"){
-    setBusyId(example.example_id);setError("");
+    setBusyId(example.example_id);setError("");setNotice("");
     try{
       await post<TrainingExample>(`/agentic-employees/chat-studio/training-examples/${encodeURIComponent(example.example_id)}/${status}`,{});
+      await load();
+    }catch(err){setError(errorText(err));}
+    finally{setBusyId("");}
+  }
+
+  async function exportDataset(format:"sft"|"dpo"){
+    setBusyId("export-"+format);setError("");setNotice("");
+    try{
+      const result=await post<{format:string;path:string;examples:number;sha256:string}>("/agentic-employees/chat-studio/training-export",{format});
+      setNotice(`${format.toUpperCase()} dataset exported: ${result.examples} examples · ${result.path}`);
+      await load();
+    }catch(err){setError(errorText(err));}
+    finally{setBusyId("");}
+  }
+
+  async function activateAdapter(adapter:Adapter){
+    setBusyId(adapter.adapter_id);setError("");setNotice("");
+    try{
+      await post<Adapter>(`/agentic-employees/chat-studio/training-adapters/${encodeURIComponent(adapter.adapter_id)}/activate`,{});
+      setNotice(`Activated ${adapter.name}. Local inference will use it when active-adapter preference is enabled on the Python service.`);
       await load();
     }catch(err){setError(errorText(err));}
     finally{setBusyId("");}
@@ -111,6 +131,7 @@ export function ResponseLearningCenterPage(){
     </header>
 
     {error&&<div className="rlc-error"><XCircle size={15}/><span>{error}</span></div>}
+    {notice&&<div className="rlc-notice"><CheckCircle2 size={15}/><span>{notice}</span></div>}
 
     <section className="rlc-score-grid">
       <Score title="Candidates" value={data.status.candidates} detail="Waiting for trusted review" icon={<Activity size={16}/>}/>
@@ -134,7 +155,7 @@ export function ResponseLearningCenterPage(){
         </section>
 
         <section className="rlc-card">
-          <div className="rlc-section-head"><div><small>MODEL EVOLUTION</small><h2>Training runs</h2><p>Offline SFT/DPO and LoRA/QLoRA runs registered by the Python training service.</p></div><span>{data.runs.length} shown</span></div>
+          <div className="rlc-section-head"><div><small>MODEL EVOLUTION</small><h2>Training runs</h2><p>Offline SFT/DPO and LoRA/QLoRA runs registered by the Python training service.</p></div><div className="rlc-export-actions"><button disabled={busyId==="export-sft"} onClick={()=>void exportDataset("sft")}>{busyId==="export-sft"?<Activity className="spin" size={12}/>:<Database size={12}/>}Export SFT</button><button disabled={busyId==="export-dpo"} onClick={()=>void exportDataset("dpo")}>{busyId==="export-dpo"?<Activity className="spin" size={12}/>:<Sparkles size={12}/>}Export DPO</button></div></div>
           {!data.runs.length?<Empty title="No model training runs yet" text="Approved examples still improve retrieval learning immediately; model fine-tuning is optional."/>:
           <div className="rlc-table-wrap"><table><thead><tr><th>Objective</th><th>Mode</th><th>Base model</th><th>Status</th><th>Started</th></tr></thead><tbody>{data.runs.map(run=><tr key={run.run_id}><td>{run.objective.toUpperCase()}</td><td>{run.mode.toUpperCase()}</td><td>{run.base_model}</td><td><span className={`rlc-status ${run.status}`}>{run.status}</span></td><td>{when(run.created_at)}</td></tr>)}</tbody></table></div>}
         </section>
@@ -152,7 +173,7 @@ export function ResponseLearningCenterPage(){
         <section className="rlc-card">
           <div className="rlc-section-head compact"><div><small>TRAINED MODELS</small><h2>Adapters</h2></div></div>
           {activeAdapter&&<div className="rlc-active-adapter"><ShieldCheck size={17}/><div><small>ACTIVE ADAPTER</small><b>{activeAdapter.name}</b><span>{activeAdapter.base_model}</span></div></div>}
-          {!data.adapters.length?<Empty title="No adapters registered" text="The response engine will continue using retrieval learning and the school's configured AI provider."/>:<div className="rlc-adapters">{data.adapters.map(adapter=><div key={adapter.adapter_id} className={adapter.active?"active":""}><Database size={14}/><div><b>{adapter.name}</b><span>{adapter.base_model}</span><small>{adapter.active?"Active":"Available"} · {when(adapter.created_at)}</small></div></div>)}</div>}
+          {!data.adapters.length?<Empty title="No adapters registered" text="The response engine will continue using retrieval learning and the school's configured AI provider."/>:<div className="rlc-adapters">{data.adapters.map(adapter=><div key={adapter.adapter_id} className={adapter.active?"active":""}><Database size={14}/><div className="rlc-adapter-copy"><b>{adapter.name}</b><span>{adapter.base_model}</span><small>{adapter.active?"Active":"Available"} · {when(adapter.created_at)}</small></div>{!adapter.active&&<button disabled={busyId===adapter.adapter_id} onClick={()=>void activateAdapter(adapter)}>{busyId===adapter.adapter_id?<Activity className="spin" size={11}/>:<Check size={11}/>}Activate</button>}</div>)}</div>}
         </section>
 
         <section className="rlc-card rlc-governance">
