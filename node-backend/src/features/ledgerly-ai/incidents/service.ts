@@ -15,6 +15,7 @@ import type { LedgerlyAiRiskLevel } from "../types.js";
 import { classifyIncident, riskForChangedPaths, type IncidentSignalInput } from "./classifier.js";
 import { runIncidentCommand } from "./command.js";
 import { IncidentStagingManager } from "./staging.js";
+import type { LedgerlyAiGitService } from "../git/service.js";
 import { IncidentWorkspaceManager, type IncidentCheckResult } from "./workspace.js";
 
 type IncidentStatus=
@@ -75,6 +76,7 @@ export class LedgerlyAiIncidentService{
     private readonly providers:LedgerlyAiProviderRuntime,
     private readonly employees:LedgerlyAiEmployeeRegistry,
     private readonly logger:LedgerlyAiLogger,
+    private readonly git:LedgerlyAiGitService,
   ){
     this.workspace=new IncidentWorkspaceManager(config);
     this.staging=new IncidentStagingManager(config);
@@ -461,28 +463,36 @@ export class LedgerlyAiIncidentService{
     try{
       if(incident.organizationId)await this.employees.ensureBuiltIns(incident.organizationId);
       const logs=await this.collectLogs(incident);
-      const work=await this.workspace.prepare(id,incident.assignedAgentKey??"kato",incident.title);
+      const work=await this.git.createWorkspace({
+        organizationId:incident.organizationId,
+        incidentId:id,
+        workKind:"incident",
+        workKey:id,
+        agentKey:incident.assignedAgentKey??"kato",
+        title:incident.title,
+        createdBy:"ledgerly-ai",
+      });
       await this.runtime.db.query(
         `UPDATE lai_incidents SET status='fixing',branch_name=$1,workspace_path=$2,base_sha=$3,
             latest_context_json=latest_context_json||$4::jsonb,updated_at=CURRENT_TIMESTAMP WHERE id=$5`,
-        [work.branch,work.path,work.baseSha,JSON.stringify({runtimeLogs:logs}),id],
+        [work.branchName,work.workspacePath,work.baseSha,JSON.stringify({runtimeLogs:logs,gitWorkspaceId:work.id}),id],
       );
-      incident.status="fixing";incident.branchName=work.branch;incident.workspacePath=work.path;incident.baseSha=work.baseSha;
+      incident.status="fixing";incident.branchName=work.branchName;incident.workspacePath=work.workspacePath;incident.baseSha=work.baseSha;
       await this.appendEvent({
         incidentId:id,organizationId:incident.organizationId,eventType:"workspace_created",status:"fixing",
-        actorType:"system",actorId:"ledgerly-ai",summary:"Created isolated incident worktree and branch.",
-        metadata:{branch:work.branch,baseSha:work.baseSha},
+        actorType:"system",actorId:"ledgerly-ai",summary:"Created isolated governed Git worktree and branch.",
+        metadata:{gitWorkspaceId:work.id,branch:work.branchName,baseSha:work.baseSha},
       });
 
       const fixResult=await this.providers.execute({
         id:createId("laiifix"),organizationId:incident.organizationId??"platform",
         userId:"ledgerly-ai:"+(incident.assignedAgentKey??"kato"),
-        correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.path,logs),
-        taskKind:"engineering",workspacePath:work.path,sandbox:"workspace-write",
+        correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.workspacePath,logs),
+        taskKind:"engineering",workspacePath:work.workspacePath,sandbox:"workspace-write",
         timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,900_000),
       });
-      const paths=await this.workspace.changedPaths(work.path);
-      this.workspace.validateChangedPaths(paths);
+      const paths=await this.git.changedPaths(work.workspacePath);
+      this.git.validateChangedPaths(paths);
       if(!paths.length){
         await this.fail(incident,"Engineering investigation completed without a source change.",{
           diagnosis:sanitizeLedgerlyAiPublicText(fixResult.text).slice(0,8000),
@@ -498,22 +508,28 @@ export class LedgerlyAiIncidentService{
       await this.runtime.db.query("UPDATE lai_incidents SET status='testing',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
       incident.status="testing";
 
-      const checks=await this.workspace.runVerification(work.path,paths);
+      const checks=await this.workspace.runVerification(work.workspacePath,paths);
       for(const check of checks)await this.persistCheck(incident,check);
       const failed=checks.find(check=>check.status==="failed");
       if(failed){
         await this.fail(incident,"Required verification failed before QA.",{commandKey:failed.commandKey});
         return{incidentId:id,status:"failed",reason:"verification_failed"};
       }
-      const diff=await this.workspace.diffSummary(work.path);
-      const qa=await this.independentQa(incident,work.path,diff,checks);
+      const diff=await this.workspace.diffSummary(work.workspacePath);
+      const qa=await this.independentQa(incident,work.workspacePath,diff,checks);
       if(!qa.approved){
         await this.fail(incident,"Independent QA rejected the incident fix.",{qa});
         return{incidentId:id,status:"failed",reason:"qa_rejected"};
       }
 
-      const committed=await this.workspace.commit(work.path,id,incident.title);
-      const changeRisk=riskForChangedPaths(committed.paths);
+      const agentKey=incident.assignedAgentKey??"kato";
+      const committed=await this.git.commitWorkspace({
+        workspaceId:work.id,
+        subject:`fix(incident): ${incident.title.slice(0,120)}`,
+        agentName:BUILT_IN_EMPLOYEE_NAMES[agentKey]??agentKey,
+        metadata:{incidentId:id,severity:incident.severity,moduleKey:incident.moduleKey},
+      });
+      const changeRisk=riskForChangedPaths(committed.changedPaths);
       await this.runtime.db.query(
         `UPDATE lai_incidents SET fix_sha=$1,change_risk=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$3`,
         [committed.sha,changeRisk,id],
@@ -521,9 +537,30 @@ export class LedgerlyAiIncidentService{
       incident.fixSha=committed.sha;incident.changeRisk=changeRisk;
       await this.appendEvent({
         incidentId:id,organizationId:incident.organizationId,eventType:"fix_committed",status:"testing",
-        actorType:"system",actorId:"ledgerly-ai",summary:"Verified incident fix committed on the incident branch.",
-        metadata:{fixSha:committed.sha,branch:work.branch,changeRisk,changedPaths:committed.paths},
+        actorType:"system",actorId:"ledgerly-ai",summary:"Verified incident fix committed through Git governance.",
+        metadata:{
+          gitWorkspaceId:work.id,fixSha:committed.sha,branch:work.branchName,
+          changeRisk,changedPaths:committed.changedPaths,diffSummary:committed.diffSummary,
+        },
       });
+      let pullRequestId:string|null=null;
+      if(this.git.autoPrEnabled()){
+        try{
+          const pr=await this.git.createPullRequest({
+            workspaceId:work.id,
+            title:`Incident ${id}: ${incident.title}`,
+            createdBy:"ledgerly-ai",
+          });
+          pullRequestId=pr.id;
+          await this.appendEvent({
+            incidentId:id,organizationId:incident.organizationId,eventType:"pull_request_created",status:"testing",
+            actorType:"system",actorId:"ledgerly-ai",summary:"Created governed pull request for the incident fix.",
+            metadata:{pullRequestId:pr.id,url:pr.url,ciState:pr.ciState},
+          });
+        }catch(error){
+          throw new Error("Governed pull request creation failed: "+(error instanceof Error?error.message:String(error)));
+        }
+      }
 
       await this.runtime.db.query("UPDATE lai_incidents SET status='staging',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
       incident.status="staging";
@@ -536,7 +573,7 @@ export class LedgerlyAiIncidentService{
       );
       let staging;
       try{
-        staging=await this.staging.deploy(id,work.path);
+        staging=await this.staging.deploy(id,work.workspacePath);
       }catch(error){
         await this.runtime.db.query(
           `UPDATE lai_incident_deployments SET status='failed',
@@ -560,7 +597,14 @@ export class LedgerlyAiIncidentService{
         actorType:"system",actorId:"ledgerly-ai",summary:"Incident fix passed isolated staging deployment and smoke checks.",
         metadata:{deploymentId,projectKey:staging.projectKey,smoke:staging.smoke},
       });
-      const approvalId=await this.requestProductionApproval(incident,committed.sha,committed.paths,deploymentId);
+      const approvalId=await this.requestProductionApproval(incident,committed.sha,committed.changedPaths,deploymentId);
+      if(pullRequestId){
+        await this.appendEvent({
+          incidentId:id,organizationId:incident.organizationId,eventType:"ci_tracking_active",status:"awaiting_approval",
+          actorType:"system",actorId:"ledgerly-ai",summary:"Production gate is tracking pull-request CI.",
+          metadata:{pullRequestId},
+        });
+      }
       return{incidentId:id,status:"awaiting_approval",fixSha:committed.sha,approvalId};
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
@@ -622,6 +666,7 @@ export class LedgerlyAiIncidentService{
       "SELECT status FROM lai_approvals WHERE id=$1 AND organization_id=$2 AND incident_id=$3",
       [incident.productionApprovalId,principal.organizationId,id],
     );
+    await this.git.assertIncidentDeployReady(id);
     if(approval.rows[0]?.status!=="approved")throw new AppError(409,"INCIDENT_PRODUCTION_NOT_APPROVED","Production deployment has not been approved.");
     const deploymentId=createId("laidep");
     await this.runtime.db.query(

@@ -2,9 +2,10 @@ import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 
-const SECRET_ENV_KEYS = new Set([
-  "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "CODEX_API_KEY",
-  "OPENROUTER_API_KEY", "GROQ_API_KEY", "GOOGLE_API_KEY",
+const SAFE_PROVIDER_ENV_KEYS = new Set([
+  "PATH","LANG","LC_ALL","LC_CTYPE","TERM","TZ","TMPDIR",
+  "HTTP_PROXY","HTTPS_PROXY","NO_PROXY","http_proxy","https_proxy","no_proxy",
+  "SSL_CERT_FILE","SSL_CERT_DIR","NODE_EXTRA_CA_CERTS",
 ]);
 
 export class ProviderSessionStore {
@@ -40,7 +41,7 @@ export class ProviderSessionStore {
   environment(provider: LedgerlyAiProviderId): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const [key, value] of Object.entries(process.env)) {
-      if (value !== undefined && !SECRET_ENV_KEYS.has(key)) env[key] = value;
+      if (value !== undefined && SAFE_PROVIDER_ENV_KEYS.has(key)) env[key] = value;
     }
     const home = this.home(provider);
     env.HOME = home;
