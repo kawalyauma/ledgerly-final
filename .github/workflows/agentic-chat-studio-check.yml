@@ -21,7 +21,7 @@ jobs:
       - name: Typecheck Node backend
         run: npm run typecheck
       - name: Run Agentic Node regression tests
-        run: npx vitest run src/features/agentic-employees/light-tool-registry.test.ts src/features/agentic-employees/quick-commands.test.ts src/features/agentic-employees/document-service.test.ts src/features/agentic-employees/system-gateway.test.ts
+        run: npx vitest run src/features/agentic-employees/light-tool-registry.test.ts src/features/agentic-employees/quick-commands.test.ts src/features/agentic-employees/analysis-knowledge.test.ts src/features/agentic-employees/response-intelligence/engine.test.ts src/features/agentic-employees/document-service.test.ts src/features/agentic-employees/system-gateway.test.ts
       - name: Strict Node build
         run: npm run build:strict
 
@@ -38,6 +38,28 @@ jobs:
       - name: Root typecheck
         run: npm run typecheck
       - name: Run Agentic root regression tests
-        run: npx vitest run modules/agentic-employees/backend/light-tool-registry.test.ts modules/agentic-employees/backend/quick-commands.test.ts selfhost/document-service.test.ts selfhost/system-gateway.test.ts
+        run: npx vitest run modules/agentic-employees/backend/light-tool-registry.test.ts modules/agentic-employees/backend/quick-commands.test.ts modules/agentic-employees/backend/analysis-knowledge.test.ts modules/agentic-employees/backend/response-intelligence/engine.test.ts selfhost/document-service.test.ts selfhost/system-gateway.test.ts
       - name: Build web
         run: npm run build:web
+
+
+  python-response-intelligence:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/response-intelligence-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+      - name: Install Response Intelligence
+        run: pip install -e ".[dev]"
+      - name: Compile Python sources
+        run: python -m compileall -q src tests
+      - name: Lint Python sources
+        run: ruff check src tests
+      - name: Run Python Response Intelligence tests
+        run: pytest -q
