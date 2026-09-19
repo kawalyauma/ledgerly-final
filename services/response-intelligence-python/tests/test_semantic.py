@@ -48,3 +48,5 @@ def test_extracts_nested_tool_result_scalars() -> None:
     )
     assert any(fact.value == 120000 for fact in evidence.facts)
     assert any(fact.value == "outstanding" for fact in evidence.facts)
+    assert any(fact.subject == "Amina" for fact in evidence.facts)
+    assert not any(fact.predicate.lower() in {"tool", "module", "kind"} for fact in evidence.facts)
