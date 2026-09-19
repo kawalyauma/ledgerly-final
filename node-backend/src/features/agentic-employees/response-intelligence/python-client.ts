@@ -107,3 +107,56 @@ export async function checkPythonResponseIntelligence(env:Env):Promise<Record<st
     return{configured:true,reachable:false,status:"unreachable",error:error instanceof Error?error.message:String(error)};
   }finally{clearTimeout(timer);}
 }
+
+
+async function trainingRequest<T>(
+  env:Env,
+  path:string,
+  init:RequestInit={},
+):Promise<T|null>{
+  if(!configured(env))return null;
+  const base=String(env.RESPONSE_INTELLIGENCE_URL||"").replace(/\/$/,"");
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Math.min(Math.max(Number(env.RESPONSE_INTELLIGENCE_TIMEOUT_MS||30000),1000),120000));
+  const headers:Record<string,string>={"Content-Type":"application/json",...(init.headers as Record<string,string>||{})};
+  const token=String(env.RESPONSE_INTELLIGENCE_TOKEN||"").trim();if(token)headers["X-Response-Intelligence-Token"]=token;
+  try{
+    const response=await fetch(base+path,{...init,headers,signal:controller.signal});
+    if(!response.ok)return null;
+    return await response.json().catch(()=>null) as T|null;
+  }catch{return null;}finally{clearTimeout(timer);}
+}
+
+export async function submitPythonResponseFeedback(env:Env,input:{
+  organizationId:string;
+  responseFingerprint:string;
+  rating:-1|0|1;
+  comment?:string;
+  correctionText?:string;
+  entityLabel?:string;
+  approveOriginal?:boolean;
+}):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/feedback",{
+    method:"POST",
+    body:JSON.stringify({
+      organization_id:input.organizationId,
+      response_fingerprint:input.responseFingerprint,
+      rating:input.rating,
+      comment:input.comment||"",
+      correction_text:input.correctionText||"",
+      entity_label:input.entityLabel||"",
+      approve_original:Boolean(input.approveOriginal),
+    }),
+  });
+}
+
+export async function getPythonLearningStatus(env:Env,organizationId:string):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/stats?organization_id="+encodeURIComponent(organizationId));
+}
+
+export async function setPythonTrainingExampleStatus(
+  env:Env,
+  exampleId:string,
+  status:"approve"|"reject",
+):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/examples/"+encodeURIComponent(exampleId)+"/"+status,{method:"POST"});
+}
