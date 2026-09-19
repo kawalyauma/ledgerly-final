@@ -234,7 +234,7 @@ function ChatLearningFeedback({message}:{message:Message}){
     setState("sending");
     try{
       await post<any>("/agentic-employees/chat-studio/response-feedback",{responseFingerprint:fingerprint,rating,approveOriginal,correctionText:rating<0?correction.trim():""});
-      setNote(rating>0?"Approved for learning.":"Correction saved for future responses.");setState("sent");
+      setNote(rating>0?"Feedback saved for learning review.":"Correction saved for learning review.");setState("sent");
     }catch(error){setNote(errorText(error));setState(rating<0?"correct":"idle");}
   }
   if(state==="sent")return <div className="acs-learn-saved"><CheckCircle2 size={12}/>{note}</div>;
