@@ -82,6 +82,8 @@ class ResponseIntelligenceEngine:
                 limit=self.settings.training_retrieval_limit,
                 include_global=True,
             )
+            if style_profile.approved_examples>=5 and style_profile.preferred_strategy:
+                plan=self.planner.apply_strategy_preference(plan,style_profile.preferred_strategy)
             for rule in style_profile.rules:
                 if rule not in plan.editorial_rules:
                     plan.editorial_rules.append(rule)
