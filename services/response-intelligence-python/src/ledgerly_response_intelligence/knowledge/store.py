@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .models import KnowledgeChunk, KnowledgeSearchHit, KnowledgeSource, KnowledgeSourceCreate, KnowledgeStats
+from .models import KnowledgeSearchHit, KnowledgeSource, KnowledgeSourceCreate, KnowledgeStats
 
 
 def _now() -> str:
@@ -55,8 +55,8 @@ def chunk_text(text: str, *, target_chars: int = 2200, overlap_chars: int = 240)
                 current=current[max(0,target_chars-overlap_chars):]
     if current:
         chunks.append(current)
-    clean=[]
-    seen=set()
+    clean:list[str]=[]
+    seen:set[str]=set()
     for item in chunks:
         item=_normalize_space(item.replace("\x00"," "))
         digest=_sha256(item)
@@ -276,7 +276,7 @@ class KnowledgeStore:
                 rows=db.execute(sql,tuple([*args,*like_args,max_results*6])).fetchall()
 
         tokens=set(re.findall(r"[a-z0-9]+",query.lower()))
-        hits=[]
+        hits:list[KnowledgeSearchHit]=[]
         for row in rows:
             haystack=(str(row["title"])+" "+str(row["content"])+" "+" ".join(json.loads(str(row["tags_json"] or "[]")))).lower()
             doc_tokens=set(re.findall(r"[a-z0-9]+",haystack))
@@ -292,7 +292,7 @@ class KnowledgeStore:
                 tags=list(json.loads(str(row["tags_json"] or "[]"))),
             ))
         hits.sort(key=lambda item:(-item.score,item.source_id,item.chunk_id))
-        dedup=[];seen=set()
+        dedup:list[KnowledgeSearchHit]=[];seen:set[tuple[str,str]]=set()
         for hit in hits:
             key=(hit.source_id,hit.content[:160])
             if key in seen:continue
