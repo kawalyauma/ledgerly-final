@@ -76,6 +76,10 @@ async def health() -> dict[str, object]:
         "providerConfigured": settings.provider_enabled,
         "externalToolsEnabled": settings.allow_external_tools,
         "webSearchEnabled": settings.allow_web_search,
+        "learningEnabled": settings.learning_enabled,
+        "learningRetrievalEnabled": settings.learning_retrieval_enabled,
+        "trainingPrivacyMode": settings.training_privacy_mode,
+        "preferActiveAdapter": settings.training_prefer_active_adapter,
     }
 
 
@@ -89,6 +93,10 @@ async def capabilities(engine: ResponseIntelligenceEngine = Depends(get_engine))
         "model": settings.model,
         "externalToolsEnabled": settings.allow_external_tools,
         "webSearchEnabled": settings.allow_web_search,
+        "learningEnabled": settings.learning_enabled,
+        "learningRetrievalEnabled": settings.learning_retrieval_enabled,
+        "trainingPrivacyMode": settings.training_privacy_mode,
+        "preferActiveAdapter": settings.training_prefer_active_adapter,
         "tools": tools,
         "qualityDimensions": [
             "grounding",
