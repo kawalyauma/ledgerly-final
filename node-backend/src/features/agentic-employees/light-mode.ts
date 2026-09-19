@@ -45,6 +45,18 @@ type UsageSummary = {
 
 const KINDS: LightTaskKind[] = ["query", "report", "create", "update", "delete", "action", "communication", "document", "analysis"];
 
+function pythonGeneration(runtime:Runtime){
+  const apiStyle=runtime.apiStyle==="anthropic"?"anthropic":runtime.apiStyle==="responses"?"responses":"chat-completions";
+  return{
+    provider:String(runtime.provider||""),
+    apiStyle,
+    baseUrl:String(runtime.baseUrl||""),
+    apiKey:String(runtime.apiKey||""),
+    model:String(runtime.model||""),
+    timeoutSeconds:Math.min(Math.max(Number(runtime.config?.timeoutMs||45000)/1000,1),120),
+  } as const;
+}
+
 function latestUser(input: LightInput) {
   return [...input.messages].reverse().find(message => message.role === "user")?.content.trim() || "";
 }
@@ -486,6 +498,7 @@ export async function runLightAgent(input: LightInput) {
     },
     detail:"standard",
     providerMode:"auto",
+    generation:pythonGeneration(runtime),
     maxWords:900,
   });
   if(pythonResponse){
@@ -586,6 +599,7 @@ export async function runCompositeReport(input: LightInput, prompt: string) {
     context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:"composite report",category:"report",recentResponses,locale:"en-UG",currency:"UGX"},
     detail:"standard",
     providerMode:"auto",
+    generation:pythonGeneration(runtime),
     maxWords:1400,
   });
   let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(reportSemantic,responseInput);
@@ -681,6 +695,7 @@ export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisM
    context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:topic?.label||"",category:topic?.category||"",entityType:entity?.type||"",entityLabel:entity?.label||"",recentResponses,locale:"en-UG",currency:"UGX"},
    detail:"deep",
    providerMode:"auto",
+    generation:pythonGeneration(runtime),
    maxWords:1800,
  });
  let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(analysis,responseInput),responseModel=pythonResponse?.model||runtime.model;
