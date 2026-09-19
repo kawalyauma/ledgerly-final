@@ -9,7 +9,7 @@ import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOption
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
 import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
-import { checkPythonResponseIntelligence,getPythonLearningStatus,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
+import { checkPythonResponseIntelligence,getPythonLearningStatus,getPythonTrainingExamples,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -61,6 +61,14 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
    approveOriginal:parsed.data.approveOriginal,
    trustedReviewer:p.role==="owner"||p.role==="admin",
  });
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/training-examples",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can review training material");
+ const status=String(c.req.query("status")||"candidate"),limit=Number(c.req.query("limit")||100);
+ const data=await getPythonTrainingExamples(c.env,p.organizationId,status,limit);
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
  return c.json({data});
 });
