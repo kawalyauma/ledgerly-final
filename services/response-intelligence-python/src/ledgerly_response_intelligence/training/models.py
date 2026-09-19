@@ -113,7 +113,44 @@ class TrainingStats(BaseModel):
     readiness: Literal["empty", "collecting", "sft-ready", "preference-ready"] = "empty"
 
 
+class TrainingRunRecord(BaseModel):
+    run_id: str
+    organization_id: str = ""
+    objective: str
+    mode: str
+    base_model: str
+    dataset_path: str
+    output_dir: str
+    status: str
+    config: dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+    completed_at: str = ""
+
+
+class AdapterRecord(BaseModel):
+    adapter_id: str
+    organization_id: str = ""
+    name: str
+    base_model: str
+    path: str
+    active: bool = False
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class AdapterRegister(BaseModel):
+    organization_id: str = ""
+    name: str
+    base_model: str
+    path: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    activate: bool = False
+
+
 class FineTuneConfig(BaseModel):
+    organization_id: str = ""
+    objective: Literal["sft", "dpo"] = "sft"
     base_model: str
     dataset_path: str
     output_dir: str
@@ -127,4 +164,5 @@ class FineTuneConfig(BaseModel):
     lora_alpha: int = Field(default=32, ge=1, le=1024)
     lora_dropout: float = Field(default=0.05, ge=0, le=0.5)
     target_modules: list[str] | Literal["all-linear"] = "all-linear"
+    dpo_beta: float = Field(default=0.1, gt=0, le=2)
     seed: int = 42
