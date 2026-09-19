@@ -294,6 +294,17 @@ async def register_training_adapter(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@app.post("/v1/training/adapters/deactivate", dependencies=[Depends(authorize)])
+async def deactivate_training_adapters(
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> dict[str, object]:
+    require_training(engine)
+    assert engine.training_store is not None
+    changed=engine.training_store.deactivate_adapters(organization_id)
+    return {"organization_id":organization_id,"deactivated":changed}
+
+
 @app.post("/v1/training/adapters/{adapter_id}/activate", response_model=AdapterRecord, dependencies=[Depends(authorize)])
 async def activate_training_adapter(
     adapter_id: str,
