@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from functools import lru_cache
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 
 from . import __version__
 from .config import Settings, get_settings
@@ -25,6 +25,21 @@ app = FastAPI(
     version=__version__,
     description="Evidence-grounded professional response planning, realization and quality control.",
 )
+
+MAX_BODY_BYTES = 3 * 1024 * 1024
+
+
+@app.middleware("http")
+async def limit_request_body(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH"}:
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                if int(content_length) > MAX_BODY_BYTES:
+                    raise HTTPException(status_code=413, detail="Request payload is too large.")
+            except ValueError:
+                pass
+    return await call_next(request)
 
 
 @lru_cache(maxsize=1)
@@ -52,6 +67,29 @@ async def health() -> dict[str, object]:
         "providerConfigured": settings.provider_enabled,
         "externalToolsEnabled": settings.allow_external_tools,
         "webSearchEnabled": settings.allow_web_search,
+    }
+
+
+@app.get("/v1/capabilities", dependencies=[Depends(authorize)])
+async def capabilities(engine: ResponseIntelligenceEngine = Depends(get_engine)) -> dict[str, object]:
+    tools = [item.model_dump(mode="json") for item in await engine.tool_broker.capabilities()]
+    settings = get_settings()
+    return {
+        "providerConfigured": settings.provider_enabled,
+        "provider": settings.provider,
+        "model": settings.model,
+        "externalToolsEnabled": settings.allow_external_tools,
+        "webSearchEnabled": settings.allow_web_search,
+        "tools": tools,
+        "qualityDimensions": [
+            "grounding",
+            "completeness",
+            "readability",
+            "naturalness",
+            "variation",
+            "causality",
+            "professionalism",
+        ],
     }
 
 
