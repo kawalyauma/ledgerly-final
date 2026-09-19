@@ -30,6 +30,8 @@ type IncidentRow={
   branchName:string|null;workspacePath:string|null;baseSha:string|null;fixSha:string|null;
   changeRisk:LedgerlyAiRiskLevel|null;productionApprovalId:string|null;
   detectedAt:string;lastSeenAt:string;verifiedAt:string|null;closedAt:string|null;
+  lastTimelineEventAt:string|null;lastDispatchAt:string|null;suppressedSignalCount:number;
+  regressionOfIncidentId:string|null;
 };
 type QaResult={approved:boolean;summary:string;risks:string[];followUps:string[]};
 
@@ -39,6 +41,11 @@ const QA_CLOSE="[[/LEDGERLY_AI_QA]]";
 
 function maxRisk(a:LedgerlyAiRiskLevel,b:LedgerlyAiRiskLevel){
   return RISK_ORDER[a]>=RISK_ORDER[b]?a:b;
+}
+function raiseRisk(value:LedgerlyAiRiskLevel):LedgerlyAiRiskLevel{
+  if(value==="low")return"medium";
+  if(value==="medium")return"high";
+  return"critical";
 }
 function isAdmin(principal:AuthPrincipal){
   return principal.role==="owner"||principal.role==="admin";
@@ -94,6 +101,9 @@ export class LedgerlyAiIncidentService{
       baseSha:row.baseSha??null,fixSha:row.fixSha??null,changeRisk:row.changeRisk??null,
       productionApprovalId:row.productionApprovalId??null,detectedAt:row.detectedAt,
       lastSeenAt:row.lastSeenAt,verifiedAt:row.verifiedAt??null,closedAt:row.closedAt??null,
+      lastTimelineEventAt:row.lastTimelineEventAt??null,lastDispatchAt:row.lastDispatchAt??null,
+      suppressedSignalCount:Number(row.suppressedSignalCount??0),
+      regressionOfIncidentId:row.regressionOfIncidentId??null,
     };
   }
 
@@ -106,7 +116,10 @@ export class LedgerlyAiIncidentService{
       http_status AS "httpStatus",branch_name AS "branchName",workspace_path AS "workspacePath",
       base_sha AS "baseSha",fix_sha AS "fixSha",change_risk AS "changeRisk",
       production_approval_id AS "productionApprovalId",detected_at AS "detectedAt",
-      last_seen_at AS "lastSeenAt",verified_at AS "verifiedAt",closed_at AS "closedAt"
+      last_seen_at AS "lastSeenAt",verified_at AS "verifiedAt",closed_at AS "closedAt",
+      last_timeline_event_at AS "lastTimelineEventAt",last_dispatch_at AS "lastDispatchAt",
+      suppressed_signal_count AS "suppressedSignalCount",
+      regression_of_incident_id AS "regressionOfIncidentId"
       FROM lai_incidents`;
   }
 
@@ -156,6 +169,7 @@ export class LedgerlyAiIncidentService{
       path:input.path??null,
       code:input.code??null,
       httpStatus:input.httpStatus??null,
+      severityHint:input.severityHint??null,
       moduleKey:input.moduleKey??null,
       correlationId:input.correlationId??null,
       message:boundedText(input.message,5000),
@@ -172,75 +186,133 @@ export class LedgerlyAiIncidentService{
 
   async signal(input:IncidentSignalInput){
     const classification=classifyIncident(input);
-    const context=await this.safeSignalContext(input);
+    let context=await this.safeSignalContext(input);
+    const eventCooldownMs=this.config.LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS*1000;
+    const dispatchCooldownMs=this.config.LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS*1000;
     const client=await this.runtime.db.connect();
     let incident:IncidentRow;
     let created=false;
+    let regression=false;
+    let emitTimeline=true;
+    let shouldDispatch=false;
     try{
       await client.query("BEGIN");
       await client.query("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",[classification.fingerprint]);
       const existing=await client.query(
-        this.selectIncident()+`
-          WHERE fingerprint=$1 AND organization_id IS NOT DISTINCT FROM $2
-            AND status NOT IN ('closed','failed')
-          ORDER BY last_seen_at DESC LIMIT 1`,
-        [classification.fingerprint,input.organizationId??null],
+        this.selectIncident()+
+          " WHERE fingerprint=$1 AND organization_id IS NOT DISTINCT FROM $2"+
+          " AND status<>\'closed\'"+
+          " AND (status<>\'failed\' OR last_dispatch_at>CURRENT_TIMESTAMP-($3*INTERVAL \'1 second\'))"+
+          " ORDER BY last_seen_at DESC LIMIT 1",
+        [classification.fingerprint,input.organizationId??null,this.config.LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS],
       );
       if(existing.rows[0]){
         const current=this.mapIncident(existing.rows[0]);
         const severity=maxRisk(current.severity,classification.severity);
+        emitTimeline=!current.lastTimelineEventAt||
+          Date.now()-new Date(current.lastTimelineEventAt).getTime()>=eventCooldownMs;
         await client.query(
-          `UPDATE lai_incidents SET occurrence_count=occurrence_count+1,last_seen_at=CURRENT_TIMESTAMP,
-              latest_context_json=$1::jsonb,severity=$2,
-              assigned_agent_key=$3,assigned_agent_id=$4,module_key=$5,error_code=$6,http_status=$7,
-              correlation_id=COALESCE($8,correlation_id),updated_at=CURRENT_TIMESTAMP
-            WHERE id=$9`,
+          "UPDATE lai_incidents SET occurrence_count=occurrence_count+1,last_seen_at=CURRENT_TIMESTAMP,"+
+          " latest_context_json=$1::jsonb,severity=$2,assigned_agent_key=$3,assigned_agent_id=$4,"+
+          " module_key=$5,error_code=$6,http_status=$7,correlation_id=COALESCE($8,correlation_id),"+
+          " suppressed_signal_count=suppressed_signal_count+$9,"+
+          " last_timeline_event_at=CASE WHEN $10 THEN CURRENT_TIMESTAMP ELSE last_timeline_event_at END,"+
+          " updated_at=CURRENT_TIMESTAMP WHERE id=$11",
           [
             JSON.stringify(context),severity,classification.assignedAgentKey,
             input.organizationId?builtInEmployeeId(input.organizationId,classification.assignedAgentKey):null,
-            classification.moduleKey,input.code??null,input.httpStatus??null,input.correlationId??null,current.id,
+            classification.moduleKey,input.code??null,input.httpStatus??null,input.correlationId??null,
+            emitTimeline?0:1,emitTimeline,current.id,
           ],
         );
         incident=await this.incidentWithClient(client,current.id);
       }else{
+        const previous=await client.query(
+          this.selectIncident()+
+            " WHERE fingerprint=$1 AND organization_id IS NOT DISTINCT FROM $2 AND status=\'closed\'"+
+            " ORDER BY closed_at DESC NULLS LAST,last_seen_at DESC LIMIT 1",
+          [classification.fingerprint,input.organizationId??null],
+        );
+        const previousIncident=previous.rows[0]?this.mapIncident(previous.rows[0]):null;
+        regression=Boolean(previousIncident);
+        const severity=regression?raiseRisk(classification.severity):classification.severity;
+        if(previousIncident){
+          context=safeJson({
+            ...context,
+            regression:{
+              previousIncidentId:previousIncident.id,
+              previousSeverity:previousIncident.severity,
+              previousClosedAt:previousIncident.closedAt,
+              previousFixSha:previousIncident.fixSha,
+            },
+          });
+        }
         const id=createId("laiinc");
         await client.query(
-          `INSERT INTO lai_incidents(
-            id,organization_id,fingerprint,source,signal_type,title,severity,status,assigned_agent_id,
-            assigned_agent_key,correlation_id,context_json,latest_context_json,module_key,error_code,http_status,
-            occurrence_count,first_seen_at,last_seen_at
-          ) VALUES($1,$2,$3,$4,$5,$6,$7,'open',$8,$9,$10,$11::jsonb,$11::jsonb,$12,$13,$14,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+          "INSERT INTO lai_incidents("+
+          " id,organization_id,fingerprint,source,signal_type,title,severity,status,assigned_agent_id,"+
+          " assigned_agent_key,correlation_id,context_json,latest_context_json,module_key,error_code,http_status,"+
+          " occurrence_count,first_seen_at,last_seen_at,last_timeline_event_at,regression_of_incident_id"+
+          " ) VALUES($1,$2,$3,$4,$5,$6,$7,\'open\',$8,$9,$10,$11::jsonb,$11::jsonb,$12,$13,$14,1,"+
+          " CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,$15)",
           [
             id,input.organizationId??null,classification.fingerprint,input.source,input.signalType,
-            classification.title,classification.severity,
+            classification.title,severity,
             input.organizationId?builtInEmployeeId(input.organizationId,classification.assignedAgentKey):null,
             classification.assignedAgentKey,input.correlationId??null,JSON.stringify(context),
-            classification.moduleKey,input.code??null,input.httpStatus??null,
+            classification.moduleKey,input.code??null,input.httpStatus??null,previousIncident?.id??null,
           ],
         );
         incident=await this.incidentWithClient(client,id);
         created=true;
+      }
+
+      const qualifies=incident.severity==="high"||incident.severity==="critical"||
+        (incident.severity==="medium"&&Number(incident.occurrenceCount)>=3);
+      const dispatchReady=!incident.lastDispatchAt||
+        Date.now()-new Date(incident.lastDispatchAt).getTime()>=dispatchCooldownMs;
+      if(incident.status==="open"&&qualifies&&dispatchReady){
+        const claimed=await client.query(
+          "UPDATE lai_incidents SET last_dispatch_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP"+
+          " WHERE id=$1 AND status=\'open\'"+
+          " AND (last_dispatch_at IS NULL OR last_dispatch_at<CURRENT_TIMESTAMP-($2*INTERVAL \'1 second\'))"+
+          " RETURNING id,last_dispatch_at AS \"lastDispatchAt\"",
+          [incident.id,this.config.LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS],
+        );
+        if(claimed.rowCount){
+          shouldDispatch=true;
+          incident.lastDispatchAt=claimed.rows[0].lastDispatchAt;
+        }
       }
       await client.query("COMMIT");
     }catch(error){
       await client.query("ROLLBACK");throw error;
     }finally{client.release();}
 
-    await this.appendEvent({
-      incidentId:incident.id,organizationId:incident.organizationId,eventType:created?"detected":"repeated",
-      status:incident.status,actorType:"system",actorId:"ledgerly-ai",
-      summary:created?"Engineering incident detected.":"Engineering incident repeated.",
-      metadata:{occurrenceCount:incident.occurrenceCount,severity:incident.severity,assignedAgentKey:incident.assignedAgentKey},
-    });
-    const shouldProcess=Boolean(incident.organizationId)&&incident.status==="open"&&(
-      classification.autoProcess||(incident.severity==="medium"&&incident.occurrenceCount>=3)
-    );
-    if(shouldProcess){
-      await this.runtime.queue.publish("ledgerly-ai.incident.process",{incidentId:incident.id},{queue:"ledgerly-ai",maxAttempts:2});
+    if(created||emitTimeline){
+      const eventType=regression?"regression_detected":created?"detected":"repeated";
+      const summary=regression?"Previously resolved engineering incident regressed.":
+        created?"Engineering incident detected.":"Engineering incident repeated after cooldown.";
+      await this.appendEvent({
+        incidentId:incident.id,organizationId:incident.organizationId,eventType,
+        status:incident.status,actorType:"system",actorId:"ledgerly-ai",summary,
+        metadata:{
+          occurrenceCount:incident.occurrenceCount,severity:incident.severity,
+          assignedAgentKey:incident.assignedAgentKey,
+          suppressedSignalCount:incident.suppressedSignalCount,
+          regressionOfIncidentId:incident.regressionOfIncidentId,
+        },
+      });
+    }
+    if(shouldDispatch){
+      await this.runtime.queue.publish(
+        "ledgerly-ai.incident.process",
+        {incidentId:incident.id},
+        {queue:"ledgerly-ai",maxAttempts:2},
+      );
     }
     return incident;
   }
-
   private async incidentWithClient(client:PoolClient,id:string){
     const result=await client.query(this.selectIncident()+" WHERE id=$1 LIMIT 1",[id]);
     return this.mapIncident(result.rows[0]);

@@ -11,6 +11,7 @@ import { LedgerlyAiForgeService } from "./forge/service.js";
 import { LedgerlyAiCustomRuntimeService } from "./custom-runtime/service.js";
 import { LedgerlyAiIncidentService } from "./incidents/service.js";
 import { LedgerlyAiGitService } from "./git/service.js";
+import { LedgerlyAiMonitoringService } from "./monitoring/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -40,6 +41,7 @@ export class LedgerlyAiFoundationService {
   readonly customRuntime: LedgerlyAiCustomRuntimeService;
   readonly incidents: LedgerlyAiIncidentService;
   readonly git: LedgerlyAiGitService;
+  readonly monitoring: LedgerlyAiMonitoringService;
   private readonly logger: LedgerlyAiLogger;
   private startPromise: Promise<void> | null = null;
 
@@ -76,6 +78,7 @@ export class LedgerlyAiFoundationService {
     this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway);
     this.git = new LedgerlyAiGitService(runtime,this.config);
     this.incidents = new LedgerlyAiIncidentService(runtime,this.config,this.providers,this.employees,this.logger,this.git);
+    this.monitoring = new LedgerlyAiMonitoringService(runtime,this.config,this.incidents,this.git);
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,
@@ -143,6 +146,9 @@ export class LedgerlyAiFoundationService {
         gitCommits: string | null;
         gitPullRequests: string | null;
         gitCiChecks: string | null;
+        monitorSamples: string | null;
+        monitorState: string | null;
+        monitorSummaries: string | null;
       }>(
         `SELECT
            to_regclass('public.lai_chats')::text AS chats,
@@ -164,7 +170,10 @@ export class LedgerlyAiFoundationService {
            to_regclass('public.lai_git_workspaces')::text AS "gitWorkspaces",
            to_regclass('public.lai_git_commits')::text AS "gitCommits",
            to_regclass('public.lai_git_pull_requests')::text AS "gitPullRequests",
-           to_regclass('public.lai_git_ci_checks')::text AS "gitCiChecks"`,
+           to_regclass('public.lai_git_ci_checks')::text AS "gitCiChecks",
+           to_regclass('public.lai_monitor_samples')::text AS "monitorSamples",
+           to_regclass('public.lai_monitor_state')::text AS "monitorState",
+           to_regclass('public.lai_monitor_summaries')::text AS "monitorSummaries"`,
       );
       const row = result.rows[0];
       schema = !row?.chats || !row.audit || !row.memories || !row.memoryAudit
@@ -172,6 +181,7 @@ export class LedgerlyAiFoundationService {
         || !row.customShares || !row.customTriggers || !row.customRuns || !row.customEvents
         || !row.incidentEvents || !row.incidentChecks || !row.incidentDeployments
         || !row.gitWorkspaces || !row.gitCommits || !row.gitPullRequests || !row.gitCiChecks
+        || !row.monitorSamples || !row.monitorState || !row.monitorSummaries
         ? {
             status: "error",
             latencyMs: Math.round(performance.now() - schemaStarted),

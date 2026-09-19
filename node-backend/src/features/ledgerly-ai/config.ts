@@ -51,11 +51,33 @@ const schema = z.object({
   LEDGERLY_AI_GITHUB_REPOSITORY: z.string().default(""),
   LEDGERLY_AI_GITHUB_TOKEN: z.string().default(""),
   LEDGERLY_AI_GITHUB_API_URL: z.string().url().default("https://api.github.com"),
+  LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS: z.coerce.number().int().min(30).max(86_400).default(300),
+  LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
+  LEDGERLY_AI_MONITOR_DB_WARN_MS: z.coerce.number().int().min(10).max(60_000).default(500),
+  LEDGERLY_AI_MONITOR_DB_CRITICAL_MS: z.coerce.number().int().min(50).max(120_000).default(2_000),
+  LEDGERLY_AI_MONITOR_SLOW_QUERY_MS: z.coerce.number().int().min(1_000).max(600_000).default(10_000),
+  LEDGERLY_AI_MONITOR_QUEUE_WARN: z.coerce.number().int().min(1).max(1_000_000).default(100),
+  LEDGERLY_AI_MONITOR_QUEUE_CRITICAL: z.coerce.number().int().min(1).max(1_000_000).default(1_000),
+  LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT: z.coerce.number().min(1).max(99).default(85),
+  LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT: z.coerce.number().min(1).max(100).default(95),
+  LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT: z.coerce.number().min(1).max(99).default(90),
+  LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT: z.coerce.number().min(1).max(100).default(97),
   LEDGERLY_AI_LOG_PROMPTS: envBoolean(false),
   LEDGERLY_AI_STARTUP_HEALTHCHECK: envBoolean(true),
 }).superRefine((value, ctx) => {
   if (value.LEDGERLY_AI_DEFAULT_PROVIDER === value.LEDGERLY_AI_FALLBACK_PROVIDER) {
     ctx.addIssue({ code: "custom", path: ["LEDGERLY_AI_FALLBACK_PROVIDER"], message: "Fallback provider must differ from the default provider." });
+  }
+  const orderedThresholds = [
+    ["LEDGERLY_AI_MONITOR_DB_WARN_MS","LEDGERLY_AI_MONITOR_DB_CRITICAL_MS"],
+    ["LEDGERLY_AI_MONITOR_QUEUE_WARN","LEDGERLY_AI_MONITOR_QUEUE_CRITICAL"],
+    ["LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT","LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT"],
+    ["LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT","LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT"],
+  ] as const;
+  for (const [warn,critical] of orderedThresholds) {
+    if (value[critical] <= value[warn]) {
+      ctx.addIssue({ code: "custom", path: [critical], message: critical + " must be greater than " + warn + "." });
+    }
   }
 });
 

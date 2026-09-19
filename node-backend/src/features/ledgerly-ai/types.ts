@@ -169,6 +169,10 @@ export type LedgerlyAiIncident = {
   lastSeenAt?: string;
   verifiedAt?: string | null;
   closedAt?: string | null;
+  lastTimelineEventAt?: string | null;
+  lastDispatchAt?: string | null;
+  suppressedSignalCount?: number;
+  regressionOfIncidentId?: string | null;
 };
 
 export type LedgerlyAiApproval = {

@@ -15,6 +15,7 @@ export type IncidentSignalInput={
   correlationId?:string|null;
   stack?:string|null;
   context?:Record<string,unknown>;
+  severityHint?:LedgerlyAiRiskLevel;
 };
 
 export type IncidentClassification={
@@ -27,30 +28,30 @@ export type IncidentClassification={
 };
 
 function compact(value:string){
-  return value.replace(/s+/g," ").trim();
+  return value.replace(/\s+/g," ").trim();
 }
 function normalizedMessage(value:string){
   return compact(value)
     .toLowerCase()
     .replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/gi,"<uuid>")
-    .replace(/[a-z]+_[a-z0-9]{12,}/gi,"<id>")
-    .replace(/[0-9a-f]{20,}/gi,"<hash>")
-    .replace(/d+/g,"#")
+    .replace(/\b[a-z]+_[a-z0-9]{12,}\b/gi,"<id>")
+    .replace(/\b[0-9a-f]{20,}\b/gi,"<hash>")
+    .replace(/\b\d+\b/g,"#")
     .slice(0,700);
 }
 function normalizedPath(value:string|undefined|null){
   if(!value)return "";
   return value
     .split("?")[0]!
-    .replace(//d+(?=/|$)/g,"/:id")
-    .replace(//[0-9a-f]{8}-[0-9a-f-]{27,}(?=/|$)/gi,"/:id")
-    .replace(//[a-z]+_[a-z0-9]{12,}(?=/|$)/gi,"/:id")
+    .replace(/\/\d+(?=\/|$)/g,"/:id")
+    .replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}(?=\/|$)/gi,"/:id")
+    .replace(/\/[a-z]+_[a-z0-9]{12,}(?=\/|$)/gi,"/:id")
     .slice(0,500);
 }
 export function affectedModule(pathValue?:string|null,explicit?:string|null){
   if(explicit?.trim())return explicit.trim().slice(0,120);
   const path=normalizedPath(pathValue);
-  const match=//api/v1/([^/]+)/.exec(path);
+  const match=/\/api\/v1\/([^/]+)/.exec(path);
   if(match?.[1])return match[1].slice(0,120);
   if(path.startsWith("/auth"))return "core-identity";
   if(path.startsWith("/system"))return "platform";
@@ -69,11 +70,11 @@ export function classifyIncident(input:IncidentSignalInput):IncidentClassificati
   const moduleKey=affectedModule(input.path,input.moduleKey);
   const text=textForClassification(input,moduleKey);
   let assignedAgentKey:IncidentClassification["assignedAgentKey"]="kato";
-  if(/(sql|postgres|database|migration|constraint|foreign key|deadlock|serialization)/.test(text))assignedAgentKey="tendo";
-  if(/(react|vite|frontend|browser|tsx|css|hydration|chunk|bundle)/.test(text))assignedAgentKey="maya";
-  if(/(test|vitest|assert|expect|qa|typecheck|typescript build)/.test(text))assignedAgentKey="nia";
-  if(/(docker|nginx|redis|storage|queue|worker|scheduler|502|503|gateway|connection refused|econnrefused)/.test(text))assignedAgentKey="jabali";
-  if(/(secret|credential|token leak|injection|privilege escalation|authorization bypass|auth bypass|xss|csrf|ssrf|path traversal|security)/.test(text))assignedAgentKey="safi";
+  if(/\b(sql|postgres|database|migration|constraint|foreign key|deadlock|serialization)\b/.test(text))assignedAgentKey="tendo";
+  if(/\b(react|vite|frontend|browser|tsx|css|hydration|chunk|bundle)\b/.test(text))assignedAgentKey="maya";
+  if(/\b(test|vitest|assert|expect|qa|typecheck|typescript build)\b/.test(text))assignedAgentKey="nia";
+  if(/\b(docker|nginx|redis|storage|queue|worker|scheduler|502|503|gateway|connection refused|econnrefused)\b/.test(text))assignedAgentKey="jabali";
+  if(/\b(secret|credential|token leak|injection|privilege escalation|authorization bypass|auth bypass|xss|csrf|ssrf|path traversal|security)\b/.test(text))assignedAgentKey="safi";
 
   let severity:LedgerlyAiRiskLevel="low";
   const status=input.httpStatus??0;
@@ -82,8 +83,15 @@ export function classifyIncident(input:IncidentSignalInput):IncidentClassificati
   else if(status>=400)severity="medium";
   if(input.signalType==="queue"&&Number(input.context?.attempts??0)>=Number(input.context?.maxAttempts??999))severity="high";
   if(input.signalType==="health")severity="high";
-  if(/(data loss|corruption|credential leak|secret leak|authorization bypass|privilege escalation|remote code execution|rce)/.test(text))severity="critical";
-  if(/(payment|journal|payroll|fees|accounting)/.test(text)&&status>=500&&severity==="high")severity="critical";
+  if(/\b(data loss|corruption|credential leak|secret leak|authorization bypass|privilege escalation|remote code execution|rce)\b/.test(text))severity="critical";
+  if(/\b(payment|journal|payroll|fees|accounting)\b/.test(text)&&status>=500&&severity==="high")severity="critical";
+  if(input.source.toLowerCase().includes("ci")||/\b(build|test|typecheck|ci)\b.*\b(fail|failed|failure)\b/.test(text)){
+    if(severity==="low")severity="medium";
+  }
+  if(input.severityHint){
+    const order:Record<LedgerlyAiRiskLevel,number>={low:1,medium:2,high:3,critical:4};
+    if(order[input.severityHint]>order[severity])severity=input.severityHint;
+  }
 
   const fingerprintSource=JSON.stringify({
     source:input.source,
@@ -131,7 +139,7 @@ export function riskForChangedPaths(paths:string[]):LedgerlyAiRiskLevel{
   if(normalized.some(path=>
     path.startsWith("web/")||
     path.includes("/frontend/")||
-    /.(tsx|jsx|css)$/.test(path)
+    /\.(tsx|jsx|css)$/.test(path)
   ))return "medium";
   return "low";
 }

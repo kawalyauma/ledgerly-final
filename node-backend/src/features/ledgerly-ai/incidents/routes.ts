@@ -35,6 +35,7 @@ export function createLedgerlyAiIncidentRoutes(service:LedgerlyAiIncidentService
       moduleKey:z.string().max(120).nullable().optional(),
       correlationId:z.string().max(200).nullable().optional(),
       context:z.record(z.string(),z.unknown()).optional(),
+      severityHint:z.enum(["low","medium","high","critical"]).optional(),
     }).safeParse(await c.req.json().catch(()=>null));
     if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid engineering signal.",parsed.error.flatten());
     const principal=c.get("principal");
