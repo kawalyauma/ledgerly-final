@@ -34,8 +34,8 @@ async def _brave(settings:Settings,request:ToolRequest)->ToolResult:
     payload=response.json()
     raw=((payload.get("web") or {}).get("results") or []) if isinstance(payload,dict) else []
     allowlist=_allowed_domains(settings)
-    results=[]
-    sources=[]
+    results:list[dict[str,object]]=[]
+    sources:list[dict[str,object]]=[]
     for item in raw:
         if not isinstance(item,dict):
             continue
@@ -75,8 +75,8 @@ async def _tavily(settings:Settings,request:ToolRequest)->ToolResult:
     response.raise_for_status()
     payload=response.json()
     raw=payload.get("results") or [] if isinstance(payload,dict) else []
-    results=[]
-    sources=[]
+    results:list[dict[str,object]]=[]
+    sources:list[dict[str,object]]=[]
     for item in raw:
         if not isinstance(item,dict):
             continue
