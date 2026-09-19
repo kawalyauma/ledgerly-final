@@ -67,6 +67,11 @@ class ResponseIntelligenceEngine:
             else None
         )
         self.knowledge_store = KnowledgeStore(settings.knowledge_db_path) if settings.knowledge_enabled else None
+        if self.knowledge_store is not None and settings.knowledge_seed_builtin_on_startup:
+            try:
+                self.knowledge_store.seed_starter_pack("")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not seed built-in analysis knowledge: %s",exc)
         self.knowledge_retriever = (
             KnowledgeRetriever(self.knowledge_store)
             if self.knowledge_store is not None and settings.knowledge_retrieval_enabled
