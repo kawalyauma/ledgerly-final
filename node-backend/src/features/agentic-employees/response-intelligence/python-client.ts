@@ -159,10 +159,12 @@ export async function getPythonLearningStatus(env:Env,organizationId:string):Pro
 
 export async function setPythonTrainingExampleStatus(
   env:Env,
+  organizationId:string,
   exampleId:string,
   status:"approve"|"reject",
 ):Promise<Record<string,unknown>|null>{
-  return trainingRequest<Record<string,unknown>>(env,"/v1/training/examples/"+encodeURIComponent(exampleId)+"/"+status,{method:"POST"});
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/examples/"+encodeURIComponent(exampleId)+"/"+status+query,{method:"POST"});
 }
 
 
@@ -211,7 +213,9 @@ export async function exportPythonTrainingDataset(
 
 export async function activatePythonAdapter(
   env:Env,
+  organizationId:string,
   adapterId:string,
 ):Promise<Record<string,unknown>|null>{
-  return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/"+encodeURIComponent(adapterId)+"/activate",{method:"POST"});
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/"+encodeURIComponent(adapterId)+"/activate"+query,{method:"POST"});
 }
