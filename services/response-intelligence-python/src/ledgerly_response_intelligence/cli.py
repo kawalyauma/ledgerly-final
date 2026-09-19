@@ -67,7 +67,7 @@ def _train(args: argparse.Namespace) -> None:
     config=FineTuneConfig(
         organization_id=args.organization,objective=args.objective,base_model=args.base_model,
         dataset_path=dataset,output_dir=output,mode=args.mode,epochs=args.epochs,
-        learning_rate=args.learning_rate,batch_size=args.batch_size,
+        learning_rate=args.learning_rate if args.learning_rate is not None else (1e-5 if args.objective=="dpo" else 1e-4),batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,max_length=args.max_length,
         lora_r=args.lora_r,lora_alpha=args.lora_alpha,lora_dropout=args.lora_dropout,dpo_beta=args.dpo_beta,
     )
@@ -119,7 +119,7 @@ def main() -> None:
     train.add_argument("--include-global",action="store_true")
     train.add_argument("--min-quality",type=float,default=0.82)
     train.add_argument("--epochs",type=float,default=2.0)
-    train.add_argument("--learning-rate",type=float,default=1e-4)
+    train.add_argument("--learning-rate",type=float,default=None)
     train.add_argument("--batch-size",type=int,default=1)
     train.add_argument("--gradient-accumulation",type=int,default=8)
     train.add_argument("--max-length",type=int,default=2048)
