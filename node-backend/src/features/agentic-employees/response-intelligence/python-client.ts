@@ -162,3 +162,16 @@ export async function setPythonTrainingExampleStatus(
 ):Promise<Record<string,unknown>|null>{
   return trainingRequest<Record<string,unknown>>(env,"/v1/training/examples/"+encodeURIComponent(exampleId)+"/"+status,{method:"POST"});
 }
+
+
+export async function getPythonTrainingExamples(
+  env:Env,
+  organizationId:string,
+  status="candidate",
+  limit=100,
+):Promise<Array<Record<string,unknown>>|null>{
+  const query=new URLSearchParams({
+    organization_id:organizationId,status_filter:status,limit:String(Math.max(1,Math.min(limit,500))),
+  });
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/training/examples?"+query.toString());
+}
