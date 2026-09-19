@@ -46,6 +46,18 @@ type UsageSummary = {
 
 const KINDS: LightTaskKind[] = ["query", "report", "create", "update", "delete", "action", "communication", "document", "analysis"];
 
+function responseToolPolicy(request:string){
+  const text=String(request||"");
+  const explicitWeb=(
+    /(^|\s)\/research\b/i.test(text)
+    || /\b(search|check|look up|find)\s+(the\s+)?(web|internet|online)\b/i.test(text)
+    || /\b(use|with|from)\s+(online|web|internet|external|public)\s+(sources?|research|information|evidence)\b/i.test(text)
+    || /\b(latest|current|recent)\s+(public|online|web|internet)\s+(information|sources?|research|guidance|policy|news)\b/i.test(text)
+    || /\bsearch\s+external\s+sources?\b/i.test(text)
+  );
+  return explicitWeb?["web.search"]:[];
+}
+
 function pythonGeneration(runtime:Runtime){
   const apiStyle=runtime.apiStyle==="anthropic"?"anthropic":runtime.apiStyle==="responses"?"responses":"chat-completions";
   return{
@@ -500,6 +512,7 @@ export async function runLightAgent(input: LightInput) {
     detail:"standard",
     providerMode:"auto",
     generation:pythonGeneration(runtime),
+    toolPolicy:responseToolPolicy(prompt),
     maxWords:900,
   });
   if(pythonResponse){
@@ -601,6 +614,7 @@ export async function runCompositeReport(input: LightInput, prompt: string) {
     detail:"standard",
     providerMode:"auto",
     generation:pythonGeneration(runtime),
+    toolPolicy:responseToolPolicy(request),
     maxWords:1400,
   });
   let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(reportSemantic,responseInput);
@@ -697,6 +711,7 @@ export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisM
    detail:"deep",
    providerMode:"auto",
     generation:pythonGeneration(runtime),
+   toolPolicy:responseToolPolicy(request),
    maxWords:1800,
  });
  let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(analysis,responseInput),responseModel=pythonResponse?.model||runtime.model;
