@@ -111,16 +111,36 @@ def _grounding(
     reasoning: ReasoningResult | None = None,
     reference_knowledge: list[KnowledgeSearchHit] | None = None,
 ) -> QualityDimension:
-    allowed = evidence_numbers(evidence, reasoning, reference_knowledge)
-    used = text_numbers(text)
-    unsupported = sorted(number for number in used if number not in allowed and not number.startswith("0."))
+    ledger_numbers=evidence_numbers(evidence,reasoning,None)
+    reference_numbers=evidence_numbers(EvidenceBundle(),None,reference_knowledge)
+    allowed=ledger_numbers|reference_numbers
+    used=text_numbers(text)
+    unsupported=sorted(number for number in used if number not in allowed and not number.startswith("0."))
     # Harmless numbered headings such as "1." are not usually factual claims.
-    unsupported = [number for number in unsupported if not (number.isdigit() and 1 <= int(number) <= 12)]
+    unsupported=[number for number in unsupported if not (number.isdigit() and 1<=int(number)<=12)]
     if not used:
         return _dimension(0.9 if evidence.facts else 1.0)
-    ratio = 1.0 - (len(unsupported) / max(len(used), 1))
-    notes = [f"Unsupported numeric claim detected: {number}" for number in unsupported[:8]]
-    return _dimension(ratio, *notes)
+    ratio=1.0-(len(unsupported)/max(len(used),1))
+    notes=[f"Unsupported numeric claim detected: {number}" for number in unsupported[:8]]
+
+    reference_only={number for number in used if number in reference_numbers and number not in ledger_numbers}
+    if reference_only and reference_knowledge:
+        lower=text.lower()
+        attributed=False
+        for item in reference_knowledge:
+            title=item.title.strip().lower()
+            url=item.url.strip().lower()
+            domain=""
+            if url:
+                domain=re.sub(r"^https?://","",url).split("/",1)[0]
+            if (title and len(title)>=5 and title in lower) or (domain and domain in lower):
+                attributed=True
+                break
+        if not attributed:
+            ratio-=0.18
+            notes.append("External numeric claims should name the retrieved source or source domain.")
+
+    return _dimension(ratio,*notes)
 
 
 def _completeness(text: str, evidence: EvidenceBundle, request: ResponseRequest) -> QualityDimension:
