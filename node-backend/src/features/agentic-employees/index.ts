@@ -21,7 +21,7 @@ function createBucketAdapter(runtime:Runtime){return{
 
 export const agenticEmployeesFeature: BackendFeature = {
   key: "agentic-employees",
-  version: "2.6.0-node",
+  version: "2.7.0-node",
   mount(app: NodeApp, runtime: Runtime) {
     const d1 = createD1Compat(runtime.db);
     const workBucket=createBucketAdapter(runtime);
