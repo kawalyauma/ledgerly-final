@@ -175,3 +175,17 @@ export async function getPythonTrainingExamples(
   });
   return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/training/examples?"+query.toString());
 }
+
+
+export async function getPythonStyleProfile(env:Env,organizationId:string):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/style-profile?organization_id="+encodeURIComponent(organizationId));
+}
+
+export async function getPythonTrainingRuns(env:Env,organizationId:string,limit=50):Promise<Array<Record<string,unknown>>|null>{
+  const query=new URLSearchParams({organization_id:organizationId,limit:String(Math.max(1,Math.min(limit,200)))});
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/training/runs?"+query.toString());
+}
+
+export async function getPythonAdapters(env:Env,organizationId:string):Promise<Array<Record<string,unknown>>|null>{
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/training/adapters?organization_id="+encodeURIComponent(organizationId));
+}
