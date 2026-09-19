@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../http/types.js";
 import { requireScope } from "../core-identity/security.js";
+import { createLedgerlyAiGatewayRoutes } from "./gateway/routes.js";
 import type { LedgerlyAiFoundationService } from "./service.js";
 
 export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
@@ -20,7 +21,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   });
 
   routes.get("/meta", (c) =>
-    c.json({ data: { name: "Ledgerly AI", featureVersion: "0.2.0", enabled: service.config.LEDGERLY_AI_ENABLED, providerSelection: "managed" } }),
+    c.json({ data: { name: "Ledgerly AI", featureVersion: "0.3.0", enabled: service.config.LEDGERLY_AI_ENABLED, providerSelection: "managed" } }),
   );
 
   routes.get("/internal/providers", requireScope("admin:read"), async (c) => {
@@ -34,5 +35,6 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     });
   });
 
+  routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway));
   return routes;
 }

@@ -1,24 +1,20 @@
 import type { ProviderResult } from "./types.js";
 
-const providerPatterns: RegExp[] = [
-  /\bOpenAI\s+Codex\b/gi,
-  /\bCodex\s+CLI\b/gi,
-  /\bCodex\b/gi,
-  /\bAnthropic\s+Claude\s+Code\b/gi,
-  /\bClaude\s+Code\b/gi,
-  /\bClaude\b/gi,
-  /\bAnthropic\b/gi,
-  /\bOpenAI\b/gi,
+const identityRules: Array<[RegExp, string]> = [
+  [/\b(?:I am|I'm|I’m)\s+(?:OpenAI\s+)?Codex(?:\s+CLI)?\b/gi, "I am Ledgerly AI"],
+  [/\b(?:I am|I'm|I’m)\s+(?:Anthropic\s+)?Claude(?:\s+Code)?\b/gi, "I am Ledgerly AI"],
+  [/\b(?:powered|handled|generated|processed|reviewed)\s+by\s+(?:OpenAI\s+)?Codex(?:\s+CLI)?\b/gi, "$1 by Ledgerly AI"],
+  [/\b(?:powered|handled|generated|processed|reviewed)\s+by\s+(?:Anthropic\s+)?Claude(?:\s+Code)?\b/gi, "$1 by Ledgerly AI"],
+  [/\b(?:running|executing|answered)\s+(?:with|through|via)\s+(?:Codex(?:\s+CLI)?|Claude\s+Code)\b/gi, "$1 via Ledgerly AI"],
 ];
 
 export function sanitizeLedgerlyAiPublicText(value: string) {
-  return providerPatterns.reduce((text, pattern) => text.replace(pattern, "Ledgerly AI"), value);
+  return identityRules.reduce((text, [pattern, replacement]) => text.replace(pattern, replacement), value);
 }
 
 export function toLedgerlyAiPublicResult(result: ProviderResult) {
   return {
     text: sanitizeLedgerlyAiPublicText(result.text),
-    sessionId: result.sessionId,
     durationMs: result.durationMs,
   };
 }

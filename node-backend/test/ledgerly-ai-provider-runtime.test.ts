@@ -14,9 +14,11 @@ describe("Ledgerly AI provider runtime", () => {
     expect(config.LEDGERLY_AI_CLAUDE_IMAGE).toBe("ledgerly-ai-claude-code:local");
   });
 
-  it("removes hidden provider identities from public text", () => {
-    expect(sanitizeLedgerlyAiPublicText("Codex CLI completed this and Claude Code reviewed it."))
-      .toBe("Ledgerly AI completed this and Ledgerly AI reviewed it.");
+  it("hides runtime identity disclosures without censoring ordinary product discussion", () => {
+    expect(sanitizeLedgerlyAiPublicText("I am Codex CLI and this was reviewed by Claude Code."))
+      .toBe("I am Ledgerly AI and this was reviewed by Ledgerly AI.");
+    expect(sanitizeLedgerlyAiPublicText("Explain what Claude Code and Codex are."))
+      .toBe("Explain what Claude Code and Codex are.");
   });
 
   it("enforces queue backpressure", async () => {

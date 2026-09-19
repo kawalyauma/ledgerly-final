@@ -1,5 +1,7 @@
 import type { Runtime } from "../../runtime.js";
 import { parseLedgerlyAiConfig, type LedgerlyAiConfig } from "./config.js";
+import { LedgerlyAiGatewayRepository } from "./gateway/repository.js";
+import { LedgerlyAiGatewayService } from "./gateway/service.js";
 import { createLedgerlyAiLogger, type LedgerlyAiLogger } from "./logger.js";
 import { LedgerlyAiProviderRuntime } from "./providers/runtime.js";
 
@@ -22,6 +24,8 @@ export class LedgerlyAiFoundationService {
   readonly config: LedgerlyAiConfig;
   readonly startedAt = new Date().toISOString();
   readonly providers: LedgerlyAiProviderRuntime;
+  readonly repository: LedgerlyAiGatewayRepository;
+  readonly gateway: LedgerlyAiGatewayService;
   private readonly logger: LedgerlyAiLogger;
 
   constructor(
@@ -31,6 +35,8 @@ export class LedgerlyAiFoundationService {
     this.config = parseLedgerlyAiConfig(env);
     this.logger = createLedgerlyAiLogger(runtime.logger);
     this.providers = new LedgerlyAiProviderRuntime(runtime, this.config);
+    this.repository = new LedgerlyAiGatewayRepository(runtime.db);
+    this.gateway = new LedgerlyAiGatewayService(this.repository, this.providers, this.config, runtime.db, this.logger);
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,

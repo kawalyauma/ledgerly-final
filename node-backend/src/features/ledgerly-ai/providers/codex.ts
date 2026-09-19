@@ -58,9 +58,10 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
 
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
     const sandbox = request.sandbox ?? "read-only";
+    const base = ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox];
     const args = request.sessionId
-      ? ["exec", "--json", "--sandbox", sandbox, "resume", request.sessionId, request.prompt]
-      : ["exec", "--json", "--sandbox", sandbox, request.prompt];
+      ? [...base, "resume", request.sessionId, request.prompt]
+      : [...base, request.prompt];
     if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
     const command = this.commands.build(this.id, args, request.workspacePath, sandbox);
     const result = await runProviderProcess({

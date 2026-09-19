@@ -32,15 +32,15 @@ const schema = z.object({
   LEDGERLY_AI_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).max(60_000).default(1_000),
   LEDGERLY_AI_CODEX_SOFT_JOBS_PER_HOUR: z.coerce.number().int().min(0).max(10_000).default(0),
   LEDGERLY_AI_CLAUDE_SOFT_JOBS_PER_HOUR: z.coerce.number().int().min(0).max(10_000).default(0),
+  LEDGERLY_AI_USER_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(20),
+  LEDGERLY_AI_ORG_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(200),
+  LEDGERLY_AI_AGENT_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(100_000).default(60),
+  LEDGERLY_AI_CHAT_HISTORY_MESSAGES: z.coerce.number().int().min(2).max(200).default(30),
   LEDGERLY_AI_LOG_PROMPTS: envBoolean(false),
   LEDGERLY_AI_STARTUP_HEALTHCHECK: envBoolean(true),
 }).superRefine((value, ctx) => {
   if (value.LEDGERLY_AI_DEFAULT_PROVIDER === value.LEDGERLY_AI_FALLBACK_PROVIDER) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["LEDGERLY_AI_FALLBACK_PROVIDER"],
-      message: "Fallback provider must differ from the default provider.",
-    });
+    ctx.addIssue({ code: "custom", path: ["LEDGERLY_AI_FALLBACK_PROVIDER"], message: "Fallback provider must differ from the default provider." });
   }
 });
 
@@ -51,9 +51,7 @@ export function parseLedgerlyAiConfig(
 ): LedgerlyAiConfig {
   const parsed = schema.safeParse(env);
   if (!parsed.success) {
-    const details = parsed.error.issues
-      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
-      .join("; ");
+    const details = parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ");
     throw new Error(`Invalid Ledgerly AI environment: ${details}`);
   }
   return parsed.data;
