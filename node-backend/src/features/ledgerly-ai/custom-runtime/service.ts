@@ -5,6 +5,7 @@ import type { AuthPrincipal, AuthRole } from "../../../http/types.js";
 import { allScopes, createId } from "../../core-identity/security.js";
 import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 import type { LedgerlyAiGatewayService } from "../gateway/service.js";
+import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import { forgeAgentSpecSchema } from "../forge/types.js";
 import {
   customAgentCronFireKey,
@@ -38,6 +39,7 @@ export class LedgerlyAiCustomRuntimeService{
     private readonly runtime:Runtime,
     private readonly employees:LedgerlyAiEmployeeRegistry,
     private readonly gateway:LedgerlyAiGatewayService,
+    private readonly policy:LedgerlyAiPolicyService,
   ){}
 
   private async assertManage(principal:AuthPrincipal,agentId:string){
@@ -267,6 +269,7 @@ export class LedgerlyAiCustomRuntimeService{
     const agent=await this.employees.resolveSelectable(principal,agentId);
     if(agent.kind!=="custom")throw new AppError(409,"CUSTOM_AGENT_REQUIRED","Only custom employees can create custom runtime runs.");
     if(agent.status!=="active")throw new AppError(409,"CUSTOM_AGENT_NOT_ACTIVE","Activate this custom employee before running it.");
+    await this.policy.assertAutonomyAllowed(principal.organizationId,agentId);
     const runId=createId("lairun");
     await this.runtime.db.query(
       `INSERT INTO lai_custom_agent_runs(
@@ -332,12 +335,15 @@ export class LedgerlyAiCustomRuntimeService{
   }
 
   private async dispatchQueued(){
-    const result=await this.runtime.db.query<{id:string}>(
-      `SELECT id FROM lai_custom_agent_runs
+    const result=await this.runtime.db.query<{id:string;organizationId:string;agentId:string}>(
+      `SELECT id,organization_id AS "organizationId",agent_id AS "agentId"
+         FROM lai_custom_agent_runs
         WHERE status='queued' AND dispatched_at IS NULL
         ORDER BY created_at LIMIT 200`,
     );
     for(const row of result.rows){
+      const control=await this.policy.autonomyState(row.organizationId,row.agentId);
+      if(!control.allowed)continue;
       await this.runtime.queue.publish("ledgerly-ai.custom-agent.run",{runId:row.id},{queue:"ledgerly-ai",maxAttempts:3});
       await this.runtime.db.query(
         "UPDATE lai_custom_agent_runs SET dispatched_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND dispatched_at IS NULL",
@@ -385,6 +391,8 @@ export class LedgerlyAiCustomRuntimeService{
           AND a.kind='custom' AND a.status='active' AND a.created_by IS NOT NULL`,
     );
     for(const trigger of schedules.rows){
+      const control=await this.policy.autonomyState(trigger.organizationId,trigger.agentId);
+      if(!control.allowed)continue;
       const fireKey=customAgentCronFireKey(trigger.cronExpression,now,trigger.timeZone||this.runtime.config.SCHEDULER_TIMEZONE);
       if(!fireKey)continue;
       const claimed=await this.runtime.db.query(
@@ -422,6 +430,8 @@ export class LedgerlyAiCustomRuntimeService{
         ORDER BY e.occurred_at DESC LIMIT 2000`,
     );
     for(const event of events.rows){
+      const control=await this.policy.autonomyState(event.organizationId,event.agentId);
+      if(!control.allowed)continue;
       await this.insertRun({
         organizationId:event.organizationId,agentId:event.agentId,triggerId:event.triggerId,
         triggerType:"event",requestedBy:event.ownerUserId,
@@ -465,6 +475,17 @@ export class LedgerlyAiCustomRuntimeService{
       [runId],
     );
     const run=claimed.rows[0];
+    if(run){
+      const control=await this.policy.autonomyState(run.organizationId,run.agentId);
+      if(!control.allowed){
+        await this.runtime.db.query(
+          `UPDATE lai_custom_agent_runs SET status='queued',started_at=NULL,dispatched_at=NULL,
+              error_text=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='running'`,
+          [run.id],
+        );
+        return{runId:run.id,status:"queued",paused:true};
+      }
+    }
     if(!run){
       await this.runtime.db.query(
         `UPDATE lai_custom_agent_runs r SET status='cancelled',

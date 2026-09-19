@@ -16,6 +16,7 @@ import { createLedgerlyAiCustomRuntimeRoutes } from "./custom-runtime/routes.js"
 import { createLedgerlyAiIncidentRoutes } from "./incidents/routes.js";
 import { createLedgerlyAiGitRoutes } from "./git/routes.js";
 import { createLedgerlyAiMonitoringRoutes } from "./monitoring/routes.js";
+import { createLedgerlyAiPolicyRoutes } from "./policy/routes.js";
 import {
   createLedgerlyAiApprovalRoutes,
   createLedgerlyAiToolRoutes,
@@ -41,7 +42,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.12.0",
+        featureVersion: "0.13.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
@@ -54,6 +55,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
         engineeringIncidents: true,
         governedGitWorkflow: true,
         autonomousMonitoring: true,
+        policyAndApprovals: true,
       },
     }),
   );
@@ -80,6 +82,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   routes.route("/incidents", createLedgerlyAiIncidentRoutes(service.incidents));
   routes.route("/git", createLedgerlyAiGitRoutes(service.git));
   routes.route("/monitoring", createLedgerlyAiMonitoringRoutes(service.monitoring));
+  routes.route("/policy", createLedgerlyAiPolicyRoutes(service.policy));
   routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway, service.employees));
   return routes;
 }

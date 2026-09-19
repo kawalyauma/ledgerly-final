@@ -12,6 +12,7 @@ import { LedgerlyAiCustomRuntimeService } from "./custom-runtime/service.js";
 import { LedgerlyAiIncidentService } from "./incidents/service.js";
 import { LedgerlyAiGitService } from "./git/service.js";
 import { LedgerlyAiMonitoringService } from "./monitoring/service.js";
+import { LedgerlyAiPolicyService } from "./policy/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -35,6 +36,7 @@ export class LedgerlyAiFoundationService {
   readonly repository: LedgerlyAiGatewayRepository;
   readonly employees: LedgerlyAiEmployeeRegistry;
   readonly memory: LedgerlyAiMemoryService;
+  readonly policy: LedgerlyAiPolicyService;
   readonly tools: LedgerlyAiToolService;
   readonly gateway: LedgerlyAiGatewayService;
   readonly forge: LedgerlyAiForgeService;
@@ -55,7 +57,8 @@ export class LedgerlyAiFoundationService {
     this.repository = new LedgerlyAiGatewayRepository(runtime.db);
     this.employees = new LedgerlyAiEmployeeRegistry(runtime.db);
     this.memory = new LedgerlyAiMemoryService(runtime.db, this.repository, this.config);
-    this.tools = new LedgerlyAiToolService(runtime, this.config, this.employees);
+    this.policy = new LedgerlyAiPolicyService(runtime);
+    this.tools = new LedgerlyAiToolService(runtime, this.config, this.employees, this.policy);
     this.forge = new LedgerlyAiForgeService(
       runtime.db,
       this.config,
@@ -75,9 +78,9 @@ export class LedgerlyAiFoundationService {
       runtime.db,
       this.logger,
     );
-    this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway);
+    this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway,this.policy);
     this.git = new LedgerlyAiGitService(runtime,this.config);
-    this.incidents = new LedgerlyAiIncidentService(runtime,this.config,this.providers,this.employees,this.logger,this.git);
+    this.incidents = new LedgerlyAiIncidentService(runtime,this.config,this.providers,this.employees,this.logger,this.git,this.policy);
     this.monitoring = new LedgerlyAiMonitoringService(runtime,this.config,this.incidents,this.git);
     this.logger.info(
       {
@@ -149,6 +152,10 @@ export class LedgerlyAiFoundationService {
         monitorSamples: string | null;
         monitorState: string | null;
         monitorSummaries: string | null;
+        policyRules: string | null;
+        aiControls: string | null;
+        privilegedAudit: string | null;
+        approvalReviews: string | null;
       }>(
         `SELECT
            to_regclass('public.lai_chats')::text AS chats,
@@ -173,7 +180,11 @@ export class LedgerlyAiFoundationService {
            to_regclass('public.lai_git_ci_checks')::text AS "gitCiChecks",
            to_regclass('public.lai_monitor_samples')::text AS "monitorSamples",
            to_regclass('public.lai_monitor_state')::text AS "monitorState",
-           to_regclass('public.lai_monitor_summaries')::text AS "monitorSummaries"`,
+           to_regclass('public.lai_monitor_summaries')::text AS "monitorSummaries",
+           to_regclass('public.lai_policy_rules')::text AS "policyRules",
+           to_regclass('public.lai_ai_controls')::text AS "aiControls",
+           to_regclass('public.lai_privileged_audit')::text AS "privilegedAudit",
+           to_regclass('public.lai_approval_reviews')::text AS "approvalReviews"`,
       );
       const row = result.rows[0];
       schema = !row?.chats || !row.audit || !row.memories || !row.memoryAudit
@@ -182,6 +193,7 @@ export class LedgerlyAiFoundationService {
         || !row.incidentEvents || !row.incidentChecks || !row.incidentDeployments
         || !row.gitWorkspaces || !row.gitCommits || !row.gitPullRequests || !row.gitCiChecks
         || !row.monitorSamples || !row.monitorState || !row.monitorSummaries
+        || !row.policyRules || !row.aiControls || !row.privilegedAudit || !row.approvalReviews
         ? {
             status: "error",
             latencyMs: Math.round(performance.now() - schemaStarted),

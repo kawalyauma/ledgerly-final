@@ -41,6 +41,8 @@ export type LedgerlyAiToolDefinition<TSchema extends z.ZodType = z.ZodType> = {
   riskLevel: LedgerlyAiRiskLevel;
   approvalRequired: boolean;
   mutating: boolean;
+  productionAction?: boolean;
+  destructive?: boolean;
   execute: (context: LedgerlyAiToolContext, input: z.infer<TSchema>) => Promise<unknown>;
 };
 
@@ -54,6 +56,8 @@ export type LedgerlyAiToolCatalogItem = {
   riskLevel: LedgerlyAiRiskLevel;
   approvalRequired: boolean;
   mutating: boolean;
+  productionAction: boolean;
+  destructive: boolean;
 };
 
 export type LedgerlyAiToolInvocationResult =
@@ -71,4 +75,6 @@ export type LedgerlyAiToolInvocationResult =
       approvalId: string;
       riskLevel: LedgerlyAiRiskLevel;
       requiredScopes: string[];
+      approvalMode: "single" | "two_step";
+      requiredApprovals: number;
     };

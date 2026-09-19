@@ -114,6 +114,8 @@ export class LedgerlyAiToolRegistry {
         riskLevel: tool.riskLevel,
         approvalRequired: tool.approvalRequired,
         mutating: tool.mutating,
+        productionAction: Boolean(tool.productionAction),
+        destructive: Boolean(tool.destructive),
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }

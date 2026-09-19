@@ -16,6 +16,7 @@ import { classifyIncident, riskForChangedPaths, type IncidentSignalInput } from 
 import { runIncidentCommand } from "./command.js";
 import { IncidentStagingManager } from "./staging.js";
 import type { LedgerlyAiGitService } from "../git/service.js";
+import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import { IncidentWorkspaceManager, type IncidentCheckResult } from "./workspace.js";
 
 type IncidentStatus=
@@ -84,6 +85,7 @@ export class LedgerlyAiIncidentService{
     private readonly employees:LedgerlyAiEmployeeRegistry,
     private readonly logger:LedgerlyAiLogger,
     private readonly git:LedgerlyAiGitService,
+    private readonly policy:LedgerlyAiPolicyService,
   ){
     this.workspace=new IncidentWorkspaceManager(config);
     this.staging=new IncidentStagingManager(config);
@@ -488,17 +490,27 @@ export class LedgerlyAiIncidentService{
       return null;
     }
     const risk=riskForChangedPaths(paths);
+    const approvalMode=risk==="critical"?"two_step":"single";
+    const requiredApprovals=risk==="critical"?2:1;
+    const reviewerRole=risk==="critical"?"owner":"admin";
     const id=createId("laiap");
     await this.runtime.db.query(
       `INSERT INTO lai_approvals(
         id,organization_id,requested_by,agent_id,action_type,risk_level,status,payload_json,
-        required_scopes_json,expires_at,incident_id
+        required_scopes_json,expires_at,incident_id,approval_mode,required_approvals,approval_policy_json
       ) VALUES($1,$2,'ledgerly-ai',$3,'incident.production_deploy',$4,'pending',$5::jsonb,
-               '["admin:write"]'::jsonb,CURRENT_TIMESTAMP+INTERVAL '24 hours',$6)`,
+               '["admin:write"]'::jsonb,CURRENT_TIMESTAMP+INTERVAL '24 hours',$6,$7,$8,$9::jsonb)`,
       [
         id,incident.organizationId,incident.assignedAgentId,risk,
         JSON.stringify({incidentId:incident.id,fixSha,branch:incident.branchName,changedPaths:paths,stagingDeploymentId}),
-        incident.id,
+        incident.id,approvalMode,requiredApprovals,
+        JSON.stringify({
+          reviewerRole,
+          reason:risk==="critical"
+            ?"Critical production change requires two distinct organization-owner approvals."
+            :"Production change requires human approval after staging verification.",
+          action:"incident.production_deploy",
+        }),
       ],
     );
     await this.runtime.db.query(
@@ -509,8 +521,14 @@ export class LedgerlyAiIncidentService{
     await this.appendEvent({
       incidentId:incident.id,organizationId:incident.organizationId,eventType:"production_approval_requested",
       status:"awaiting_approval",actorType:"system",actorId:"ledgerly-ai",
-      summary:`Production deployment requires human approval (${risk} change risk).`,
-      metadata:{approvalId:id,risk,fixSha,changedPaths:paths},
+      summary:`Production deployment requires ${requiredApprovals} human approval(s) (${risk} change risk).`,
+      metadata:{approvalId:id,risk,fixSha,changedPaths:paths,approvalMode,requiredApprovals,reviewerRole},
+    });
+    await this.policy.privilegedAudit({
+      organizationId:incident.organizationId,actorType:"system",actorId:"ledgerly-ai",
+      action:"ledgerly_ai.incident.production_approval_requested",entityType:"incident",entityId:incident.id,
+      correlationId:"incident:"+incident.id+":production-approval",riskLevel:risk,
+      metadata:{approvalId:id,fixSha,changedPaths:paths,approvalMode,requiredApprovals,reviewerRole},
     });
     return id;
   }
@@ -521,6 +539,18 @@ export class LedgerlyAiIncidentService{
     );
     if(!claimed.rows[0])return{skipped:true};
     const incident=this.mapIncident(claimed.rows[0]);
+    if(incident.organizationId){
+      const control=await this.policy.autonomyState(incident.organizationId,incident.assignedAgentId);
+      if(!control.allowed){
+        await this.appendEvent({
+          incidentId:id,organizationId:incident.organizationId,eventType:"autonomy_paused",status:"open",
+          actorType:"system",actorId:"ledgerly-ai",
+          summary:"Engineering investigation deferred because Ledgerly AI autonomy is paused or stopped.",
+          metadata:{scopeType:control.blocking?.scopeType,scopeId:control.blocking?.scopeId,state:control.blocking?.state},
+        });
+        return{incidentId:id,status:"open",paused:true};
+      }
+    }
     const statusClaim=await this.runtime.db.query(
       "UPDATE lai_incidents SET status='investigating',updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='open' RETURNING id",
       [id],
@@ -707,27 +737,104 @@ export class LedgerlyAiIncidentService{
     const incident=await this.incident(id);
     if(incident.organizationId!==principal.organizationId)throw new AppError(404,"LEDGERLY_AI_INCIDENT_NOT_FOUND","Engineering incident not found.");
     if(!incident.productionApprovalId)throw new AppError(409,"INCIDENT_APPROVAL_MISSING","This incident has no production approval request.");
-    if(incident.changeRisk==="critical"&&principal.role!=="owner"){
-      throw new AppError(403,"FORBIDDEN","Critical incident deployments require organization owner approval.");
-    }
-    const result=await this.runtime.db.query(
-      `UPDATE lai_approvals SET status=$1,reviewed_by=$2,review_note=$3,reviewed_at=CURRENT_TIMESTAMP
-        WHERE id=$4 AND organization_id=$5 AND incident_id=$6 AND status='pending'
-        RETURNING id`,
-      [decision==="approve"?"approved":"rejected",principal.userId,note?.slice(0,1000)??null,
-       incident.productionApprovalId,principal.organizationId,id],
+
+    const approvalResult=await this.runtime.db.query<{
+      id:string;status:string;approvalMode:"single"|"two_step";requiredApprovals:number;
+      reviewerRole:string|null;riskLevel:LedgerlyAiRiskLevel;
+    }>(
+      `SELECT id,status,approval_mode AS "approvalMode",required_approvals AS "requiredApprovals",
+              approval_policy_json->>'reviewerRole' AS "reviewerRole",risk_level AS "riskLevel"
+         FROM lai_approvals
+        WHERE id=$1 AND organization_id=$2 AND incident_id=$3 LIMIT 1`,
+      [incident.productionApprovalId,principal.organizationId,id],
     );
-    if(!result.rowCount)throw new AppError(409,"INCIDENT_APPROVAL_REVIEWED","Production approval has already been reviewed.");
-    await this.appendEvent({
-      incidentId:id,organizationId:incident.organizationId,eventType:decision==="approve"?"production_approved":"production_rejected",
-      status:decision==="approve"?"awaiting_approval":"failed",actorType:"user",actorId:principal.userId,
-      summary:decision==="approve"?"Production deployment approved.":"Production deployment rejected.",
-      metadata:{approvalId:incident.productionApprovalId,note:note??null,changeRisk:incident.changeRisk},
+    const approval=approvalResult.rows[0];
+    if(!approval||approval.status!=="pending")throw new AppError(409,"INCIDENT_APPROVAL_REVIEWED","Production approval has already been reviewed.");
+    this.policy.assertReviewer(principal,approval.reviewerRole==="owner"?"owner":"admin");
+
+    const prior=await this.runtime.db.query(
+      "SELECT decision FROM lai_approval_reviews WHERE approval_id=$1 AND organization_id=$2 AND reviewer_id=$3 LIMIT 1",
+      [approval.id,principal.organizationId,principal.userId],
+    );
+    if(prior.rowCount)throw new AppError(409,"LEDGERLY_AI_APPROVAL_ALREADY_REVIEWED_BY_USER","You have already reviewed this production approval.");
+
+    const reviewId=createId("laiar");
+    const client=await this.runtime.db.connect();
+    let approvalCount=0;
+    let finalStatus="pending";
+    try{
+      await client.query("BEGIN");
+      const locked=await client.query<{status:string}>(
+        "SELECT status FROM lai_approvals WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+        [approval.id,principal.organizationId],
+      );
+      if(locked.rows[0]?.status!=="pending"){
+        throw new AppError(409,"INCIDENT_APPROVAL_REVIEWED","Production approval has already been reviewed.");
+      }
+      await client.query(
+        `INSERT INTO lai_approval_reviews(
+          id,approval_id,organization_id,reviewer_id,decision,note,metadata_json
+        ) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+        [
+          reviewId,approval.id,principal.organizationId,principal.userId,decision==="approve"?"approved":"rejected",
+          note?.slice(0,1000)??null,JSON.stringify({role:principal.role,incidentId:id,changeRisk:incident.changeRisk}),
+        ],
+      );
+      if(decision==="reject"){
+        const rejected=await client.query(
+          `UPDATE lai_approvals SET status='rejected',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
+            WHERE id=$3 AND organization_id=$4 AND status='pending' RETURNING id`,
+          [principal.userId,note?.slice(0,1000)??null,approval.id,principal.organizationId],
+        );
+        if(rejected.rowCount){
+          finalStatus="rejected";
+          await client.query(
+            "UPDATE lai_incidents SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=$1",
+            [id],
+          );
+        }
+      }else{
+        const count=await client.query<{count:number}>(
+          `SELECT COUNT(*)::int AS count FROM lai_approval_reviews
+            WHERE approval_id=$1 AND organization_id=$2 AND decision='approved'`,
+          [approval.id,principal.organizationId],
+        );
+        approvalCount=Number(count.rows[0]?.count??0);
+        if(approvalCount>=approval.requiredApprovals){
+          const approved=await client.query(
+            `UPDATE lai_approvals SET status='approved',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
+              WHERE id=$3 AND organization_id=$4 AND status='pending' RETURNING id`,
+            [principal.userId,note?.slice(0,1000)??null,approval.id,principal.organizationId],
+          );
+          if(approved.rowCount)finalStatus="approved";
+        }
+      }
+      await client.query("COMMIT");
+    }catch(error){
+      await client.query("ROLLBACK");throw error;
+    }finally{client.release();}
+
+    await this.policy.privilegedAudit({
+      organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+      action:decision==="approve"?"ledgerly_ai.incident.production_review_approved":"ledgerly_ai.incident.production_review_rejected",
+      entityType:"approval",entityId:approval.id,correlationId:"incident:"+id+":production-review",
+      riskLevel:approval.riskLevel,
+      metadata:{reviewId,incidentId:id,approvalCount,requiredApprovals:approval.requiredApprovals,note:note??null},
     });
-    if(decision==="reject"){
-      await this.runtime.db.query("UPDATE lai_incidents SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
-    }
-    return{id,approvalId:incident.productionApprovalId,status:decision==="approve"?"approved":"rejected"};
+    await this.appendEvent({
+      incidentId:id,organizationId:incident.organizationId,
+      eventType:decision==="reject"?"production_rejected":
+        finalStatus==="approved"?"production_approved":"production_approval_progress",
+      status:decision==="reject"?"failed":"awaiting_approval",actorType:"user",actorId:principal.userId,
+      summary:decision==="reject"?"Production deployment rejected.":
+        finalStatus==="approved"?"Production deployment fully approved.":
+        `Production approval recorded (${approvalCount}/${approval.requiredApprovals}).`,
+      metadata:{approvalId:approval.id,note:note??null,changeRisk:incident.changeRisk,approvalCount,requiredApprovals:approval.requiredApprovals},
+    });
+    return{
+      id,approvalId:approval.id,status:finalStatus,
+      approvalCount,requiredApprovals:approval.requiredApprovals,
+    };
   }
 
   async recordProductionDeployment(principal:AuthPrincipal,id:string,input:{deployedRef:string;previousRef?:string|null;note?:string}){
@@ -748,6 +855,12 @@ export class LedgerlyAiIncidentService{
       [deploymentId,id,principal.organizationId,input.previousRef??null,input.deployedRef,principal.userId],
     );
     await this.runtime.db.query("UPDATE lai_incidents SET status='deployed',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
+    await this.policy.privilegedAudit({
+      organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+      action:"ledgerly_ai.incident.production_deployed",entityType:"incident",entityId:id,
+      correlationId:"incident:"+id+":production-deploy",riskLevel:incident.changeRisk??incident.severity,
+      metadata:{deploymentId,deployedRef:input.deployedRef,previousRef:input.previousRef??null,note:input.note??null},
+    });
     await this.appendEvent({
       incidentId:id,organizationId:incident.organizationId,eventType:"production_deployed",status:"deployed",
       actorType:"user",actorId:principal.userId,summary:"Approved incident fix recorded as deployed to production.",

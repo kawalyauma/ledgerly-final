@@ -6,6 +6,7 @@ import type { LedgerlyAiConfig } from "../config.js";
 import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 import type { LedgerlyAiEmployee } from "../employees/types.js";
 import { redactLedgerlyAiValue } from "../gateway/redaction.js";
+import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import { actionTools } from "./action-tools.js";
 import { databaseTools } from "./database-tools.js";
 import { engineeringTools } from "./engineering-tools.js";
@@ -46,6 +47,9 @@ type ApprovalRow = {
   requiredScopes: unknown;
   payload: Record<string, unknown>;
   expiresAt: string | null;
+  approvalMode: "single" | "two_step";
+  requiredApprovals: number;
+  approvalPolicy: Record<string, unknown>;
 };
 
 function isAdmin(principal: AuthPrincipal) {
@@ -88,6 +92,7 @@ export class LedgerlyAiToolService {
     private readonly runtime: Runtime,
     private readonly config: LedgerlyAiConfig,
     private readonly employees: LedgerlyAiEmployeeRegistry,
+    private readonly policy: LedgerlyAiPolicyService,
   ) {
     this.registry.registerMany([
       ...schoolTools,
@@ -217,13 +222,43 @@ export class LedgerlyAiToolService {
       );
     }
 
-    if (tool.approvalRequired && input.principal.role === "integration") {
+    const decision = await this.policy.evaluateTool({
+      principal: input.principal,
+      employee: input.employee,
+      tool,
+    });
+    if (decision.effect === "deny") {
+      await this.policy.privilegedAudit({
+        organizationId: input.principal.organizationId,
+        actorType: "user",
+        actorId: input.principal.userId,
+        action: "ledgerly_ai.tool.denied_by_policy",
+        entityType: "tool",
+        entityId: tool.name,
+        correlationId: input.correlationId,
+        riskLevel: tool.riskLevel,
+        metadata: {
+          agentId: input.employee?.id ?? null,
+          agentKey: input.employee?.key ?? null,
+          reason: decision.reason,
+          ruleId: decision.ruleId,
+        },
+      });
+      throw new AppError(403, "LEDGERLY_AI_POLICY_DENIED", decision.reason, {
+        toolName: tool.name,
+        riskLevel: tool.riskLevel,
+        ruleId: decision.ruleId,
+      });
+    }
+
+    const requiresApproval = decision.effect === "single" || decision.effect === "two_step";
+    if (requiresApproval && input.principal.role === "integration") {
       throw new AppError(403, "FORBIDDEN", "Integration identities cannot request approval-gated Ledgerly AI actions.");
     }
 
     const toolCallId = createId("laitc");
     const argumentsJson = boundedJson(parsed.data, this.config.LEDGERLY_AI_TOOL_MAX_RESULT_BYTES);
-    if (tool.approvalRequired) {
+    if (requiresApproval) {
       const approvalId = createId("laiap");
       const client = await this.runtime.db.connect();
       try {
@@ -242,13 +277,22 @@ export class LedgerlyAiToolService {
         await client.query(
           `INSERT INTO lai_approvals(
             id,organization_id,requested_by,agent_id,job_id,action_type,risk_level,status,
-            payload_json,tool_call_id,tool_name,required_scopes_json,expires_at
+            payload_json,tool_call_id,tool_name,required_scopes_json,expires_at,
+            approval_mode,required_approvals,approval_policy_json
           ) VALUES($1,$2,$3,$4,$5,$6,$7,'pending',$8::jsonb,$9,$10,$11::jsonb,
-                   CURRENT_TIMESTAMP + INTERVAL '24 hours')`,
+                   CURRENT_TIMESTAMP + INTERVAL '24 hours',$12,$13,$14::jsonb)`,
           [
             approvalId,input.principal.organizationId,input.principal.userId,input.employee?.id ?? null,
             input.jobId ?? null,"tool." + tool.name,tool.riskLevel,JSON.stringify(argumentsJson),
             toolCallId,tool.name,JSON.stringify(tool.requiredScopes),
+            decision.approvalMode,decision.requiredApprovals,
+            JSON.stringify({
+              reviewerRole:decision.reviewerRole,
+              reason:decision.reason,
+              ruleId:decision.ruleId,
+              productionAction:Boolean(tool.productionAction),
+              destructive:Boolean(tool.destructive),
+            }),
           ],
         );
         await client.query("COMMIT");
@@ -264,7 +308,26 @@ export class LedgerlyAiToolService {
         entityType: "approval",
         entityId: approvalId,
         correlationId: input.correlationId,
-        metadata: { toolCallId, toolName: tool.name, riskLevel: tool.riskLevel, requiredScopes: tool.requiredScopes },
+        metadata: {
+          toolCallId, toolName: tool.name, riskLevel: tool.riskLevel,
+          requiredScopes: tool.requiredScopes, approvalMode: decision.approvalMode,
+          requiredApprovals: decision.requiredApprovals, ruleId: decision.ruleId,
+        },
+      });
+      await this.policy.privilegedAudit({
+        organizationId: input.principal.organizationId,
+        actorType: "user",
+        actorId: input.principal.userId,
+        action: "ledgerly_ai.approval.requested",
+        entityType: "approval",
+        entityId: approvalId,
+        correlationId: input.correlationId,
+        riskLevel: tool.riskLevel,
+        metadata: {
+          toolCallId,toolName:tool.name,agentId:input.employee?.id??null,
+          approvalMode:decision.approvalMode,requiredApprovals:decision.requiredApprovals,
+          reviewerRole:decision.reviewerRole,ruleId:decision.ruleId,
+        },
       });
       return {
         status: "waiting_approval",
@@ -273,6 +336,8 @@ export class LedgerlyAiToolService {
         approvalId,
         riskLevel: tool.riskLevel,
         requiredScopes: tool.requiredScopes,
+        approvalMode: decision.approvalMode!,
+        requiredApprovals: decision.requiredApprovals,
       };
     }
 
@@ -300,6 +365,22 @@ export class LedgerlyAiToolService {
         jobId: input.jobId,
       },
     );
+    if (tool.mutating || tool.riskLevel === "high" || tool.riskLevel === "critical") {
+      await this.policy.privilegedAudit({
+        organizationId: input.principal.organizationId,
+        actorType: "user",
+        actorId: input.principal.userId,
+        action: "ledgerly_ai.tool.auto_executed",
+        entityType: "tool_call",
+        entityId: toolCallId,
+        correlationId: input.correlationId,
+        riskLevel: tool.riskLevel,
+        metadata: {
+          toolName: tool.name,agentId:input.employee?.id??null,ruleId:decision.ruleId,
+          policyReason:decision.reason,
+        },
+      });
+    }
     return {
       status: "succeeded",
       toolCallId,
@@ -331,7 +412,9 @@ export class LedgerlyAiToolService {
       `SELECT id,organization_id AS "organizationId",requested_by AS "requestedBy",
               agent_id AS "agentId",job_id AS "jobId",action_type AS "actionType",
               risk_level AS "riskLevel",status,tool_call_id AS "toolCallId",tool_name AS "toolName",
-              required_scopes_json AS "requiredScopes",payload_json AS payload,expires_at AS "expiresAt"
+              required_scopes_json AS "requiredScopes",payload_json AS payload,expires_at AS "expiresAt",
+              approval_mode AS "approvalMode",required_approvals AS "requiredApprovals",
+              approval_policy_json AS "approvalPolicy"
          FROM lai_approvals WHERE id=$1 AND organization_id=$2`,
       [approvalId,principal.organizationId],
     );
@@ -354,12 +437,21 @@ export class LedgerlyAiToolService {
       requiredScopes: unknown;
       payload: Record<string, unknown>;
       expiresAt: string | null;
+      approvalMode: "single" | "two_step";
+      requiredApprovals: number;
+      approvalCount: number;
+      reviewerRole: string | null;
       createdAt: string;
     }>(
       `SELECT id,requested_by AS "requestedBy",agent_id AS "agentId",job_id AS "jobId",
               action_type AS "actionType",risk_level AS "riskLevel",status,tool_call_id AS "toolCallId",
               tool_name AS "toolName",required_scopes_json AS "requiredScopes",
-              payload_json AS payload,expires_at AS "expiresAt",created_at AS "createdAt"
+              payload_json AS payload,expires_at AS "expiresAt",
+              approval_mode AS "approvalMode",required_approvals AS "requiredApprovals",
+              COALESCE((SELECT COUNT(*) FROM lai_approval_reviews r
+                WHERE r.approval_id=lai_approvals.id AND r.decision='approved'),0)::int AS "approvalCount",
+              approval_policy_json->>'reviewerRole' AS "reviewerRole",
+              created_at AS "createdAt"
          FROM lai_approvals
         WHERE organization_id=$1 AND status=$2 AND tool_call_id IS NOT NULL
         ORDER BY created_at DESC LIMIT 200`,
@@ -376,7 +468,7 @@ export class LedgerlyAiToolService {
   }
 
   async approve(principal: AuthPrincipal, approvalId: string, note?: string) {
-    const approval = await this.approvalRow(principal, approvalId);
+    let approval = await this.approvalRow(principal, approvalId);
     if (approval.status !== "pending") {
       throw new AppError(409, "LEDGERLY_AI_APPROVAL_REVIEWED", "This approval has already been reviewed.");
     }
@@ -411,6 +503,11 @@ export class LedgerlyAiToolService {
       } finally {
         client.release();
       }
+      await this.policy.privilegedAudit({
+        organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+        action:"ledgerly_ai.approval.expired",entityType:"approval",entityId:approvalId,
+        correlationId:"approval:"+approvalId,riskLevel:approval.riskLevel,
+      });
       throw new AppError(409, "LEDGERLY_AI_APPROVAL_EXPIRED", "This approval request has expired.");
     }
     if (!approval.toolName || !approval.toolCallId) {
@@ -425,6 +522,22 @@ export class LedgerlyAiToolService {
       });
     }
 
+    const storedReviewerRole = approval.approvalPolicy?.reviewerRole;
+    const reviewerRole = storedReviewerRole === "owner" ? "owner" : "admin";
+    this.policy.assertReviewer(principal, reviewerRole);
+    if (approval.approvalMode === "two_step" && approval.requestedBy === principal.userId) {
+      throw new AppError(403, "LEDGERLY_AI_TWO_STEP_SELF_APPROVAL",
+        "The requester cannot serve as one of the two reviewers for this sensitive action.");
+    }
+    const priorReview = await this.runtime.db.query(
+      "SELECT decision FROM lai_approval_reviews WHERE approval_id=$1 AND organization_id=$2 AND reviewer_id=$3 LIMIT 1",
+      [approvalId,principal.organizationId,principal.userId],
+    );
+    if (priorReview.rowCount) {
+      throw new AppError(409, "LEDGERLY_AI_APPROVAL_ALREADY_REVIEWED_BY_USER",
+        "You have already reviewed this approval request.");
+    }
+
     const requester = await this.requesterPrincipal(approval.organizationId, approval.requestedBy);
     const employee = approval.agentId
       ? await this.employees.resolveSelectable(requester, approval.agentId)
@@ -435,14 +548,108 @@ export class LedgerlyAiToolService {
       throw new AppError(409, "LEDGERLY_AI_APPROVAL_PAYLOAD_INVALID", "Stored approval arguments no longer validate.");
     }
 
-    const claimed = await this.runtime.db.query(
-      `UPDATE lai_approvals
-          SET status='approved',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
-        WHERE id=$3 AND organization_id=$4 AND status='pending'
-        RETURNING id`,
-      [principal.userId,note ?? null,approvalId,principal.organizationId],
-    );
-    if (!claimed.rowCount) throw new AppError(409, "LEDGERLY_AI_APPROVAL_REVIEWED", "Approval was reviewed by another request.");
+    const currentDecision = await this.policy.evaluateTool({principal:requester,employee,tool});
+    if (currentDecision.effect === "deny") {
+      throw new AppError(409, "LEDGERLY_AI_POLICY_CHANGED",
+        "Current Ledgerly AI policy now denies this action.",{
+          reason:currentDecision.reason,ruleId:currentDecision.ruleId,
+        });
+    }
+    const currentRequired = currentDecision.effect === "two_step" ? 2 :
+      currentDecision.effect === "single" ? 1 : 0;
+    if (currentRequired > approval.requiredApprovals) {
+      await this.runtime.db.query(
+        `UPDATE lai_approvals SET approval_mode=$1,required_approvals=$2,
+            approval_policy_json=approval_policy_json||$3::jsonb
+          WHERE id=$4 AND organization_id=$5 AND status='pending'`,
+        [
+          currentRequired >= 2 ? "two_step" : "single",currentRequired,
+          JSON.stringify({
+            reviewerRole:currentDecision.reviewerRole,
+            reason:currentDecision.reason,
+            ruleId:currentDecision.ruleId,
+            upgradedAt:new Date().toISOString(),
+          }),
+          approvalId,principal.organizationId,
+        ],
+      );
+      approval=await this.approvalRow(principal,approvalId);
+      const upgradedRole=approval.approvalPolicy?.reviewerRole==="owner"?"owner":"admin";
+      this.policy.assertReviewer(principal,upgradedRole);
+      if(approval.approvalMode==="two_step"&&approval.requestedBy===principal.userId){
+        throw new AppError(403,"LEDGERLY_AI_TWO_STEP_SELF_APPROVAL",
+          "The requester cannot serve as one of the two reviewers for this sensitive action.");
+      }
+    }
+
+    const reviewId=createId("laiar");
+    const client=await this.runtime.db.connect();
+    let approvalCount=0;
+    let executionClaimed=false;
+    try{
+      await client.query("BEGIN");
+      const locked=await client.query<{status:string}>(
+        "SELECT status FROM lai_approvals WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+        [approvalId,principal.organizationId],
+      );
+      if(locked.rows[0]?.status!=="pending"){
+        throw new AppError(409,"LEDGERLY_AI_APPROVAL_REVIEWED","Approval was reviewed by another request.");
+      }
+      await client.query(
+        `INSERT INTO lai_approval_reviews(
+          id,approval_id,organization_id,reviewer_id,decision,note,metadata_json
+        ) VALUES($1,$2,$3,$4,'approved',$5,$6::jsonb)`,
+        [
+          reviewId,approvalId,principal.organizationId,principal.userId,note?.slice(0,2000)??null,
+          JSON.stringify({role:principal.role,approvalMode:approval.approvalMode}),
+        ],
+      );
+      const count=await client.query<{count:number}>(
+        `SELECT COUNT(*)::int AS count FROM lai_approval_reviews
+          WHERE approval_id=$1 AND organization_id=$2 AND decision='approved'`,
+        [approvalId,principal.organizationId],
+      );
+      approvalCount=Number(count.rows[0]?.count??0);
+      if(approvalCount>=approval.requiredApprovals){
+        const promoted=await client.query(
+          `UPDATE lai_approvals
+              SET status='approved',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
+            WHERE id=$3 AND organization_id=$4 AND status='pending'
+            RETURNING id`,
+          [principal.userId,note??null,approvalId,principal.organizationId],
+        );
+        executionClaimed=Boolean(promoted.rowCount);
+      }
+      await client.query("COMMIT");
+    }catch(error){
+      await client.query("ROLLBACK");
+      throw error;
+    }finally{client.release();}
+
+    await this.policy.privilegedAudit({
+      organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+      action:"ledgerly_ai.approval.reviewed",entityType:"approval",entityId:approvalId,
+      correlationId:"approval:"+approvalId,riskLevel:approval.riskLevel,
+      metadata:{
+        decision:"approved",reviewId,approvalMode:approval.approvalMode,
+        approvalCount,requiredApprovals:approval.requiredApprovals,toolName:tool.name,
+      },
+    });
+
+    if(approvalCount<approval.requiredApprovals){
+      return{
+        id:approvalId,status:"pending",toolCallId:approval.toolCallId,
+        approvalCount,requiredApprovals:approval.requiredApprovals,
+      };
+    }
+
+    if(!executionClaimed){
+      const final=await this.approvalRow(principal,approvalId);
+      return{
+        id:approvalId,status:final.status,toolCallId:approval.toolCallId,
+        approvalCount,requiredApprovals:approval.requiredApprovals,
+      };
+    }
 
     try {
       await this.runtime.db.query(
@@ -465,7 +672,7 @@ export class LedgerlyAiToolService {
       await this.runtime.db.query(
         `UPDATE lai_approvals
             SET status='executed',executed_at=CURRENT_TIMESTAMP,execution_result_json=$1::jsonb
-          WHERE id=$2 AND organization_id=$3`,
+          WHERE id=$2 AND organization_id=$3 AND status='approved'`,
         [JSON.stringify(executed.result),approvalId,principal.organizationId],
       );
       if (approval.jobId) {
@@ -500,7 +707,19 @@ export class LedgerlyAiToolService {
         correlationId: "approval:" + approvalId,
         metadata: { toolName: tool.name, toolCallId: approval.toolCallId, requestedBy: requester.userId },
       });
-      return { id: approvalId, status: "executed", toolCallId: approval.toolCallId, result: executed.result };
+      await this.policy.privilegedAudit({
+        organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+        action:"ledgerly_ai.approval.executed",entityType:"approval",entityId:approvalId,
+        correlationId:"approval:"+approvalId,riskLevel:approval.riskLevel,
+        metadata:{
+          toolName:tool.name,toolCallId:approval.toolCallId,requestedBy:requester.userId,
+          approvalCount,requiredApprovals:approval.requiredApprovals,
+        },
+      });
+      return {
+        id: approvalId, status: "executed", toolCallId: approval.toolCallId,
+        approvalCount,requiredApprovals:approval.requiredApprovals,result: executed.result,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.runtime.db.query(
@@ -523,6 +742,12 @@ export class LedgerlyAiToolService {
           [message.slice(0,4000),principal.organizationId,approval.jobId],
         );
       }
+      await this.policy.privilegedAudit({
+        organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+        action:"ledgerly_ai.approval.execution_failed",entityType:"approval",entityId:approvalId,
+        correlationId:"approval:"+approvalId,riskLevel:approval.riskLevel,
+        metadata:{toolName:tool.name,error:message.slice(0,1000)},
+      });
       throw error;
     }
   }
@@ -540,36 +765,76 @@ export class LedgerlyAiToolService {
     if (!scopeSatisfied(principal, required, tool.scopeMode ?? "all")) {
       throw new AppError(403, "FORBIDDEN", "You do not hold the Ledgerly permissions required to review this action.");
     }
-    const reviewed = await this.runtime.db.query(
-      `UPDATE lai_approvals SET status='rejected',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
-        WHERE id=$3 AND organization_id=$4 AND status='pending'
-        RETURNING id`,
-      [principal.userId,note ?? null,approvalId,principal.organizationId],
+    const reviewerRole=approval.approvalPolicy?.reviewerRole==="owner"?"owner":"admin";
+    this.policy.assertReviewer(principal,reviewerRole);
+    const priorReview=await this.runtime.db.query(
+      "SELECT decision FROM lai_approval_reviews WHERE approval_id=$1 AND organization_id=$2 AND reviewer_id=$3 LIMIT 1",
+      [approvalId,principal.organizationId,principal.userId],
     );
-    if (!reviewed.rowCount) {
-      throw new AppError(409, "LEDGERLY_AI_APPROVAL_REVIEWED", "Approval was reviewed by another request.");
+    if(priorReview.rowCount){
+      throw new AppError(409,"LEDGERLY_AI_APPROVAL_ALREADY_REVIEWED_BY_USER",
+        "You have already reviewed this approval request.");
     }
-    if (approval.toolCallId) {
-      await this.runtime.db.query(
-        `UPDATE lai_tool_calls SET status='denied',error_text='Human approval rejected',
-                completed_at=CURRENT_TIMESTAMP
-          WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'`,
-        [approval.toolCallId,principal.organizationId],
+
+    const reviewId=createId("laiar");
+    const client=await this.runtime.db.connect();
+    let rejected=false;
+    try{
+      await client.query("BEGIN");
+      const locked=await client.query<{status:string}>(
+        "SELECT status FROM lai_approvals WHERE id=$1 AND organization_id=$2 FOR UPDATE",
+        [approvalId,principal.organizationId],
       );
-    }
-    if (approval.jobId) {
-      await this.runtime.db.query(
-        `UPDATE lai_jobs SET status='cancelled',error_text='Human approval rejected',
-                completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-          WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'`,
-        [approval.jobId,principal.organizationId],
+      if(locked.rows[0]?.status!=="pending"){
+        throw new AppError(409,"LEDGERLY_AI_APPROVAL_REVIEWED","Approval was reviewed by another request.");
+      }
+      await client.query(
+        `INSERT INTO lai_approval_reviews(
+          id,approval_id,organization_id,reviewer_id,decision,note,metadata_json
+        ) VALUES($1,$2,$3,$4,'rejected',$5,$6::jsonb)`,
+        [
+          reviewId,approvalId,principal.organizationId,principal.userId,note?.slice(0,2000)??null,
+          JSON.stringify({role:principal.role,approvalMode:approval.approvalMode}),
+        ],
       );
-      await this.runtime.db.query(
-        `UPDATE lai_custom_agent_runs SET status='cancelled',error_text='Human approval rejected',
-                completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
-          WHERE organization_id=$1 AND job_id=$2 AND status='waiting_approval'`,
-        [principal.organizationId,approval.jobId],
+      const reviewed=await client.query(
+        `UPDATE lai_approvals SET status='rejected',reviewed_by=$1,review_note=$2,reviewed_at=CURRENT_TIMESTAMP
+          WHERE id=$3 AND organization_id=$4 AND status='pending'
+          RETURNING id`,
+        [principal.userId,note??null,approvalId,principal.organizationId],
       );
+      rejected=Boolean(reviewed.rowCount);
+      if(rejected){
+        await client.query(
+          `UPDATE lai_tool_calls SET status='denied',error_text='Human approval rejected',
+                  completed_at=CURRENT_TIMESTAMP
+            WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'`,
+          [approval.toolCallId,principal.organizationId],
+        );
+        if (approval.jobId) {
+          await client.query(
+            `UPDATE lai_jobs SET status='cancelled',error_text='Human approval rejected',
+                    completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+              WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'`,
+            [approval.jobId,principal.organizationId],
+          );
+          await client.query(
+            `UPDATE lai_custom_agent_runs SET status='cancelled',error_text='Human approval rejected',
+                    completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+              WHERE organization_id=$1 AND job_id=$2 AND status='waiting_approval'`,
+            [principal.organizationId,approval.jobId],
+          );
+        }
+      }
+      await client.query("COMMIT");
+    }catch(error){
+      await client.query("ROLLBACK");
+      throw error;
+    }finally{client.release();}
+
+    if(!rejected){
+      const current=await this.approvalRow(principal,approvalId);
+      return{id:approvalId,status:current.status};
     }
     await this.audit({
       principal,
@@ -578,6 +843,12 @@ export class LedgerlyAiToolService {
       entityId: approvalId,
       correlationId: "approval:" + approvalId,
       metadata: { toolName: approval.toolName, toolCallId: approval.toolCallId },
+    });
+    await this.policy.privilegedAudit({
+      organizationId:principal.organizationId,actorType:"user",actorId:principal.userId,
+      action:"ledgerly_ai.approval.rejected",entityType:"approval",entityId:approvalId,
+      correlationId:"approval:"+approvalId,riskLevel:approval.riskLevel,
+      metadata:{reviewId,toolName:approval.toolName,toolCallId:approval.toolCallId,note:note??null},
     });
     return { id: approvalId, status: "rejected" };
   }
