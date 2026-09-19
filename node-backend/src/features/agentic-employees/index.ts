@@ -12,6 +12,10 @@ import { agenticMemoryRoutes } from "./memory-routes.js";
 import { agenticChatStudioRoutes } from "./chat-studio-routes.js";
 import { agenticLightRoutes } from "./light-routes.js";
 import { agenticDocumentRoutes } from "./document-routes.js";
+import { getLedgerlyAiFoundationService } from "../ledgerly-ai/runtime-service.js";
+import { AgenticLedgerlyAiBridge } from "./ledgerly-ai-bridge.js";
+import { createLegacyEmployeeDelegationTool } from "./ledgerly-ai-tool.js";
+import { agenticIntegrationRoutes } from "./integration-routes.js";
 
 function createBucketAdapter(runtime:Runtime){return{
   async put(key:string,body:Uint8Array|ArrayBuffer,options?:any){const bytes=body instanceof Uint8Array?body:new Uint8Array(body);await runtime.storage.put(key,bytes,options?.httpMetadata?.contentType||options?.contentType);return{};},
@@ -21,25 +25,25 @@ function createBucketAdapter(runtime:Runtime){return{
 
 export const agenticEmployeesFeature: BackendFeature = {
   key: "agentic-employees",
-  version: "2.8.0-node",
+  version: "2.9.0-node",
   mount(app: NodeApp, runtime: Runtime) {
     const d1 = createD1Compat(runtime.db);
     const workBucket=createBucketAdapter(runtime);
+    const ledgerlyAi=getLedgerlyAiFoundationService(runtime);
+    const bridge=new AgenticLedgerlyAiBridge(runtime,ledgerlyAi);
     const agenticEnv: Record<string, any> = {
       FINANCE_DB: d1,
       ENVIRONMENT: runtime.config.NODE_ENV,
-      OPENAI_API_KEY: runtime.config.OPENAI_API_KEY,
-      OPENAI_BASE_URL: runtime.config.OPENAI_BASE_URL,
-      OPENAI_MODEL_LUNA: runtime.config.OPENAI_MODEL_LUNA,
-      OPENAI_MODEL_TERRA: runtime.config.OPENAI_MODEL_TERRA,
-      OPENAI_MODEL_SOL: runtime.config.OPENAI_MODEL_SOL,
-      AI_PROVIDER_ENCRYPTION_KEY: runtime.config.AI_PROVIDER_ENCRYPTION_KEY,
       RESPONSE_INTELLIGENCE_URL: runtime.config.RESPONSE_INTELLIGENCE_URL,
       RESPONSE_INTELLIGENCE_TOKEN: runtime.config.RESPONSE_INTELLIGENCE_TOKEN,
       RESPONSE_INTELLIGENCE_TIMEOUT_MS: runtime.config.RESPONSE_INTELLIGENCE_TIMEOUT_MS,
       WORK_FILES_BUCKET: workBucket,
       AGENT_DOCUMENT_SERVICE: createAgentDocumentService(runtime.storage),
+      LEDGERLY_AI_AGENTIC_BRIDGE: bridge,
     };
+    if (!ledgerlyAi.tools.registry.has("agent.delegate.legacy")) {
+      ledgerlyAi.tools.registry.register(createLegacyEmployeeDelegationTool(bridge,d1,agenticEnv));
+    }
     agenticEnv.AGENT_SYSTEM_GATEWAY = createAgentSystemGateway(app, runtime.config.JWT_SECRET, runtime.config.JWT_ISSUER, runtime.config.JWT_AUDIENCE);
 
     app.use("/api/v1/agentic-employees/*", async (c, next) => {
@@ -54,5 +58,6 @@ export const agenticEmployeesFeature: BackendFeature = {
     app.route("/api/v1/agentic-employees", agenticLightRoutes as any);
     app.route("/api/v1/agentic-employees", agenticDocumentRoutes as any);
     app.route("/api/v1/agentic-employees", agenticMemoryRoutes as any);
+    app.route("/api/v1/agentic-employees", agenticIntegrationRoutes as any);
   },
 };

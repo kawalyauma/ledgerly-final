@@ -36,13 +36,14 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.6.0",
+        featureVersion: "0.7.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
         namedEmployees: true,
         tools: true,
         approvals: true,
+        legacyEmployeesIntegrated: true,
       },
     }),
   );

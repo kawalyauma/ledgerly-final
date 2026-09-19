@@ -54,17 +54,13 @@ agenticEmployeeRoutes.get("/agents", requireScope("school:read"), async c => {
 });
 
 agenticEmployeeRoutes.get("/settings", requireScope("school:read"), async c => {
-  const env = c.env as Env & Record<string, unknown>;
   return c.json({
     data: {
-      provider: "openai-responses",
-      configured: Boolean(env.OPENAI_API_KEY),
-      baseUrl: env.OPENAI_BASE_URL || "https://api.openai.com/v1",
-      models: {
-        luna: env.OPENAI_MODEL_LUNA || "gpt-5.6-luna",
-        terra: env.OPENAI_MODEL_TERRA || "gpt-5.6-terra",
-        sol: env.OPENAI_MODEL_SOL || "gpt-5.6-sol",
-      },
+      provider: "Ledgerly AI",
+      providerId: "ledgerly-ai",
+      configured: true,
+      providerSelection: "managed",
+      models: { luna: "managed", terra: "managed", sol: "managed" },
     },
   });
 });
@@ -188,23 +184,25 @@ agenticEmployeeRoutes.post("/conversations/:id/messages", requireScope("school:r
     requestedTools: agent.configuredTools,
     conversationId: conversation.id,
     messages: [...history.results].reverse(),
+    sourceMessageId: userMessageId,
   });
 
   const assistantMessageId = createId("aam");
   await c.env.FINANCE_DB.batch([
     c.env.FINANCE_DB.prepare(`
       INSERT INTO ae_messages
-        (id, organization_id, conversation_id, role, content, user_id, model, provider_response_id, metadata_json)
-      VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)
+        (id, organization_id, conversation_id, role, content, user_id, model, provider_response_id, metadata_json, ledgerly_ai_message_id)
+      VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
     `).bind(
       assistantMessageId,
       principal.organizationId,
       conversation.id,
       result.text,
       principal.userId,
-      result.model,
+      "Ledgerly AI",
       result.providerResponseId,
-      JSON.stringify({ usage: result.usage, toolEvents: result.toolEvents }),
+      JSON.stringify({ usage: result.usage, toolEvents: result.toolEvents, ledgerlyJobId: result.ledgerlyJobId }),
+      result.ledgerlyAssistantMessageId,
     ),
     c.env.FINANCE_DB.prepare(`
       UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
@@ -217,7 +215,7 @@ agenticEmployeeRoutes.post("/conversations/:id/messages", requireScope("school:r
       id: assistantMessageId,
       role: "assistant",
       content: result.text,
-      model: result.model,
+      model: "Ledgerly AI",
       toolEvents: result.toolEvents,
     },
   });
@@ -276,6 +274,7 @@ agenticEmployeeRoutes.post("/tasks", requireScope("school:read"), async c => {
       requestedTools: agent.configuredTools,
       conversationId,
       messages: [{ role: "user", content: parsed.data.instructions }],
+      sourceMessageId: messageId,
     });
     const assistantMessageId = createId("aam");
     await c.env.FINANCE_DB.batch([
@@ -284,9 +283,9 @@ agenticEmployeeRoutes.post("/tasks", requireScope("school:read"), async c => {
         WHERE id=? AND organization_id=?
       `).bind(result.text, taskId, principal.organizationId),
       c.env.FINANCE_DB.prepare(`
-        INSERT INTO ae_messages(id, organization_id, conversation_id, role, content, user_id, model, provider_response_id, metadata_json)
-        VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?)
-      `).bind(assistantMessageId, principal.organizationId, conversationId, result.text, principal.userId, result.model, result.providerResponseId, JSON.stringify({ usage: result.usage, toolEvents: result.toolEvents })),
+        INSERT INTO ae_messages(id, organization_id, conversation_id, role, content, user_id, model, provider_response_id, metadata_json, ledgerly_ai_message_id)
+        VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?, ?, ?)
+      `).bind(assistantMessageId, principal.organizationId, conversationId, result.text, principal.userId, "Ledgerly AI", result.providerResponseId, JSON.stringify({ usage: result.usage, toolEvents: result.toolEvents, ledgerlyJobId: result.ledgerlyJobId }), result.ledgerlyAssistantMessageId),
       c.env.FINANCE_DB.prepare(`
         UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
         WHERE id=? AND organization_id=?

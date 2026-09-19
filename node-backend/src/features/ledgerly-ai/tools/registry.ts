@@ -38,6 +38,10 @@ export class LedgerlyAiToolRegistry {
     return this;
   }
 
+  has(name: string) {
+    return this.tools.has(name);
+  }
+
   get(name: string) {
     const tool = this.tools.get(name);
     if (!tool) throw new AppError(404, "LEDGERLY_AI_TOOL_NOT_FOUND", "Ledgerly AI tool not found.");

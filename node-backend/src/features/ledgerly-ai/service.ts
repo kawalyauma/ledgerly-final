@@ -33,6 +33,7 @@ export class LedgerlyAiFoundationService {
   readonly tools: LedgerlyAiToolService;
   readonly gateway: LedgerlyAiGatewayService;
   private readonly logger: LedgerlyAiLogger;
+  private startPromise: Promise<void> | null = null;
 
   constructor(
     private readonly runtime: Runtime,
@@ -67,14 +68,20 @@ export class LedgerlyAiFoundationService {
   }
 
   start() {
-    void this.providers.initialize()
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.providers.initialize()
       .then(async () => {
         if (!this.config.LEDGERLY_AI_STARTUP_HEALTHCHECK) return;
         const health = await this.health();
         if (health.ready) this.logger.info({ health }, "Ledgerly AI startup health check passed");
         else this.logger.warn({ health }, "Ledgerly AI startup health check is degraded");
       })
-      .catch((error) => this.logger.error({ err: error }, "Ledgerly AI startup failed"));
+      .catch((error) => {
+        this.startPromise = null;
+        this.logger.error({ err: error }, "Ledgerly AI startup failed");
+        throw error;
+      });
+    return this.startPromise;
   }
 
   async health(): Promise<LedgerlyAiHealth> {

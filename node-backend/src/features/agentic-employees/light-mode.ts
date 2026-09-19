@@ -1,7 +1,7 @@
 import { AppError, createId } from "./shared.js";
 import type { AuthPrincipal, Env } from "./shared.js";
 import type { AgentDefinition } from "./policy.js";
-import { resolveRuntimeProvider } from "./provider-config.js";
+import type { AgenticLedgerlyAiBridge } from "./ledgerly-ai-bridge.js";
 import { executeTool } from "./memory-tools-v17.js";
 import { lookupSystemSchema } from "./system-schemas.js";
 import {
@@ -27,7 +27,12 @@ type LightInput = {
   conversationId: string;
   messages: ChatMessage[];
 };
-type Runtime = Awaited<ReturnType<typeof resolveRuntimeProvider>>;
+type Runtime = {
+  model: "Ledgerly AI";
+  provider: "ledgerly-ai";
+  config: { timeoutMs: number };
+  generate(prompt: string, maxTokens: number, stage: string): Promise<{ text: string; id: string | null; usage: unknown }>;
+};
 type RouteArguments = {
   pathParams?: Record<string, string | number>;
   query?: Record<string, unknown>;
@@ -58,23 +63,39 @@ function responseToolPolicy(request:string){
   return explicitWeb?["web.search"]:[];
 }
 
-function pythonGeneration(runtime:Runtime){
-  const apiStyle=runtime.apiStyle==="anthropic"?"anthropic":runtime.apiStyle==="responses"?"responses":"chat-completions";
+function managedRuntime(input:LightInput):Runtime{
+  const bridge=(input.env as Env & {LEDGERLY_AI_AGENTIC_BRIDGE?:AgenticLedgerlyAiBridge}).LEDGERLY_AI_AGENTIC_BRIDGE;
+  if(!bridge)throw new AppError(503,"LEDGERLY_AI_UNAVAILABLE","Ledgerly AI is not available for Light Mode.");
   return{
-    provider:String(runtime.provider||""),
-    apiStyle,
-    baseUrl:String(runtime.baseUrl||""),
-    apiKey:String(runtime.apiKey||""),
-    model:String(runtime.model||""),
-    timeoutSeconds:Math.min(Math.max(Number(runtime.config?.timeoutMs||45000)/1000,1),120),
-  } as const;
+    model:"Ledgerly AI",
+    provider:"ledgerly-ai",
+    config:{timeoutMs:120000},
+    async generate(prompt,maxTokens,stage){
+      const result=await bridge.generateText({
+        db:input.db,
+        env:input.env as Env & Record<string,unknown>,
+        principal:input.principal,
+        agent:input.agent,
+        conversationId:input.conversationId,
+        prompt:[
+          prompt,
+          "",
+          "Output budget guidance: keep the response within approximately "+Math.max(64,maxTokens)+" tokens unless the requested JSON needs slightly more.",
+        ].join("\n"),
+        stage,
+        taskKind:"analysis",
+      });
+      return{text:result.text,id:result.id,usage:result.usage};
+    },
+  };
 }
+function pythonGeneration(_runtime:Runtime){return undefined;}
 
 function latestUser(input: LightInput) {
   return [...input.messages].reverse().find(message => message.role === "user")?.content.trim() || "";
 }
 function stripFence(value: string) {
-  const text = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const text = value.trim().replace(/^\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`$/i, "");
   const start = text.indexOf("{"), end = text.lastIndexOf("}");
   return start >= 0 && end > start ? text.slice(start, end + 1) : text;
 }
@@ -85,55 +106,16 @@ function parseObject<T extends Record<string, unknown>>(value: string, fallback:
   } catch { return fallback; }
 }
 
-async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
-    const payload = await response.json().catch(() => ({})) as T;
-    return { response, payload };
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw new AppError(504, "AI_PROVIDER_TIMEOUT", "Light AI request timed out");
-    throw error;
-  } finally { clearTimeout(timer); }
-}
-function responseText(payload: any) {
-  if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text.trim();
-  const chunks: string[] = [];
-  for (const item of payload?.output || []) if (item?.type === "message") for (const part of item.content || []) if (part?.type === "output_text" && part.text) chunks.push(part.text);
-  return chunks.join("\n").trim();
-}
-async function cheapText(runtime: Runtime, prompt: string, maxTokens = 400) {
-  const timeout = Math.min(runtime.config.timeoutMs, 45_000);
-  const system = "You are Ledgerly Light AI. Be concise, follow the requested output format exactly, and never invent school data or IDs.";
-  if (runtime.apiStyle === "responses") {
-    const { response, payload } = await fetchJson<any>(`${runtime.baseUrl}/responses`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${runtime.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: runtime.model, instructions: system, input: prompt, max_output_tokens: maxTokens }),
-    }, timeout);
-    if (!response.ok) throw new AppError(502, "AI_PROVIDER_ERROR", payload?.error?.message || `AI request failed (${response.status})`);
-    return { text: responseText(payload), id: payload?.id || null, usage: payload?.usage || null };
-  }
-  if (runtime.apiStyle === "anthropic") {
-    const { response, payload } = await fetchJson<any>(`${runtime.baseUrl}/messages`, {
-      method: "POST",
-      headers: { "x-api-key": runtime.apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-      body: JSON.stringify({ model: runtime.model, system, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0 }),
-    }, timeout);
-    if (!response.ok) throw new AppError(502, "AI_PROVIDER_ERROR", payload?.error?.message || `AI request failed (${response.status})`);
-    const text = (payload?.content || []).filter((part: any) => part?.type === "text" && part.text).map((part: any) => part.text).join("\n").trim();
-    return { text, id: payload?.id || null, usage: payload?.usage || null };
-  }
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (runtime.apiKey) headers.Authorization = `Bearer ${runtime.apiKey}`;
-  const { response, payload } = await fetchJson<any>(`${runtime.baseUrl}/chat/completions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ model: runtime.model, messages: [{ role: "system", content: system }, { role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0 }),
-  }, timeout);
-  if (!response.ok) throw new AppError(502, "AI_PROVIDER_ERROR", payload?.error?.message || `AI request failed (${response.status})`);
-  return { text: String(payload?.choices?.[0]?.message?.content || "").trim(), id: payload?.id || null, usage: payload?.usage || null };
+async function cheapText(runtime: Runtime, prompt: string, maxTokens = 400, stageName = "light.generate") {
+  return runtime.generate(
+    [
+      "You are Ledgerly Light AI.",
+      "Be concise, follow the requested output format exactly, and never invent school data or IDs.",
+      prompt,
+    ].join("\n\n"),
+    maxTokens,
+    stageName,
+  );
 }
 function emptyUsage(): UsageSummary { return { calls: [], inputTokens: 0, outputTokens: 0, totalTokens: 0 }; }
 function addUsage(summary: UsageSummary, stageName: string, usage: any) {
@@ -146,8 +128,8 @@ function addUsage(summary: UsageSummary, stageName: string, usage: any) {
   summary.outputTokens += output;
   summary.totalTokens += total;
 }
-async function cheapJson<T extends Record<string, unknown>>(runtime: Runtime, prompt: string, fallback: T, maxTokens = 300) {
-  const result = await cheapText(runtime, `${prompt}\n\nReturn JSON only. No markdown.`, maxTokens);
+async function cheapJson<T extends Record<string, unknown>>(runtime: Runtime, prompt: string, fallback: T, maxTokens = 300, stageName = "light.json") {
+  const result = await cheapText(runtime, `${prompt}\n\nReturn JSON only. No markdown.`, maxTokens, stageName);
   return { value: parseObject(result.text, fallback), id: result.id, usage: result.usage };
 }
 
@@ -169,14 +151,14 @@ async function stage<T>(input: LightInput, name: string, work: () => Promise<T>)
 }
 async function aiJson<T extends Record<string, unknown>>(input: LightInput, runtime: Runtime, usage: UsageSummary, stageName: string, prompt: string, fallback: T, maxTokens: number) {
   return stage(input, stageName, async () => {
-    const result = await cheapJson(runtime, prompt, fallback, maxTokens);
+    const result = await cheapJson(runtime, prompt, fallback, maxTokens, stageName);
     addUsage(usage, stageName, result.usage);
     return result.value;
   });
 }
 async function aiText(input: LightInput, runtime: Runtime, usage: UsageSummary, stageName: string, prompt: string, maxTokens: number) {
   return stage(input, stageName, async () => {
-    const result = await cheapText(runtime, prompt, maxTokens);
+    const result = await cheapText(runtime, prompt, maxTokens, stageName);
     addUsage(usage, stageName, result.usage);
     return result;
   });
@@ -426,7 +408,7 @@ async function prepareDocumentFromResults(input: LightInput, runtime: Runtime, p
 export async function runLightAgent(input: LightInput) {
   const prompt = latestUser(input);
   if (!prompt) throw new AppError(422, "VALIDATION_ERROR", "A user message is required");
-  const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, "luna");
+  const runtime = managedRuntime(input);
   const usage = emptyUsage();
   const registry = await stage(input, "light_build_registry", () => buildLightToolRegistry(input.env, input.principal, input.agent));
   let kinds = await stage(input, "light_route_type", async () => inferKinds(prompt));
@@ -510,7 +492,7 @@ export async function runLightAgent(input: LightInput) {
       currency:"UGX",
     },
     detail:"standard",
-    providerMode:"auto",
+    providerMode:"disabled",
     generation:pythonGeneration(runtime),
     toolPolicy:responseToolPolicy(prompt),
     maxWords:900,
@@ -573,7 +555,7 @@ function sanitizeComposite(value: CompositeCompiled, fallbackRows: Record<string
 export async function runCompositeReport(input: LightInput, prompt: string) {
   const request = String(prompt || "").trim();
   if (!request) throw new AppError(422, "VALIDATION_ERROR", "Describe the report you want Ledgerly to build.");
-  const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, "luna"), usage = emptyUsage();
+  const runtime = managedRuntime(input), usage = emptyUsage();
   const registry = await stage(input, "composite_build_registry", () => buildLightToolRegistry(input.env, input.principal, input.agent));
   const readable = registry.tools.filter(tool => tool.readOnly && (tool.kind === "query" || tool.kind === "report" || tool.kind === "analysis"));
   if (!readable.length) throw new AppError(409, "COMPOSITE_REPORT_UNAVAILABLE", "No permitted read capabilities are available for this AI employee.");
@@ -612,7 +594,7 @@ export async function runCompositeReport(input: LightInput, prompt: string) {
     semanticPayload:{...data,sources:sourceInfo},
     context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:"composite report",category:"report",recentResponses,locale:"en-UG",currency:"UGX"},
     detail:"standard",
-    providerMode:"auto",
+    providerMode:"disabled",
     generation:pythonGeneration(runtime),
     toolPolicy:responseToolPolicy(request),
     maxWords:1400,
@@ -649,7 +631,7 @@ function guidedCapabilitySearch(prompt:string,topicText:string){return (prompt+"
 export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisMode;prompt:string;topicId?:string|null;entity?:AnalysisEntityOption|null}){
  const mode:AnalysisMode=payload.mode==="account-for"?"account-for":"analyse",request=String(payload.prompt||"").trim();
  if(!request)throw new AppError(422,"VALIDATION_ERROR","Describe what you want Ledgerly to analyse.");
- const runtime=await resolveRuntimeProvider(input.db,input.env,input.principal.organizationId,"luna"),usage=emptyUsage();
+ const runtime=managedRuntime(input),usage=emptyUsage();
  const registry=await stage(input,"analysis_build_registry",()=>buildLightToolRegistry(input.env,input.principal,input.agent));
  const readable=registry.tools.filter(tool=>tool.readOnly&&(tool.kind==="query"||tool.kind==="report"||tool.kind==="analysis"));
  if(!readable.length)throw new AppError(409,"ANALYSIS_UNAVAILABLE","No permitted read capabilities are available for this AI employee.");
@@ -709,7 +691,7 @@ export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisM
    semanticPayload:{rows:analysis.rows,summary:{summary:analysis.summary},relationships:analysis.relationships,limitations:analysis.limitations,sources,findings:analysis.findings,metrics:analysis.metrics},
    context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:topic?.label||"",category:topic?.category||"",entityType:entity?.type||"",entityLabel:entity?.label||"",recentResponses,locale:"en-UG",currency:"UGX"},
    detail:"deep",
-   providerMode:"auto",
+   providerMode:"disabled",
     generation:pythonGeneration(runtime),
    toolPolicy:responseToolPolicy(request),
    maxWords:1800,

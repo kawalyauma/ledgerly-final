@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { AGENTS } from "../src/features/agentic-employees/policy.js";
 import { openAiTools } from "../src/features/agentic-employees/memory-tools-v17.js";
 import { buildDraftSlots } from "../src/features/agentic-employees/semantic-tools.js";
-import { AI_PROVIDER_CATALOG, normalizeAdvancedConfig, normalizeModels } from "../src/features/agentic-employees/provider-config.js";
+import {
+  LEDGERLY_AI_PROVIDERS,
+  parseLedgerlyAiConfig,
+} from "../src/features/ledgerly-ai/config.js";
 
 describe("agentic semantic runtime", () => {
   it("actually exposes the semantic tools to an AI employee", () => {
@@ -31,24 +34,19 @@ describe("agentic semantic runtime", () => {
   });
 });
 
-describe("agentic provider abstraction", () => {
-  it("supports switchable cloud, local and future compatible providers", () => {
-    expect(Object.keys(AI_PROVIDER_CATALOG).sort()).toEqual([
-      "anthropic", "cloudflare", "custom", "google", "groq", "ollama", "openai", "openrouter",
-    ]);
-    expect(AI_PROVIDER_CATALOG.openai.apiStyle).toBe("responses");
-    expect(AI_PROVIDER_CATALOG.anthropic.apiStyle).toBe("anthropic");
-    for (const provider of ["groq", "google", "cloudflare", "openrouter", "ollama", "custom"] as const) {
-      expect(AI_PROVIDER_CATALOG[provider].apiStyle).toBe("chat-completions");
-    }
-    expect(AI_PROVIDER_CATALOG.ollama.apiKeyRequired).toBe(false);
-    expect(AI_PROVIDER_CATALOG.custom.apiKeyRequired).toBe(false);
+describe("Agentic Employees managed Ledgerly AI provider policy", () => {
+  it("uses only the two Ledgerly AI CLI execution providers", () => {
+    expect(LEDGERLY_AI_PROVIDERS).toEqual(["codex", "claude-code"]);
+    const config = parseLedgerlyAiConfig({});
+    expect(config.LEDGERLY_AI_DEFAULT_PROVIDER).toBe("codex");
+    expect(config.LEDGERLY_AI_FALLBACK_PROVIDER).toBe("claude-code");
   });
 
-  it("allows provider-specific model IDs and custom/local endpoints", () => {
-    expect(normalizeModels("groq", { sol: "openai/gpt-oss-120b" }).sol).toBe("openai/gpt-oss-120b");
-    expect(normalizeModels("ollama", { luna: "qwen3:8b" }).luna).toBe("qwen3:8b");
-    expect(normalizeModels("custom", { terra: "my-company/model-v2" }).terra).toBe("my-company/model-v2");
-    expect(normalizeAdvancedConfig({ baseUrl: "http://192.168.1.20:11434/v1" }).baseUrl).toBe("http://192.168.1.20:11434/v1");
+  it("keeps employee model tiers as routing hints rather than public providers", () => {
+    expect(AGENTS.secretary.modelTier).toBe("luna");
+    expect(AGENTS.dos.modelTier).toBe("terra");
+    expect(AGENTS.headteacher.modelTier).toBe("sol");
+    expect(LEDGERLY_AI_PROVIDERS).not.toContain("openai" as never);
+    expect(LEDGERLY_AI_PROVIDERS).not.toContain("ollama" as never);
   });
 });
