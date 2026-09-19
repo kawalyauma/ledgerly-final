@@ -77,7 +77,7 @@ class DatasetBuilder:
                     """SELECT f.*,e.request_text,e.semantic_json,e.response_text AS rejected_text,e.purpose
                        FROM response_feedback f
                        JOIN training_examples e ON e.response_fingerprint=f.response_fingerprint
-                       WHERE f.organization_id=? AND f.correction_text<>'' AND f.rating<=0
+                       WHERE f.organization_id=? AND f.correction_text<>'' AND f.rating<=0 AND f.trusted_reviewer=1
                        ORDER BY f.created_at""",(organization_id,)
                 ).fetchall()
             else:
@@ -85,7 +85,7 @@ class DatasetBuilder:
                     """SELECT f.*,e.request_text,e.semantic_json,e.response_text AS rejected_text,e.purpose
                        FROM response_feedback f
                        JOIN training_examples e ON e.response_fingerprint=f.response_fingerprint
-                       WHERE f.organization_id='' AND f.correction_text<>'' AND f.rating<=0
+                       WHERE f.organization_id='' AND f.correction_text<>'' AND f.rating<=0 AND f.trusted_reviewer=1
                        ORDER BY f.created_at"""
                 ).fetchall()
         result=[]
