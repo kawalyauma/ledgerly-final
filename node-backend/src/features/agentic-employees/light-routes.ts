@@ -9,7 +9,7 @@ import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOption
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
 import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
-import { checkPythonResponseIntelligence } from "./response-intelligence/python-client.js";
+import { checkPythonResponseIntelligence,getPythonLearningStatus,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -37,6 +37,38 @@ agenticLightRoutes.get("/chat-studio/response-intelligence",requireScope("school
 
 agenticLightRoutes.get("/chat-studio/response-intelligence-python",requireScope("school:read"),async c=>{
  return c.json({data:await checkPythonResponseIntelligence(c.env)});
+});
+
+agenticLightRoutes.get("/chat-studio/learning-status",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),data=await getPythonLearningStatus(c.env,p.organizationId);
+ return c.json({data:data||{organization_id:p.organizationId,readiness:"unavailable",approved:0,candidates:0,corrections:0}});
+});
+
+agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({
+   responseFingerprint:z.string().min(4).max(128),
+   rating:z.union([z.literal(-1),z.literal(0),z.literal(1)]),
+   comment:z.string().max(5000).optional(),
+   correctionText:z.string().max(50000).optional(),
+   entityLabel:z.string().max(500).optional(),
+   approveOriginal:z.boolean().optional(),
+ });
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR",parsed.error.issues[0]?.message||"Invalid feedback");
+ const data=await submitPythonResponseFeedback(c.env,{
+   organizationId:p.organizationId,responseFingerprint:parsed.data.responseFingerprint,rating:parsed.data.rating,
+   comment:parsed.data.comment,correctionText:parsed.data.correctionText,entityLabel:parsed.data.entityLabel,
+   approveOriginal:parsed.data.approveOriginal,
+ });
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/training-examples/:id/:status",requireScope("school:read"),async c=>{
+ const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
+ const data=await setPythonTrainingExampleStatus(c.env,c.req.param("id"),status);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
 });
 
 agenticLightRoutes.get("/chat-studio/analysis-guidance",requireScope("school:read"),async c=>{
