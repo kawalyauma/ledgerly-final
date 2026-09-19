@@ -26,8 +26,8 @@ from .realization import (
     clean_response,
 )
 from .semantic import merge_evidence
-from .tools.base import ToolBroker
-from .tools.registry import DisabledToolBroker
+from .tools.base import ToolBroker, ToolRequest
+from .tools.web_search import build_external_tool_registry
 from .training.models import AdapterRecord, RetrievalExample, StyleProfile
 from .training.retrieval import TrainingRetriever
 from .training.store import TrainingStore
@@ -46,7 +46,7 @@ class ResponseIntelligenceEngine:
     ) -> None:
         self.settings = settings
         self.provider = provider if provider is not None else build_provider(settings)
-        self.tool_broker = tool_broker or DisabledToolBroker()
+        self.tool_broker = tool_broker or build_external_tool_registry(settings)
         self.planner = DiscoursePlanner()
         self.reasoner = ReasoningEngine()
         self.realizer = DeterministicRealizer()
@@ -131,10 +131,15 @@ class ResponseIntelligenceEngine:
                         "sources":[item.source_id for item in reference_knowledge],
                     })
 
-        # External retrieval is deliberately policy-gated. The interface is live now so
-        # web/search/document tools can be added later without changing the response engine.
+        # External retrieval is deliberately policy-gated. Live web results remain
+        # supplemental references and never enter the deterministic Ledgerly fact graph.
         if request.tool_policy:
-            tool_events.extend(await self._tool_policy_events(request.tool_policy))
+            external_events,external_refs=await self._execute_reference_tools(request)
+            tool_events.extend(external_events)
+            reference_knowledge=self._trim_knowledge(
+                [*reference_knowledge,*external_refs],
+                self.settings.knowledge_max_context_chars,
+            )
 
         delegated_provider = build_delegated_provider(request.generation)
         active_adapter: AdapterRecord | None = None
@@ -195,7 +200,7 @@ class ResponseIntelligenceEngine:
                 active_provider=None
                 use_provider=False
 
-        quality = self.critic.evaluate(draft, request, evidence, reasoning)
+        quality = self.critic.evaluate(draft, request, evidence, reasoning, reference_knowledge)
         if use_provider:
             draft, quality, revision_count = await self._revise_until_acceptable(
                 request=request,
@@ -214,7 +219,7 @@ class ResponseIntelligenceEngine:
         # is safer than returning fluent hallucination.
         if quality.grounding.score < 0.9 or quality.causality.score < 0.7:
             fallback = self.realizer.realize(request, evidence, plan, reasoning)
-            fallback_quality = self.critic.evaluate(fallback, request, evidence, reasoning)
+            fallback_quality = self.critic.evaluate(fallback, request, evidence, reasoning, reference_knowledge)
             if fallback_quality.grounding.score >= quality.grounding.score:
                 draft = fallback
                 quality = fallback_quality
@@ -292,7 +297,16 @@ class ResponseIntelligenceEngine:
                         "scope":item.organization_scope,
                         "score":item.score,
                     }
-                    for item in reference_knowledge
+                    for item in reference_knowledge if item.source_type!="web"
+                ],
+                "webSourcesUsed": [
+                    {
+                        "sourceId":item.source_id,
+                        "title":item.title,
+                        "url":item.url,
+                        "score":item.score,
+                    }
+                    for item in reference_knowledge if item.source_type=="web"
                 ],
             },
         )
@@ -354,7 +368,7 @@ class ResponseIntelligenceEngine:
             candidate = clean_response(response.text)
             if not candidate:
                 break
-            candidate_quality = self.critic.evaluate(candidate, request, evidence, reasoning)
+            candidate_quality = self.critic.evaluate(candidate, request, evidence, reasoning, reference_knowledge)
             if candidate_quality.overall >= current_quality.overall or (
                 candidate_quality.grounding.score > current_quality.grounding.score
             ):
@@ -363,6 +377,66 @@ class ResponseIntelligenceEngine:
             else:
                 break
         return current, current_quality, revisions
+
+    async def _execute_reference_tools(
+        self,
+        request:ResponseRequest,
+    )->tuple[list[dict[str,Any]],list[KnowledgeSearchHit]]:
+        capabilities={item.name:item for item in await self.tool_broker.capabilities()}
+        events:list[dict[str,Any]]=[]
+        references:list[KnowledgeSearchHit]=[]
+        for name in request.tool_policy:
+            capability=capabilities.get(name)
+            if not capability:
+                events.append({"tool":name,"available":False,"enabled":False,"external":False})
+                continue
+            if not capability.enabled:
+                events.append({
+                    "tool":name,"available":True,"enabled":False,"external":capability.external,
+                    "error":"Tool is not enabled.",
+                })
+                continue
+            try:
+                result=await self.tool_broker.execute(ToolRequest(
+                    name=name,query=request.request,
+                    arguments={"limit":self.settings.web_search_max_results},
+                ))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("External reference tool %s failed: %s",name,exc)
+                events.append({
+                    "tool":name,"available":True,"enabled":True,"external":capability.external,
+                    "ok":False,"error":str(exc),
+                })
+                continue
+            event={
+                "tool":name,"available":True,"enabled":True,"external":capability.external,
+                "ok":result.ok,"error":result.error,"sources":result.sources,
+            }
+            raw_results=(result.data or {}).get("results",[]) if isinstance(result.data,dict) else []
+            if isinstance(raw_results,list):
+                event["results"]=len(raw_results)
+                for index,item in enumerate(raw_results[:self.settings.web_search_max_results]):
+                    if not isinstance(item,dict):
+                        continue
+                    url=str(item.get("url") or "")
+                    title=str(item.get("title") or url or "Web result")
+                    snippet=str(item.get("snippet") or item.get("content") or "").strip()
+                    if not snippet:
+                        continue
+                    references.append(KnowledgeSearchHit(
+                        chunk_id="web_"+fingerprint(url+"|"+snippet)[:20],
+                        source_id="web_"+fingerprint(url)[:20],
+                        title=title,
+                        content=snippet,
+                        source_type="web",
+                        url=url,
+                        published_at=str(item.get("age") or item.get("published_at") or ""),
+                        score=float(item.get("score") or 0.55),
+                        organization_scope="global",
+                        tags=["live-web",str(item.get("provider") or "web")],
+                    ))
+            events.append(event)
+        return events,references
 
     async def _tool_policy_events(self, names: list[str]) -> list[dict[str, Any]]:
         capabilities = {item.name: item for item in await self.tool_broker.capabilities()}
