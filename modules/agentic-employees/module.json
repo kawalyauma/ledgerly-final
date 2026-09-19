@@ -247,7 +247,8 @@
       "governed-training-dataset-export",
       "admin-trained-adapter-activation",
       "adapter-holdout-evaluation",
-      "trained-adapter-runtime-state-ui"
+      "trained-adapter-runtime-state-ui",
+      "trained-adapter-rollback"
     ]
   }
 }
