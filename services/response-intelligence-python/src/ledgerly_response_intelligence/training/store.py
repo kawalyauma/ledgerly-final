@@ -257,7 +257,16 @@ class TrainingStore:
 
     def add_feedback(self, item: FeedbackCreate) -> FeedbackRecord:
         feedback_id = "fb_" + uuid.uuid4().hex
-        existing = self.find_by_fingerprint(item.response_fingerprint,item.organization_id)
+        existing: TrainingExample | None = None
+        if item.example_id:
+            try:
+                candidate=self.get_example(item.example_id)
+                if not item.organization_id or candidate.organization_id==item.organization_id:
+                    existing=candidate
+            except KeyError:
+                existing=None
+        if existing is None:
+            existing=self.find_by_fingerprint(item.response_fingerprint,item.organization_id)
         example_id = existing.example_id if existing else ""
         correction = redact_text(item.correction_text,item.entity_label)
         comment = redact_text(item.comment,item.entity_label)
