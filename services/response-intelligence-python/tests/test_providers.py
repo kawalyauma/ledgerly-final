@@ -1,6 +1,7 @@
+from ledgerly_response_intelligence.config import Settings
 from ledgerly_response_intelligence.models import GenerationConfig
 from ledgerly_response_intelligence.providers.anthropic import AnthropicProvider
-from ledgerly_response_intelligence.providers.factory import build_delegated_provider
+from ledgerly_response_intelligence.providers.factory import build_delegated_provider, build_provider
 from ledgerly_response_intelligence.providers.openai_compatible import OpenAICompatibleProvider
 from ledgerly_response_intelligence.providers.responses import ResponsesProvider
 
@@ -55,3 +56,15 @@ def test_anthropic_without_key_is_not_accepted() -> None:
         )
     )
     assert provider is None
+
+
+def test_service_wide_responses_provider() -> None:
+    provider = build_provider(
+        Settings(
+            provider="responses",
+            base_url="https://api.openai.com/v1",
+            api_key="secret-key",
+            model="gpt-example",
+        )
+    )
+    assert isinstance(provider, ResponsesProvider)
