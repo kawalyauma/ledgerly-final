@@ -68,7 +68,8 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
 
 agenticLightRoutes.get("/chat-studio/learning-center",requireScope("school:read"),async c=>{
  const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can manage Response Intelligence learning");
- const [status,style,candidates,runs,adapters]=await Promise.all([
+ const [service,status,style,candidates,runs,adapters]=await Promise.all([
+   checkPythonResponseIntelligence(c.env),
    getPythonLearningStatus(c.env,p.organizationId),
    getPythonStyleProfile(c.env,p.organizationId),
    getPythonTrainingExamples(c.env,p.organizationId,"candidate",100),
@@ -76,7 +77,7 @@ agenticLightRoutes.get("/chat-studio/learning-center",requireScope("school:read"
    getPythonAdapters(c.env,p.organizationId),
  ]);
  if(!status)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
- return c.json({data:{status,style:style||{},candidates:candidates||[],runs:runs||[],adapters:adapters||[]}});
+ return c.json({data:{service,status,style:style||{},candidates:candidates||[],runs:runs||[],adapters:adapters||[]}});
 });
 
 agenticLightRoutes.post("/chat-studio/training-export",requireScope("school:read"),async c=>{
