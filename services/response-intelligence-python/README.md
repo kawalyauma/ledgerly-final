@@ -488,3 +488,10 @@ This retains:
 - trained adapter folders placed under the configured data directory.
 
 Back up this directory together with the rest of the self-hosted Ledgerly production state.
+
+
+### Learning Center
+
+Owners and administrators can manage the supervised learning lifecycle from **Agentic Employees → Learning Center**. The page shows readiness, approved/candidate counts, learned style, recent training runs and registered adapters. It supports candidate approval/rejection, SFT/DPO dataset export, adapter activation and safe adapter rollback.
+
+Choosing **Use provider only** deactivates the organization's trained adapter without deleting it. The normal delegated/service provider chain then handles responses again.
