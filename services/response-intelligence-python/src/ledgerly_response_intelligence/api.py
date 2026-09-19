@@ -282,7 +282,10 @@ async def register_training_adapter(
 ) -> AdapterRecord:
     require_training(engine)
     assert engine.training_store is not None
-    return engine.training_store.register_adapter(item)
+    try:
+        return engine.training_store.register_adapter(item)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/v1/training/adapters/{adapter_id}/activate", response_model=AdapterRecord, dependencies=[Depends(authorize)])
@@ -296,3 +299,5 @@ async def activate_training_adapter(
         return engine.training_store.activate_adapter(adapter_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Adapter not found.") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
