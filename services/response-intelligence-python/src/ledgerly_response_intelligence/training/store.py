@@ -452,6 +452,14 @@ class TrainingStore:
             metrics=json.loads(str(row["metrics_json"] or "{}")),created_at=str(row["created_at"]),
         ) for row in rows]
 
+    def active_adapter(self,organization_id:str)->AdapterRecord|None:
+        with self._lock,self._connect() as db:
+            row=db.execute(
+                "SELECT adapter_id FROM model_adapters WHERE organization_id=? AND active=1 ORDER BY created_at DESC LIMIT 1",
+                (organization_id,),
+            ).fetchone()
+        return self.get_adapter(str(row["adapter_id"])) if row else None
+
     def activate_adapter(self,adapter_id:str)->AdapterRecord:
         adapter=self.get_adapter(adapter_id)
         with self._lock,self._connect() as db:
