@@ -23,6 +23,17 @@ dev = [
   "ruff>=0.12,<1",
   "mypy>=1.17,<2",
 ]
+training = [
+  "torch>=2.6",
+  "transformers>=5,<6",
+  "datasets>=4,<5",
+  "accelerate>=1,<2",
+  "peft>=0.17,<1",
+  "trl>=1,<2",
+]
+qlora = [
+  "bitsandbytes>=0.47,<1",
+]
 
 [project.scripts]
 ledgerly-response-intelligence = "ledgerly_response_intelligence.cli:main"
