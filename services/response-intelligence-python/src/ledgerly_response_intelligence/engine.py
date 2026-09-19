@@ -141,6 +141,7 @@ class ResponseIntelligenceEngine:
 
         draft = self._limit_words(clean_response(draft), request.max_words)
         quality = self.critic.evaluate(draft, request, evidence, reasoning)
+        final_fingerprint = fingerprint(draft)
         training_example_id = ""
         if (
             self.training_store is not None
@@ -166,6 +167,7 @@ class ResponseIntelligenceEngine:
                         ] if item
                     ],
                     entity_label=request.context.entity_label,
+                    response_fingerprint=final_fingerprint,
                 )
                 training_example_id = candidate.example_id
             except Exception as exc:  # noqa: BLE001
@@ -181,7 +183,7 @@ class ResponseIntelligenceEngine:
             provider=provider_name,
             model=model,
             revision_count=revision_count,
-            response_fingerprint=fingerprint(draft),
+            response_fingerprint=final_fingerprint,
             tool_events=tool_events,
             metadata={
                 "providerConfigured": bool(active_provider),
