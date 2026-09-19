@@ -5,6 +5,8 @@ from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 
 from . import __version__
 from .config import Settings, get_settings
@@ -32,7 +34,7 @@ MAX_BODY_BYTES = 3 * 1024 * 1024
 
 
 @app.middleware("http")
-async def limit_request_body(request: Request, call_next):
+async def limit_request_body(request: Request, call_next: RequestResponseEndpoint) -> Response:
     if request.method in {"POST", "PUT", "PATCH"}:
         content_length = request.headers.get("content-length")
         if content_length:
