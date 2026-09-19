@@ -8,6 +8,7 @@ import type { HealthChecker } from "./health/service.js";
 import { AppError, isPgError } from "./http/errors.js";
 import type { AppEnv } from "./http/types.js";
 import type { Runtime } from "./runtime.js";
+import { getLedgerlyAiFoundationService } from "./features/ledgerly-ai/runtime-service.js";
 
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500;
 
@@ -19,8 +20,49 @@ export function createApp(options: {
   runtime?: Runtime;
 }) {
   const app = new Hono<AppEnv>();
+  const captureIncident = (input: {
+    organizationId?: string | null;
+    source: string;
+    signalType: "http" | "exception" | "queue" | "health" | "manual";
+    message: string;
+    title?: string;
+    code?: string | null;
+    httpStatus?: number | null;
+    path?: string | null;
+    method?: string | null;
+    correlationId?: string | null;
+    stack?: string | null;
+    context?: Record<string, unknown>;
+  }) => {
+    if (!options.runtime) return;
+    void getLedgerlyAiFoundationService(options.runtime).incidents.signal(input).catch((incidentError) => {
+      options.runtime?.logger.warn(
+        { err: incidentError instanceof Error ? incidentError.message : String(incidentError), source: input.source },
+        "Ledgerly AI incident capture failed",
+      );
+    });
+  };
   app.use("*", requestId());
   app.use("*", secureHeaders());
+  app.use("*", async (c, next) => {
+    await next();
+    const status = c.res.status;
+    if (status < 400 || c.get("incidentCaptured")) return;
+    let organizationId: string | null = null;
+    try { organizationId = c.get("principal")?.organizationId ?? null; } catch {}
+    c.set("incidentCaptured", true);
+    captureIncident({
+      organizationId,
+      source: "api-response",
+      signalType: "http",
+      message: `HTTP ${status} response`,
+      code: `HTTP_${status}`,
+      httpStatus: status,
+      path: c.req.path,
+      method: c.req.method,
+      correlationId: c.get("requestId"),
+    });
+  });
   const corsConfig = {
     origin: options.corsOrigins.includes("*") ? "*" : options.corsOrigins,
     allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key", "X-API-Key", "X-Organization-Id", "X-User-Id", "X-Request-Id", "X-Printerly-Claim"],
@@ -55,6 +97,22 @@ export function createApp(options: {
   app.get("/system/live", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
   app.get("/system/health", async (c) => {
     const health = await options.health.check();
+    if (health.status !== "ok") {
+      c.set("incidentCaptured", true);
+      captureIncident({
+        organizationId: null,
+        source: "platform-health",
+        signalType: "health",
+        message: "Ledgerly platform health is degraded.",
+        title: "Platform health degraded",
+        code: "PLATFORM_HEALTH_DEGRADED",
+        httpStatus: 503,
+        path: c.req.path,
+        method: c.req.method,
+        correlationId: c.get("requestId"),
+        context: { components: health.components },
+      });
+    }
     return c.json(health, health.status === "ok" ? 200 : 503);
   });
 
@@ -64,10 +122,57 @@ export function createApp(options: {
     feature.mount(app, options.runtime);
   }
 
-  app.notFound((c) => c.json({ error: { code: "NOT_FOUND", message: "Route not found", requestId: c.get("requestId") } }, 404));
+  app.notFound((c) => {
+    let organizationId: string | null = null;
+    try { organizationId = c.get("principal")?.organizationId ?? null; } catch {}
+    c.set("incidentCaptured", true);
+    captureIncident({
+      organizationId,
+      source: "api",
+      signalType: "http",
+      message: "Route not found",
+      code: "NOT_FOUND",
+      httpStatus: 404,
+      path: c.req.path,
+      method: c.req.method,
+      correlationId: c.get("requestId"),
+    });
+    return c.json({ error: { code: "NOT_FOUND", message: "Route not found", requestId: c.get("requestId") } }, 404);
+  });
   app.onError((error, c) => {
     const requestId = c.get("requestId");
     console.error(JSON.stringify({ level: "error", requestId, message: error.message, stack: error.stack }));
+    let organizationId: string | null = null;
+    try { organizationId = c.get("principal")?.organizationId ?? null; } catch {}
+    c.set("incidentCaptured", true);
+    let incidentStatus = 500;
+    let incidentCode = "INTERNAL_ERROR";
+    if (error instanceof AppError) {
+      incidentStatus = error.status;
+      incidentCode = error.code;
+    } else if (isPgError(error) && error.code === "23505") {
+      incidentStatus = 409; incidentCode = "DUPLICATE_RECORD";
+    } else if (isPgError(error) && error.code === "23503") {
+      incidentStatus = 409; incidentCode = "RELATED_RECORD_CONFLICT";
+    } else if (isPgError(error) && error.code === "P0001") {
+      incidentStatus = 409; incidentCode = "DATABASE_INVARIANT";
+    }
+    captureIncident({
+      organizationId,
+      source: "api",
+      signalType: incidentStatus >= 500 ? "exception" : "http",
+      message: error.message,
+      code: incidentCode,
+      httpStatus: incidentStatus,
+      path: c.req.path,
+      method: c.req.method,
+      correlationId: requestId,
+      stack: error.stack,
+      context: error instanceof AppError ? { details: error.details } : {
+        pgCode: isPgError(error) ? error.code ?? null : null,
+        pgConstraint: isPgError(error) ? error.constraint ?? null : null,
+      },
+    });
     if (error instanceof AppError) {
       return c.json({ error: { code: error.code, message: error.message, details: error.details, requestId } }, error.status as ErrorStatus);
     }

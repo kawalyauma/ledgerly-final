@@ -1,0 +1,118 @@
+name: Ledgerly AI CI
+
+on:
+  push:
+    branches: [ledgerly-ai]
+    paths:
+      - "ledgerly-ai/**"
+      - "node-backend/**"
+      - "modules/ledgerly-ai/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ledgerly-ai-ci.yml"
+  pull_request:
+    paths:
+      - "ledgerly-ai/**"
+      - "node-backend/**"
+      - "modules/ledgerly-ai/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ledgerly-ai-ci.yml"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: node-backend
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ledgerly
+          POSTGRES_PASSWORD: ledgerly
+          POSTGRES_DB: ledgerly
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ledgerly -d ledgerly"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://ledgerly:ledgerly@127.0.0.1:5432/ledgerly
+      REDIS_URL: redis://127.0.0.1:6379
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_ROOT: /tmp/ledgerly-storage
+      JWT_SECRET: ci-only-secret-must-be-at-least-32-characters
+      NODE_ENV: test
+      HOST: 127.0.0.1
+      PORT: 8080
+      LEDGERLY_AI_ENABLED: "true"
+      LEDGERLY_AI_DEFAULT_PROVIDER: codex
+      LEDGERLY_AI_FALLBACK_PROVIDER: claude-code
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install frontend dependencies
+        working-directory: .
+        run: npm ci
+      - name: Frontend typecheck
+        working-directory: .
+        run: npm run typecheck
+      - name: Frontend build
+        working-directory: .
+        run: npm run build:web
+      - name: Install backend dependencies
+        run: npm install --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm run build:strict
+      - name: Build Ledgerly AI worker images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t ledgerly-ai-codex:ci ../ledgerly-ai/workers/codex
+          docker build -t ledgerly-ai-claude-code:ci ../ledgerly-ai/workers/claude-code
+      - name: Verify isolated worker CLIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=512m --cpus=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            ledgerly-ai-codex:ci --version
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=512m --cpus=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            ledgerly-ai-claude-code:ci --version
+      - name: Ledgerly AI smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm start >/tmp/ledgerly-ai-api.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/system/health >/tmp/health.json; then break; fi
+            sleep 1
+          done
+          cat /tmp/health.json
+          grep -q '"status":"ok"' /tmp/health.json
+          curl -fsS http://127.0.0.1:8080/ >/tmp/root.json
+          grep -q '"key":"ledgerly-ai"' /tmp/root.json
+          unauth_status=$(curl -sS -o /tmp/lai-unauth.json -w '%{http_code}' http://127.0.0.1:8080/api/v1/ledgerly-ai/health)
+          test "$unauth_status" = "401"
+          npm run smoke:ledgerly-ai

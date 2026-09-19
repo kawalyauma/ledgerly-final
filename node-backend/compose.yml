@@ -30,11 +30,6 @@ services:
       timeout: 3s
       retries: 20
 
-  # migrate/api/queue/scheduler run on the host network, not the compose bridge
-  # network, so they can reach real AI providers (OpenAI/Gemini/Claude/Workers
-  # AI) — some sandboxed Docker hosts block outbound internet from the default
-  # bridge network entirely. Postgres/Redis are reached via the published
-  # loopback ports above instead of their service-name DNS.
   migrate:
     build:
       context: .
@@ -49,7 +44,6 @@ services:
       STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: /data/storage
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
-      # Keep the main Node API and modular/self-host API on one token authority.
       JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-your-finance-pro-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
@@ -59,6 +53,46 @@ services:
       OPENAI_MODEL_LUNA: ${OPENAI_MODEL_LUNA:-}
       OPENAI_MODEL_TERRA: ${OPENAI_MODEL_TERRA:-}
       OPENAI_MODEL_SOL: ${OPENAI_MODEL_SOL:-}
+      LEDGERLY_AI_ENABLED: ${LEDGERLY_AI_ENABLED:-true}
+      LEDGERLY_AI_DEFAULT_PROVIDER: ${LEDGERLY_AI_DEFAULT_PROVIDER:-codex}
+      LEDGERLY_AI_FALLBACK_PROVIDER: ${LEDGERLY_AI_FALLBACK_PROVIDER:-claude-code}
+      LEDGERLY_AI_EXECUTION_MODE: ${LEDGERLY_AI_EXECUTION_MODE:-docker}
+      LEDGERLY_AI_CODEX_IMAGE: ${LEDGERLY_AI_CODEX_IMAGE:-ledgerly-ai-codex:local}
+      LEDGERLY_AI_CLAUDE_IMAGE: ${LEDGERLY_AI_CLAUDE_IMAGE:-ledgerly-ai-claude-code:local}
+      LEDGERLY_AI_SESSION_ROOT: /var/lib/ledgerly-ai/sessions
+      LEDGERLY_AI_WORK_ROOT: /var/lib/ledgerly-ai/workspaces
+      LEDGERLY_AI_MAX_CONCURRENCY: ${LEDGERLY_AI_MAX_CONCURRENCY:-4}
+      LEDGERLY_AI_MAX_QUEUE: ${LEDGERLY_AI_MAX_QUEUE:-100}
+      LEDGERLY_AI_USER_REQUESTS_PER_MINUTE: ${LEDGERLY_AI_USER_REQUESTS_PER_MINUTE:-20}
+      LEDGERLY_AI_ORG_REQUESTS_PER_MINUTE: ${LEDGERLY_AI_ORG_REQUESTS_PER_MINUTE:-200}
+      LEDGERLY_AI_AGENT_REQUESTS_PER_MINUTE: ${LEDGERLY_AI_AGENT_REQUESTS_PER_MINUTE:-60}
+      LEDGERLY_AI_CHAT_HISTORY_MESSAGES: ${LEDGERLY_AI_CHAT_HISTORY_MESSAGES:-30}
+      LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS: ${LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS:-7}
+      LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT: ${LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT:-12}
+      LEDGERLY_AI_MEMORY_CONTEXT_CHARS: ${LEDGERLY_AI_MEMORY_CONTEXT_CHARS:-12000}
+      LEDGERLY_AI_MAX_TOOL_STEPS: ${LEDGERLY_AI_MAX_TOOL_STEPS:-6}
+      LEDGERLY_AI_TOOL_TIMEOUT_MS: ${LEDGERLY_AI_TOOL_TIMEOUT_MS:-120000}
+      LEDGERLY_AI_TOOL_MAX_RESULT_BYTES: ${LEDGERLY_AI_TOOL_MAX_RESULT_BYTES:-524288}
+      LEDGERLY_AI_REPO_ROOT: /opt/ledgerly/source
+      LEDGERLY_AI_GIT_BASE_BRANCH: ${LEDGERLY_AI_GIT_BASE_BRANCH:-main}
+      LEDGERLY_AI_GIT_REMOTE: ${LEDGERLY_AI_GIT_REMOTE:-origin}
+      LEDGERLY_AI_GIT_PROTECTED_BRANCHES: ${LEDGERLY_AI_GIT_PROTECTED_BRANCHES:-main,master,production}
+      LEDGERLY_AI_GIT_AUTO_PR: ${LEDGERLY_AI_GIT_AUTO_PR:-false}
+      LEDGERLY_AI_GIT_REQUIRED_CHECKS: ${LEDGERLY_AI_GIT_REQUIRED_CHECKS:-}
+      LEDGERLY_AI_GITHUB_REPOSITORY: ${LEDGERLY_AI_GITHUB_REPOSITORY:-}
+      LEDGERLY_AI_GITHUB_TOKEN: ${LEDGERLY_AI_GITHUB_TOKEN:-}
+      LEDGERLY_AI_GITHUB_API_URL: ${LEDGERLY_AI_GITHUB_API_URL:-https://api.github.com}
+      LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS: ${LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS:-300}
+      LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS: ${LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS:-600}
+      LEDGERLY_AI_MONITOR_DB_WARN_MS: ${LEDGERLY_AI_MONITOR_DB_WARN_MS:-500}
+      LEDGERLY_AI_MONITOR_DB_CRITICAL_MS: ${LEDGERLY_AI_MONITOR_DB_CRITICAL_MS:-2000}
+      LEDGERLY_AI_MONITOR_SLOW_QUERY_MS: ${LEDGERLY_AI_MONITOR_SLOW_QUERY_MS:-10000}
+      LEDGERLY_AI_MONITOR_QUEUE_WARN: ${LEDGERLY_AI_MONITOR_QUEUE_WARN:-100}
+      LEDGERLY_AI_MONITOR_QUEUE_CRITICAL: ${LEDGERLY_AI_MONITOR_QUEUE_CRITICAL:-1000}
+      LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT: ${LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT:-85}
+      LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT: ${LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT:-95}
+      LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT: ${LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT:-90}
+      LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT: ${LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT:-97}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -72,8 +106,14 @@ services:
     environment:
       <<: *backend-env
       PORT: ${LEDGERLY_API_PORT:-8787}
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - app-storage:/data/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/ledgerly-ai/sessions:/var/lib/ledgerly-ai/sessions
+      - /var/lib/ledgerly-ai/workspaces:/var/lib/ledgerly-ai/workspaces
+      - ${LEDGERLY_SOURCE_ROOT:-/opt/ledgerly/source}:/opt/ledgerly/source
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -86,8 +126,14 @@ services:
     restart: unless-stopped
     command: ["node", "dist/queue/worker.js"]
     environment: *backend-env
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - app-storage:/data/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/ledgerly-ai/sessions:/var/lib/ledgerly-ai/sessions
+      - /var/lib/ledgerly-ai/workspaces:/var/lib/ledgerly-ai/workspaces
+      - ${LEDGERLY_SOURCE_ROOT:-/opt/ledgerly/source}:/opt/ledgerly/source
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
