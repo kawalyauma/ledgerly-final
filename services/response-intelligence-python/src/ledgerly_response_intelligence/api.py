@@ -256,8 +256,8 @@ async def search_knowledge(
     engine: ResponseIntelligenceEngine = Depends(get_engine),
 ) -> list[KnowledgeSearchHit]:
     require_knowledge(engine)
-    assert engine.knowledge_retriever is not None
-    return engine.knowledge_retriever.search(
+    assert engine.knowledge_store is not None
+    return engine.knowledge_store.search(
         organization_id=item.organization_id,
         query=item.query,
         limit=item.limit,
