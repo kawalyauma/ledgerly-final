@@ -78,6 +78,8 @@ async def health() -> dict[str, object]:
         "webSearchEnabled": settings.allow_web_search,
         "learningEnabled": settings.learning_enabled,
         "learningRetrievalEnabled": settings.learning_retrieval_enabled,
+        "knowledgeEnabled": settings.knowledge_enabled,
+        "knowledgeRetrievalEnabled": settings.knowledge_retrieval_enabled,
         "trainingPrivacyMode": settings.training_privacy_mode,
         "preferActiveAdapter": settings.training_prefer_active_adapter,
     }
@@ -155,6 +157,16 @@ async def respond(
 def require_knowledge(engine: ResponseIntelligenceEngine) -> None:
     if engine.knowledge_store is None:
         raise HTTPException(status_code=503, detail="Institutional knowledge is disabled.")
+
+
+@app.post("/v1/knowledge/seed-starter-pack", response_model=list[KnowledgeSource], dependencies=[Depends(authorize)])
+async def seed_knowledge_starter_pack(
+    organization_id: str = "",
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[KnowledgeSource]:
+    require_knowledge(engine)
+    assert engine.knowledge_store is not None
+    return engine.knowledge_store.seed_starter_pack(organization_id)
 
 
 @app.get("/v1/knowledge/stats", response_model=KnowledgeStats, dependencies=[Depends(authorize)])
