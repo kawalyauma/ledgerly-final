@@ -11,9 +11,13 @@ from typing import Any
 from ..memory import fingerprint
 from ..models import Purpose, Register
 from .models import (
+    AdapterRecord,
+    AdapterRegister,
     FeedbackCreate,
     FeedbackRecord,
+    FineTuneConfig,
     StyleProfile,
+    TrainingRunRecord,
     TrainingExample,
     TrainingExampleCreate,
     TrainingStats,
@@ -351,6 +355,89 @@ class TrainingStore:
             heading_rate=heading/len(examples),bullet_rate=bullet/len(examples),concise_rate=concise/len(examples),
             rules=rules,
         )
+
+    def create_training_run(self,config:FineTuneConfig)->TrainingRunRecord:
+        run_id="trn_"+uuid.uuid4().hex
+        now=_now()
+        with self._lock,self._connect() as db:
+            db.execute(
+                """INSERT INTO training_runs(
+                   run_id,organization_id,mode,base_model,dataset_path,output_dir,status,config_json,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    run_id,config.organization_id,f"{config.objective}:{config.mode}",config.base_model,
+                    config.dataset_path,config.output_dir,"running",stable_json(config.model_dump(mode="json")),now,
+                ),
+            )
+        return self.get_training_run(run_id)
+
+    def finish_training_run(self,run_id:str,*,status:str,metrics:dict[str,Any]|None=None)->TrainingRunRecord:
+        with self._lock,self._connect() as db:
+            db.execute(
+                "UPDATE training_runs SET status=?,metrics_json=?,completed_at=? WHERE run_id=?",
+                (status,stable_json(metrics or {}),_now(),run_id),
+            )
+        return self.get_training_run(run_id)
+
+    def get_training_run(self,run_id:str)->TrainingRunRecord:
+        with self._lock,self._connect() as db:
+            row=db.execute("SELECT * FROM training_runs WHERE run_id=?",(run_id,)).fetchone()
+        if not row:raise KeyError(run_id)
+        mode_text=str(row["mode"])
+        objective,_,mode=mode_text.partition(":")
+        return TrainingRunRecord(
+            run_id=str(row["run_id"]),organization_id=str(row["organization_id"]),
+            objective=objective or "sft",mode=mode or mode_text,base_model=str(row["base_model"]),
+            dataset_path=str(row["dataset_path"]),output_dir=str(row["output_dir"]),status=str(row["status"]),
+            config=json.loads(str(row["config_json"] or "{}")),metrics=json.loads(str(row["metrics_json"] or "{}")),
+            created_at=str(row["created_at"]),completed_at=str(row["completed_at"] or ""),
+        )
+
+    def register_adapter(self,item:AdapterRegister)->AdapterRecord:
+        adapter_id="adp_"+uuid.uuid4().hex
+        now=_now()
+        with self._lock,self._connect() as db:
+            if item.activate:
+                db.execute("UPDATE model_adapters SET active=0 WHERE organization_id=?",(item.organization_id,))
+            db.execute(
+                """INSERT INTO model_adapters(
+                   adapter_id,organization_id,name,base_model,path,active,metrics_json,created_at
+                   ) VALUES(?,?,?,?,?,?,?,?)""",
+                (
+                    adapter_id,item.organization_id,item.name,item.base_model,item.path,1 if item.activate else 0,
+                    stable_json(item.metrics),now,
+                ),
+            )
+        return self.get_adapter(adapter_id)
+
+    def get_adapter(self,adapter_id:str)->AdapterRecord:
+        with self._lock,self._connect() as db:
+            row=db.execute("SELECT * FROM model_adapters WHERE adapter_id=?",(adapter_id,)).fetchone()
+        if not row:raise KeyError(adapter_id)
+        return AdapterRecord(
+            adapter_id=str(row["adapter_id"]),organization_id=str(row["organization_id"]),name=str(row["name"]),
+            base_model=str(row["base_model"]),path=str(row["path"]),active=bool(row["active"]),
+            metrics=json.loads(str(row["metrics_json"] or "{}")),created_at=str(row["created_at"]),
+        )
+
+    def list_adapters(self,organization_id:str="")->list[AdapterRecord]:
+        with self._lock,self._connect() as db:
+            rows=db.execute(
+                "SELECT * FROM model_adapters WHERE organization_id=? ORDER BY active DESC,created_at DESC",
+                (organization_id,),
+            ).fetchall()
+        return [AdapterRecord(
+            adapter_id=str(row["adapter_id"]),organization_id=str(row["organization_id"]),name=str(row["name"]),
+            base_model=str(row["base_model"]),path=str(row["path"]),active=bool(row["active"]),
+            metrics=json.loads(str(row["metrics_json"] or "{}")),created_at=str(row["created_at"]),
+        ) for row in rows]
+
+    def activate_adapter(self,adapter_id:str)->AdapterRecord:
+        adapter=self.get_adapter(adapter_id)
+        with self._lock,self._connect() as db:
+            db.execute("UPDATE model_adapters SET active=0 WHERE organization_id=?",(adapter.organization_id,))
+            db.execute("UPDATE model_adapters SET active=1 WHERE adapter_id=?",(adapter_id,))
+        return self.get_adapter(adapter_id)
 
     @staticmethod
     def _row_example(row: sqlite3.Row) -> TrainingExample:
