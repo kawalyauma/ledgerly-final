@@ -2,14 +2,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive, BarChart3, Bot, Brain, CheckCircle2, ChevronRight, Database, Download, FileDown,
   FileSpreadsheet, FileText, LoaderCircle, MessageSquare, Pencil, Plus, Presentation,
-  RefreshCcw, Send, ShieldCheck, Sparkles, X,
+  RefreshCcw, Send, ShieldCheck, Sparkles, ThumbsDown, ThumbsUp, X,
 } from "lucide-react";
 import { downloadFile, errorText, get, patch, post } from "../../../web/api";
 import { QuickCommandPalette, type QuickCommandPaletteHandle } from "./QuickCommandPalette";
 
 type Agent={key:string;name:string;title:string;description:string;modelTier:"luna"|"terra"|"sol";enabled:boolean;configuredTools:string[]};
 type Conversation={id:string;agentKey:string;title:string;status:string;lastMessageAt?:string;createdAt?:string};
-type Message={id:string;role:"user"|"assistant";content:string;model?:string;createdAt?:string};
+type Message={id:string;role:"user"|"assistant";content:string;model?:string;createdAt?:string;routing?:{responseFingerprint?:string};responseMeta?:{fingerprint?:string}};
 type Settings={provider:string;configured:boolean;models:Record<string,string>};
 type Action={id:string;agentKey:string;actionType:string;title:string;summary:string;requiredScope:string;status:string;approvalId?:string|null;payload:Record<string,unknown>;resultEntityType?:string|null;resultEntityId?:string|null;failureText?:string|null;createdAt?:string;updatedAt?:string};
 type Artifact={id:string;title:string;format:"pdf"|"docx"|"xlsx"|"pptx";sourceMimeType:string;sourceSizeBytes:number;pdfSizeBytes:number;pdfPageCount:number;status:string;createdAt?:string};
@@ -205,7 +205,7 @@ export function AgenticChatStudioPage(){
       <section className="acs-chat">
         {!conversation&&<div className="acs-empty"><Bot size={34}/><h2>Start a fresh AI chat</h2><p>Choose an AI employee or start a new conversation. Light and Advanced can use the same Ledgerly capabilities; only routing, speed and AI cost differ.</p><button className="acs-empty-action" disabled={!agent||busy} onClick={()=>void startNewChat()}><Plus size={15}/>Start new chat</button></div>}
         {conversation&&messages.length===0&&conversation.status!=="closed"&&<div className="acs-welcome"><span className="acs-avatar hero">{meta.initials}</span><h2>What should {agent?.name} work on?</h2><p>{mode==="light"?"Light Mode breaks work into small low-cost steps while retaining the same Ledgerly capabilities.":"Advanced Mode uses deeper reasoning and broader context for speed on complex work."}</p><div className="acs-starters">{meta.prompts.map(prompt=><button key={prompt} onClick={()=>setText(prompt)}>{prompt}<ChevronRight size={14}/></button>)}</div></div>}
-        {messages.map(message=><article key={message.id} className={`acs-message ${message.role}`}><div className="acs-message-meta"><b>{message.role==="user"?"You":agent?.name||"Ledgerly AI"}</b><span>{formatWhen(message.createdAt)}</span></div><div className="acs-message-body"><RichContent content={message.content}/></div>{message.model&&<small className="acs-model">{message.model}</small>}</article>)}
+        {messages.map(message=><article key={message.id} className={`acs-message ${message.role}`}><div className="acs-message-meta"><b>{message.role==="user"?"You":agent?.name||"Ledgerly AI"}</b><span>{formatWhen(message.createdAt)}</span></div><div className="acs-message-body"><RichContent content={message.content}/></div>{message.model&&<small className="acs-model">{message.model}</small>}{message.role==="assistant"&&<ChatLearningFeedback message={message}/>}</article>)}
         {busy&&liveStatus&&<WorkingCard phase={phase} status={liveStatus} agentName={agent?.name||"Ledgerly AI"}/>}
 
         {pending.map(action=><ApprovalCard key={action.id} action={action} draft={drafts[action.id]||JSON.stringify(action.payload,null,2)} editing={editing===action.id} busy={actionBusy===action.id} onEdit={()=>setEditing(current=>current===action.id?"":action.id)} onDraft={value=>setDrafts(current=>({...current,[action.id]:value}))} onSave={()=>void saveEdits(action).catch(()=>{})} onApprove={()=>void approveAndRun(action)} onReject={()=>void rejectAction(action)}/>)}
@@ -223,6 +223,25 @@ export function AgenticChatStudioPage(){
         <div className="acs-composer-note"><ShieldCheck size={12}/>{mode==="light"?"Light Mode uses low-cost staged routing. Type / for validated quick commands and searchable Ledgerly pickers.":"Advanced Mode uses deeper reasoning. Type / for validated quick commands; writes still require the same review and approval."}</div>
       </footer>}
     </main>
+  </div>;
+}
+
+function ChatLearningFeedback({message}:{message:Message}){
+  const fingerprint=String(message.routing?.responseFingerprint||message.responseMeta?.fingerprint||"");
+  const[state,setState]=useState<"idle"|"correct"|"sending"|"sent">("idle"),[correction,setCorrection]=useState(""),[note,setNote]=useState("");
+  if(!fingerprint)return null;
+  async function send(rating:-1|1,approveOriginal=false){
+    setState("sending");
+    try{
+      await post<any>("/agentic-employees/chat-studio/response-feedback",{responseFingerprint:fingerprint,rating,approveOriginal,correctionText:rating<0?correction.trim():""});
+      setNote(rating>0?"Approved for learning.":"Correction saved for future responses.");setState("sent");
+    }catch(error){setNote(errorText(error));setState(rating<0?"correct":"idle");}
+  }
+  if(state==="sent")return <div className="acs-learn-saved"><CheckCircle2 size={12}/>{note}</div>;
+  return <div className="acs-learn">
+    <div className="acs-learn-buttons"><button disabled={state==="sending"} onClick={()=>void send(1,true)} title="Approve this response for learning"><ThumbsUp size={12}/>Teach as good</button><button disabled={state==="sending"} onClick={()=>setState(state==="correct"?"idle":"correct")} title="Correct this response"><ThumbsDown size={12}/>Improve</button></div>
+    {state==="correct"&&<div className="acs-learn-editor"><textarea rows={3} value={correction} onChange={e=>setCorrection(e.target.value)} placeholder="Write the better response Ledgerly should learn…"/><button disabled={!correction.trim()} onClick={()=>void send(-1)}>Save correction</button></div>}
+    {note&&state!=="sent"&&<small>{note}</small>}
   </div>;
 }
 
