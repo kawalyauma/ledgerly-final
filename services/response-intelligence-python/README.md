@@ -279,3 +279,212 @@ pytest
 ```
 
 The GitHub workflow also contains a dedicated Python Response Intelligence job. If GitHub runner infrastructure is unavailable, these commands should be run locally before deployment.
+
+
+## Trainable intelligence lifecycle
+
+Response Intelligence learns in controlled stages. It does **not** silently fine-tune itself from every conversation.
+
+### 1. Candidate capture
+
+A response that passes the configured quality threshold can be saved as a **candidate**. The stored training copy is privacy-processed according to `RIE_TRAINING_PRIVACY_MODE`:
+
+- `redacted` — default; secrets, IDs, contacts and known entity names are redacted.
+- `structure-only` — retains semantic shape rather than business values.
+- `full` — stores full supplied training content; use only in a controlled environment.
+
+Candidates are not used as learned exemplars until approved.
+
+### 2. Human feedback
+
+Command Center and Chat Studio can send:
+
+- positive feedback,
+- negative feedback,
+- a complete corrected response.
+
+Owners and administrators are treated as trusted reviewers. Their approvals can promote examples and their corrections can become approved training material. Feedback from other users is recorded, but corrections remain candidates requiring review.
+
+This protects the organization-specific response behavior from accidental or malicious training-data poisoning.
+
+### 3. Immediate retrieval learning
+
+Approved examples become useful **without model fine-tuning**.
+
+For a new request the engine retrieves similar approved examples for the same organization and uses them only as demonstrations of:
+
+- writing quality,
+- reasoning shape,
+- response architecture,
+- preferred level of detail,
+- section style.
+
+Old examples are never factual sources for the current answer. The current verified Ledgerly evidence always has priority.
+
+After enough approved examples, the organization style profile can also influence the discourse strategy, such as executive-brief, diagnostic, contrast-first or evidence-first.
+
+### 4. Inspect learning readiness
+
+```bash
+ledgerly-response-intelligence training-stats --organization org_123
+```
+
+The service reports:
+
+- candidates,
+- approved examples,
+- rejected examples,
+- positive/negative feedback,
+- trusted corrections,
+- training runs,
+- registered adapters,
+- readiness: `empty`, `collecting`, `sft-ready`, or `preference-ready`.
+
+Thresholds are configurable through:
+
+```bash
+RIE_TRAINING_MIN_SFT_EXAMPLES=25
+RIE_TRAINING_MIN_PREFERENCE_EXAMPLES=20
+```
+
+Readiness means the dataset is large enough to begin an experiment; it is not a guarantee that a fine-tuned model will outperform the base model.
+
+### 5. Export supervised datasets
+
+SFT dataset:
+
+```bash
+ledgerly-response-intelligence export-dataset \
+  --organization org_123 \
+  --format sft \
+  --min-quality 0.88
+```
+
+Preference/DPO dataset:
+
+```bash
+ledgerly-response-intelligence export-dataset \
+  --organization org_123 \
+  --format dpo
+```
+
+DPO export uses **trusted human corrections only**. Ordinary unreviewed negative feedback cannot enter the preference dataset.
+
+Exports are JSONL with a SHA-256 digest for reproducibility.
+
+### 6. Install optional model-training dependencies
+
+LoRA/SFT:
+
+```bash
+make install-training
+```
+
+QLoRA:
+
+```bash
+make install-qlora
+```
+
+The live FastAPI service does not require these large ML packages unless local training or local adapter inference is used.
+
+### 7. Train an SFT LoRA adapter
+
+```bash
+ledgerly-response-intelligence train-adapter \
+  --organization org_123 \
+  --objective sft \
+  --mode lora \
+  --base-model Qwen/Qwen3-4B \
+  --name ledgerly-org123-sft \
+  --epochs 2 \
+  --activate
+```
+
+If `--dataset` is omitted, the CLI exports the organization's approved SFT dataset first.
+
+### 8. Train QLoRA
+
+```bash
+ledgerly-response-intelligence train-adapter \
+  --organization org_123 \
+  --objective sft \
+  --mode qlora \
+  --base-model Qwen/Qwen3-4B \
+  --name ledgerly-org123-qlora \
+  --activate
+```
+
+### 9. Preference training from corrections
+
+```bash
+ledgerly-response-intelligence train-adapter \
+  --organization org_123 \
+  --objective dpo \
+  --mode lora \
+  --base-model Qwen/Qwen3-4B \
+  --learning-rate 0.00001 \
+  --name ledgerly-org123-preference
+```
+
+### 10. Use the trained adapter locally
+
+Training with `--activate` registers the resulting adapter as the organization's active adapter.
+
+Local adapter inference is opt-in:
+
+```bash
+RIE_TRAINING_PREFER_ACTIVE_ADAPTER=true
+RIE_LOCAL_ADAPTER_DEVICE_MAP=auto
+RIE_LOCAL_ADAPTER_TEMPERATURE=0.55
+```
+
+When enabled, the provider order is:
+
+```text
+active organization adapter
+        ↓ if unavailable/fails
+school's normal delegated AI provider
+        ↓ if unavailable/fails
+service-wide provider
+        ↓
+deterministic grounded fallback
+```
+
+The local model is loaded lazily and cached in the Python process. With `RIE_TRAINING_PREFER_ACTIVE_ADAPTER=false`—the default—training can still be used for experiments while production continues using the school's existing provider.
+
+## Learning API
+
+In addition to generation endpoints:
+
+- `GET /v1/training/stats`
+- `GET /v1/training/examples`
+- `POST /v1/training/examples`
+- `POST /v1/training/feedback`
+- `POST /v1/training/examples/{id}/approve`
+- `POST /v1/training/examples/{id}/reject`
+- `GET /v1/training/style-profile`
+- `POST /v1/training/export`
+- `GET /v1/training/runs`
+- `GET /v1/training/adapters`
+- `POST /v1/training/adapters`
+- `POST /v1/training/adapters/{id}/activate`
+
+Browser clients should normally use the tenant-scoped Node endpoints rather than calling this internal API directly.
+
+## Training data persistence
+
+Docker Compose mounts:
+
+```text
+./data → /app/data
+```
+
+This retains:
+
+- SQLite learning state,
+- exported SFT/DPO datasets,
+- adapter registry data,
+- trained adapter folders placed under the configured data directory.
+
+Back up this directory together with the rest of the self-hosted Ledgerly production state.
