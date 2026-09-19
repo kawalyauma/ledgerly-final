@@ -45,6 +45,8 @@
       "dual-provider-failure-recovery-tests",
       "authenticated-e2e-smoke-tests",
       "architecture-documentation",
+      "operations-runbook",
+      "backup-recovery-guide",
       "provider-policy-documentation",
       "forge-operations-documentation",
       "incident-operations-documentation",

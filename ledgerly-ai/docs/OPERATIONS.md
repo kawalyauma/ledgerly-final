@@ -67,8 +67,10 @@ Ledgerly AI expects persistent provider session homes:
 
 Readiness markers checked by the backend are:
 
-- Codex: `auth.json` inside the Codex session home.
-- Claude Code: `.claude/.credentials.json` inside the Claude Code session home.
+- Codex: `/var/lib/ledgerly-ai/sessions/codex/auth.json`.
+- Claude Code: `/var/lib/ledgerly-ai/sessions/claude-code/.claude/.credentials.json`.
+
+Provider session directories use mode `0700`; credential files must remain owner-only.
 
 Credential files must not be group/world accessible. The runtime treats a provider as not configured when the marker file is absent, empty or has group/world permission bits.
 
