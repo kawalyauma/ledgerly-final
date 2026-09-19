@@ -76,6 +76,8 @@ async def health() -> dict[str, object]:
         "providerConfigured": settings.provider_enabled,
         "externalToolsEnabled": settings.allow_external_tools,
         "webSearchEnabled": settings.allow_web_search,
+        "webSearchProvider": settings.web_search_provider,
+        "webSearchConfigured": bool(settings.web_search_api_key and settings.web_search_provider!="none"),
         "learningEnabled": settings.learning_enabled,
         "learningRetrievalEnabled": settings.learning_retrieval_enabled,
         "knowledgeEnabled": settings.knowledge_enabled,
