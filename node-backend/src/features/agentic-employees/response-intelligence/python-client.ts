@@ -219,3 +219,12 @@ export async function activatePythonAdapter(
   const query="?organization_id="+encodeURIComponent(organizationId);
   return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/"+encodeURIComponent(adapterId)+"/activate"+query,{method:"POST"});
 }
+
+
+export async function deactivatePythonAdapters(
+  env:Env,
+  organizationId:string,
+):Promise<Record<string,unknown>|null>{
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/deactivate"+query,{method:"POST"});
+}
