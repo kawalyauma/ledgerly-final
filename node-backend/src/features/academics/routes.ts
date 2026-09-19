@@ -7,7 +7,8 @@ import { createId, requireScope } from "../core-identity/security.js";
 
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const curriculumSchema=z.object({code:z.string().min(1),name:z.string().min(2),authority:z.string().nullable().optional(),version:z.string().nullable().optional(),startsOn:date.nullable().optional(),endsOn:date.nullable().optional()});
-const schemeSchema=z.object({academicYearId:z.string(),termId:z.string(),classId:z.string(),streamId:z.string().nullable().optional(),subjectId:z.string(),teacherStaffId:z.string().nullable().optional(),curriculumId:z.string().nullable().optional(),title:z.string().min(2)});
+const blankToNull=z.string().nullable().optional().transform(v=>v?v:null);
+const schemeSchema=z.object({academicYearId:z.string(),termId:z.string(),classId:z.string(),streamId:blankToNull,subjectId:z.string(),teacherStaffId:blankToNull,curriculumId:blankToNull,title:z.string().min(2)});
 const itemSchema=z.object({syllabusTopicId:z.string().nullable().optional(),weekNumber:z.number().int().positive(),sequence:z.number().int().positive().default(1),topic:z.string().min(1),subtopic:z.string().nullable().optional(),learningOutcomes:z.string().nullable().optional(),teachingMethods:z.string().nullable().optional(),learningResources:z.string().nullable().optional(),assessmentStrategy:z.string().nullable().optional(),plannedPeriods:z.number().int().positive().default(1)});
 function camel(row:Record<string,unknown>){const o:Record<string,unknown>={};for(const[k,v]of Object.entries(row))o[k.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())]=v;return o;}
 async function owned(runtime:Runtime,org:string,table:string,id?:string|null){if(!id)return;const q=await runtime.db.query(`SELECT 1 FROM ${table} WHERE id=$1 AND organization_id=$2`,[id,org]);if(!q.rowCount)throw new AppError(422,"INVALID_REFERENCE",`${table} record does not belong to this school`);}

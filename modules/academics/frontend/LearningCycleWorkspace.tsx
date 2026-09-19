@@ -3,7 +3,7 @@ import {BookOpenCheck,CheckCircle2,ChevronDown,ChevronRight,ClipboardCheck,FileT
 import {errorText,get,patch,post,put} from "../../../web/api";
 import {Badge,Button,Card,Field,Modal,Notice,Spinner} from "../../../web/components/ui";
 
-const base="/academics/learning";
+const base="/academics";
 type R=Record<string,any>;
 type Setup={years:R[];terms:R[];classes:R[];streams:R[];subjects:R[];teachers:R[];teacherAllocations:R[]};
 type Competency={id?:string;competencyType:string;code?:string;title:string;description?:string;successCriteria?:string};
