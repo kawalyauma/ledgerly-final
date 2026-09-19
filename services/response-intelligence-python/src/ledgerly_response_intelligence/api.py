@@ -4,6 +4,7 @@ import logging
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 
 from . import __version__
 from .config import Settings, get_settings
@@ -36,7 +37,10 @@ async def limit_request_body(request: Request, call_next):
         if content_length:
             try:
                 if int(content_length) > MAX_BODY_BYTES:
-                    raise HTTPException(status_code=413, detail="Request payload is too large.")
+                    return JSONResponse(
+                        {"detail": "Request payload is too large."},
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    )
             except ValueError:
                 pass
     return await call_next(request)
