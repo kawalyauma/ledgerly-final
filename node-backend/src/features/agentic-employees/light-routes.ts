@@ -48,6 +48,7 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
  const p=c.get("principal"),raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
  const schema=z.object({
    responseFingerprint:z.string().min(4).max(128),
+   exampleId:z.string().max(128).optional(),
    rating:z.union([z.literal(-1),z.literal(0),z.literal(1)]),
    comment:z.string().max(5000).optional(),
    correctionText:z.string().max(50000).optional(),
@@ -56,7 +57,7 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
  });
  const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR",parsed.error.issues[0]?.message||"Invalid feedback");
  const data=await submitPythonResponseFeedback(c.env,{
-   organizationId:p.organizationId,responseFingerprint:parsed.data.responseFingerprint,rating:parsed.data.rating,
+   organizationId:p.organizationId,exampleId:parsed.data.exampleId,responseFingerprint:parsed.data.responseFingerprint,rating:parsed.data.rating,
    comment:parsed.data.comment,correctionText:parsed.data.correctionText,entityLabel:parsed.data.entityLabel,
    approveOriginal:parsed.data.approveOriginal,
    trustedReviewer:p.role==="owner"||p.role==="admin",
