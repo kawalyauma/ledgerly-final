@@ -117,3 +117,26 @@ def test_untrusted_correction_stays_candidate_until_review(tmp_path) -> None:
     assert store.get_example(original.example_id).status=="candidate"
     assert store.get_example(feedback.example_id).status=="candidate"
     assert feedback.trusted_reviewer is False
+
+
+def test_redacts_multiple_semantic_identities_from_training_text(tmp_path) -> None:
+    store=TrainingStore(str(tmp_path/"learning.sqlite3"),privacy_mode="redacted")
+    item=store.add_example(TrainingExampleCreate(
+        organization_id="org_1",purpose=Purpose.comparison,
+        request="Compare Amina Nambi with John Kato and contact parent@example.com.",
+        semantic_payload={
+            "rows":[
+                {"studentName":"Amina Nambi","studentId":"std_1","attendancePercent":72},
+                {"studentName":"John Kato","studentId":"std_2","attendancePercent":91},
+            ],
+            "guardianEmail":"parent@example.com",
+        },
+        response_text="Amina Nambi is below John Kato. parent@example.com should not be retained.",
+        quality_overall=0.95,status="approved",
+    ))
+    combined=item.request+" "+item.response_text
+    assert "Amina Nambi" not in combined
+    assert "John Kato" not in combined
+    assert "parent@example.com" not in combined
+    assert "std_1" not in json.dumps(item.semantic_payload)
+    assert "std_2" not in json.dumps(item.semantic_payload)
