@@ -25,6 +25,8 @@ from .realization import (
 from .semantic import merge_evidence
 from .tools.base import ToolBroker
 from .tools.registry import DisabledToolBroker
+from .training.retrieval import TrainingRetriever
+from .training.store import TrainingStore
 
 
 logger = logging.getLogger(__name__)
@@ -45,12 +47,38 @@ class ResponseIntelligenceEngine:
         self.reasoner = ReasoningEngine()
         self.realizer = DeterministicRealizer()
         self.critic = ResponseCritic()
+        self.training_store = (
+            TrainingStore(settings.training_db_path, privacy_mode=settings.training_privacy_mode)
+            if settings.learning_enabled
+            else None
+        )
+        self.training_retriever = (
+            TrainingRetriever(self.training_store)
+            if self.training_store is not None and settings.learning_retrieval_enabled
+            else None
+        )
 
     async def respond(self, request: ResponseRequest) -> ResponseResult:
         evidence = merge_evidence(request.evidence, request.semantic_payload)
         reasoning = self.reasoner.derive(request, evidence)
         plan = self.planner.build(request, evidence)
         tool_events: list[dict[str, Any]] = []
+        learned_examples = []
+        style_profile = None
+        if self.training_retriever is not None and request.context.organization_id:
+            style_profile = self.training_retriever.style_profile(request.context.organization_id)
+            learned_examples = self.training_retriever.retrieve(
+                organization_id=request.context.organization_id,
+                request=request.request,
+                purpose=request.purpose.value,
+                register=plan.register.value,
+                strategy_id=plan.strategy_id,
+                limit=self.settings.training_retrieval_limit,
+                include_global=True,
+            )
+            for rule in style_profile.rules:
+                if rule not in plan.editorial_rules:
+                    plan.editorial_rules.append(rule)
 
         # External retrieval is deliberately policy-gated. The interface is live now so
         # web/search/document tools can be added later without changing the response engine.
@@ -70,7 +98,7 @@ class ResponseIntelligenceEngine:
 
         if use_provider:
             try:
-                system, prompt = build_generation_prompt(request, evidence, plan, reasoning=reasoning)
+                system, prompt = build_generation_prompt(request, evidence, plan, reasoning=reasoning, learned_examples=learned_examples, style_profile=style_profile)
                 assert active_provider is not None
                 response = await active_provider.generate(
                     system=system,
@@ -96,6 +124,8 @@ class ResponseIntelligenceEngine:
                 draft=draft,
                 quality=quality,
                 provider=active_provider,
+                learned_examples=learned_examples,
+                style_profile=style_profile,
             )
 
         # If provider output still contains unsupported factual claims, deterministic output
@@ -111,6 +141,35 @@ class ResponseIntelligenceEngine:
 
         draft = self._limit_words(clean_response(draft), request.max_words)
         quality = self.critic.evaluate(draft, request, evidence, reasoning)
+        training_example_id = ""
+        if (
+            self.training_store is not None
+            and request.context.organization_id
+            and quality.overall >= self.settings.training_auto_candidate_quality
+        ):
+            try:
+                candidate = self.training_store.capture_candidate(
+                    organization_id=request.context.organization_id,
+                    purpose=request.purpose,
+                    request=request.request,
+                    semantic_payload=request.semantic_payload,
+                    response_text=draft,
+                    register=plan.register,
+                    strategy_id=plan.strategy_id,
+                    quality_overall=quality.overall,
+                    tags=[
+                        item for item in [
+                            request.context.category,
+                            request.context.topic,
+                            request.context.entity_type,
+                            "auto-candidate",
+                        ] if item
+                    ],
+                    entity_label=request.context.entity_label,
+                )
+                training_example_id = candidate.example_id
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Could not capture response training candidate: %s", exc)
 
         return ResponseResult(
             request_id=request.request_id,
@@ -132,6 +191,10 @@ class ResponseIntelligenceEngine:
                 "factCount": len(evidence.facts),
                 "relationshipCount": len(evidence.relationships),
                 "limitationCount": len(evidence.limitations),
+                "learningEnabled": self.training_store is not None,
+                "learnedExamplesUsed": [item.example_id for item in learned_examples],
+                "styleProfileExamples": style_profile.approved_examples if style_profile else 0,
+                "trainingExampleId": training_example_id,
             },
         )
 
@@ -158,6 +221,8 @@ class ResponseIntelligenceEngine:
         draft: str,
         quality: QualityReport,
         provider: GenerationProvider | None,
+        learned_examples: list[Any],
+        style_profile: Any,
     ) -> tuple[str, QualityReport, int]:
         if provider is None:
             return draft, quality, 0
@@ -171,6 +236,8 @@ class ResponseIntelligenceEngine:
                 evidence,
                 plan,
                 reasoning=reasoning,
+                learned_examples=learned_examples,
+                style_profile=style_profile,
                 previous_draft=current,
                 revision_instructions=current_quality.revision_instructions,
             )
