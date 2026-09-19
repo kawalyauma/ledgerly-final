@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkPythonResponseIntelligence,
   realizeWithPythonResponseIntelligence,
+  submitPythonResponseFeedback,
 } from "./python-client.js";
 
 afterEach(() => {
@@ -79,4 +80,25 @@ describe("Python Response Intelligence bridge", () => {
     expect(result.reachable).toBe(true);
     expect(result.status).toBe("ok");
   });
+});
+
+
+it("sends tenant-scoped human corrections to the learning service", async () => {
+  const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+    const body=JSON.parse(String(init?.body||"{}"));
+    expect(body.organization_id).toBe("org_1");
+    expect(body.response_fingerprint).toBe("fp_123");
+    expect(body.rating).toBe(-1);
+    expect(body.correction_text).toContain("better");
+    return new Response(JSON.stringify({feedback_id:"fb_1"}),{status:200,headers:{"Content-Type":"application/json"}});
+  });
+  vi.stubGlobal("fetch",fetchMock);
+  const result=await submitPythonResponseFeedback({
+    RESPONSE_INTELLIGENCE_URL:"http://127.0.0.1:8091",
+    RESPONSE_INTELLIGENCE_TOKEN:"service-token-123456",
+  } as any,{
+    organizationId:"org_1",responseFingerprint:"fp_123",rating:-1,
+    correctionText:"A better evidence-grounded response.",
+  });
+  expect(result?.feedback_id).toBe("fb_1");
 });
