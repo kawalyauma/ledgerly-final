@@ -393,6 +393,14 @@ class TrainingStore:
             created_at=str(row["created_at"]),completed_at=str(row["completed_at"] or ""),
         )
 
+    def list_training_runs(self,organization_id:str="",limit:int=100)->list[TrainingRunRecord]:
+        with self._lock,self._connect() as db:
+            rows=db.execute(
+                "SELECT run_id FROM training_runs WHERE organization_id=? ORDER BY created_at DESC LIMIT ?",
+                (organization_id,max(1,min(limit,1000))),
+            ).fetchall()
+        return [self.get_training_run(str(row["run_id"])) for row in rows]
+
     def register_adapter(self,item:AdapterRegister)->AdapterRecord:
         adapter_id="adp_"+uuid.uuid4().hex
         now=_now()
