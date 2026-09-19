@@ -170,4 +170,5 @@ class FineTuneConfig(BaseModel):
     lora_dropout: float = Field(default=0.05, ge=0, le=0.5)
     target_modules: list[str] | Literal["all-linear"] = "all-linear"
     dpo_beta: float = Field(default=0.1, gt=0, le=2)
+    eval_ratio: float = Field(default=0.1, ge=0, le=0.4)
     seed: int = 42
