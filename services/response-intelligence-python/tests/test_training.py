@@ -75,7 +75,7 @@ def test_approved_examples_are_retrievable_but_candidates_are_not(tmp_path) -> N
 
 def test_exports_sft_and_dpo_datasets(tmp_path) -> None:
     store=TrainingStore(str(tmp_path/"learning.sqlite3"))
-    approved=store.add_example(TrainingExampleCreate(
+    store.add_example(TrainingExampleCreate(
         organization_id="org_1",purpose=Purpose.report,request="Report fee balances.",
         semantic_payload={"rows":[{"balance":120000}]},response_text="The outstanding balance is UGX 120,000.",
         quality_overall=0.95,status="approved",response_fingerprint="good-fp",
