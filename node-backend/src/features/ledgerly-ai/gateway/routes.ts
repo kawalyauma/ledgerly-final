@@ -9,6 +9,12 @@ import type { LedgerlyAiGatewayService } from "./service.js";
 import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 
 const taskKinds = ["chat","analysis","report","research","code","engineering","testing","operations"] as const;
+const attachmentSchema=z.object({
+  name:z.string().trim().min(1).max(160),
+  mimeType:z.enum(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml"]),
+  content:z.string().max(40000),
+  kind:z.enum(["file","context"]),
+});
 const requestSchema = z.object({
   message: z.string().trim().min(1).max(30000),
   chatId: z.string().min(1).max(120).optional(),
@@ -17,6 +23,12 @@ const requestSchema = z.object({
   activeModule: z.string().trim().min(1).max(120).nullable().optional(),
   taskKind: z.enum(taskKinds).default("chat"),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  attachments:z.array(attachmentSchema).max(5)
+    .refine(
+      items=>items.reduce((sum,item)=>sum+Buffer.byteLength(item.content,"utf8"),0)<=120000,
+      "Attached context is limited to 120 KB per message.",
+    )
+    .default([]),
 });
 
 function idempotencyKey(c: { req: { header(name: string): string | undefined } }) {
@@ -80,6 +92,43 @@ export function createLedgerlyAiGatewayRoutes(
         });
       }
     });
+  });
+
+  routes.get("/my/chats", async (c) => {
+    const status=z.enum(["active","archived"]).optional().safeParse(c.req.query("status"));
+    if(!status.success)throw new AppError(422,"VALIDATION_ERROR","Invalid chat status.");
+    return c.json({data:await repository.listMyChats(c.get("principal"),status.data)});
+  });
+
+  routes.get("/my/chats/:id", async (c) => {
+    const principal=c.get("principal");
+    const chat=await repository.getMyChat(principal,c.req.param("id"));
+    const messages=await repository.listMyChatMessages(principal,chat.id);
+    return c.json({data:{...chat,messages}});
+  });
+
+  routes.post("/my/chats/:id/messages", async (c) => {
+    const parsed=requestSchema.omit({chatId:true}).safeParse(await c.req.json().catch(()=>null));
+    if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid Ledgerly AI message.",parsed.error.flatten());
+    const principal=c.get("principal");
+    await repository.getMyChat(principal,c.req.param("id"));
+    const response=await gateway.run({
+      ...parsed.data,principal,chatId:c.req.param("id"),
+      taskKind:parsed.data.taskKind as LedgerlyAiTaskKind,idempotencyKey:idempotencyKey(c),
+    });
+    return c.json({data:response});
+  });
+
+  routes.post("/my/chats/:id/archive", async (c) => {
+    const principal=c.get("principal");
+    await repository.getMyChat(principal,c.req.param("id"));
+    return c.json({data:await repository.updateChat(principal,c.req.param("id"),{status:"archived"})});
+  });
+
+  routes.get("/my/jobs", async (c) => {
+    const parsed=z.coerce.number().int().min(1).max(100).default(50).safeParse(c.req.query("limit")??50);
+    if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid job limit.");
+    return c.json({data:await repository.listUserJobs(c.get("principal"),parsed.data)});
   });
 
   routes.get("/chats", async (c) => {

@@ -107,6 +107,48 @@ export class LedgerlyAiGatewayRepository {
     return result.rows.map(mapChat);
   }
 
+  async listMyChats(principal:AuthPrincipal,status?: "active"|"archived"){
+    const result=await this.db.query<Record<string,unknown>>(
+      `SELECT id,organization_id AS "organizationId",created_by AS "createdBy",agent_id AS "agentId",
+              title,status,metadata_json AS metadata,last_message_at AS "lastMessageAt",
+              created_at AS "createdAt",updated_at AS "updatedAt"
+         FROM lai_chats
+        WHERE organization_id=$1 AND created_by=$2 AND status<>'deleted'
+          AND ($3::text IS NULL OR status=$3)
+        ORDER BY COALESCE(last_message_at,created_at) DESC
+        LIMIT 200`,
+      [principal.organizationId,principal.userId,status??null],
+    );
+    return result.rows.map(mapChat);
+  }
+
+  async getMyChat(principal:AuthPrincipal,id:string){
+    const result=await this.db.query<Record<string,unknown>>(
+      `SELECT id,organization_id AS "organizationId",created_by AS "createdBy",agent_id AS "agentId",
+              title,status,metadata_json AS metadata,last_message_at AS "lastMessageAt",
+              created_at AS "createdAt",updated_at AS "updatedAt"
+         FROM lai_chats
+        WHERE id=$1 AND organization_id=$2 AND created_by=$3 AND status<>'deleted'
+        LIMIT 1`,
+      [id,principal.organizationId,principal.userId],
+    );
+    if(!result.rows[0])throw new AppError(404,"LEDGERLY_AI_CHAT_NOT_FOUND","Ledgerly AI chat not found.");
+    return mapChat(result.rows[0]);
+  }
+
+  async listMyChatMessages(principal:AuthPrincipal,chatId:string,limit=200){
+    await this.getMyChat(principal,chatId);
+    const result=await this.db.query<Record<string,unknown>>(
+      `SELECT id,chat_id AS "chatId",role,content,user_id AS "userId",agent_id AS "agentId",
+              correlation_id AS "correlationId",metadata_json AS metadata,created_at AS "createdAt"
+         FROM lai_messages
+        WHERE organization_id=$1 AND chat_id=$2
+        ORDER BY created_at,id LIMIT $3`,
+      [principal.organizationId,chatId,limit],
+    );
+    return result.rows.map(mapMessage);
+  }
+
   async updateChat(principal: AuthPrincipal, id: string, changes: { title?: string; status?: "active" | "archived" | "deleted" }) {
     await this.getChat(principal, id, true);
     const result = await this.db.query<Record<string, unknown>>(
@@ -211,6 +253,21 @@ export class LedgerlyAiGatewayRepository {
       "UPDATE lai_jobs SET status='failed',error_text=$1,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3",
       [error.slice(0, 4000), id, organizationId],
     );
+  }
+
+  async listUserJobs(principal:AuthPrincipal,limit=50){
+    const result=await this.db.query(
+      `SELECT j.id,j.kind,j.status,j.risk_level AS "riskLevel",j.agent_id AS "agentId",
+              a.display_name AS "agentName",j.chat_id AS "chatId",j.error_text AS error,
+              j.result_json AS result,j.started_at AS "startedAt",j.completed_at AS "completedAt",
+              j.created_at AS "createdAt",j.updated_at AS "updatedAt"
+         FROM lai_jobs j
+         LEFT JOIN lai_agents a ON a.id=j.agent_id AND a.organization_id=j.organization_id
+        WHERE j.organization_id=$1 AND j.created_by=$2
+        ORDER BY j.created_at DESC LIMIT $3`,
+      [principal.organizationId,principal.userId,Math.min(Math.max(limit,1),100)],
+    );
+    return result.rows;
   }
 
   async audit(input: {

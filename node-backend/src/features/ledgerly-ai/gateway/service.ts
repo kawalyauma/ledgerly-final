@@ -27,6 +27,13 @@ export type LedgerlyAiGatewayProgress = (event: {
   data?: Record<string, unknown>;
 }) => void | Promise<void>;
 
+export type LedgerlyAiAttachment = {
+  name:string;
+  mimeType:string;
+  content:string;
+  kind:"file"|"context";
+};
+
 export type LedgerlyAiGatewayRequest = {
   principal: AuthPrincipal;
   message: string;
@@ -36,6 +43,7 @@ export type LedgerlyAiGatewayRequest = {
   activeModule?: string | null;
   taskKind: LedgerlyAiTaskKind;
   metadata?: Record<string, unknown>;
+  attachments?: LedgerlyAiAttachment[];
   idempotencyKey?: string | null;
 };
 
@@ -56,6 +64,8 @@ export type LedgerlyAiGatewayResponse = {
     toolName: string;
     riskLevel: "low" | "medium" | "high" | "critical";
     status: "pending";
+    approvalMode?: "single" | "two_step";
+    requiredApprovals?: number;
   };
 };
 
@@ -119,6 +129,15 @@ export class LedgerlyAiGatewayService {
 
   async run(input: LedgerlyAiGatewayRequest, progress?: LedgerlyAiGatewayProgress): Promise<LedgerlyAiGatewayResponse> {
     const correlationId = createLedgerlyAiCorrelationId();
+    const safeAttachments=(input.attachments??[]).map(item=>({
+      name:item.name.trim().slice(0,160),
+      mimeType:item.mimeType.trim().slice(0,120)||"text/plain",
+      kind:item.kind,
+      content:redactLedgerlyAiText(item.content).slice(0,40000),
+    }));
+    const attachmentMeta=safeAttachments.map(item=>({
+      name:item.name,mimeType:item.mimeType,kind:item.kind,chars:item.content.length,
+    }));
     const requestHash = this.idempotency.hash({
       message: input.message,
       chatId: input.chatId ?? null,
@@ -126,6 +145,7 @@ export class LedgerlyAiGatewayService {
       activeModule: input.activeModule ?? null,
       taskKind: input.taskKind,
       metadata: redactLedgerlyAiValue(input.metadata ?? {}),
+      attachments:safeAttachments,
     });
     const claim = await this.idempotency.claim({
       organizationId: input.principal.organizationId,
@@ -173,7 +193,10 @@ export class LedgerlyAiGatewayService {
         content: input.message,
         correlationId,
         agentId,
-        metadata: redactLedgerlyAiValue(input.metadata ?? {}) as Record<string, unknown>,
+        metadata: {
+          ...(redactLedgerlyAiValue(input.metadata ?? {}) as Record<string, unknown>),
+          ...(attachmentMeta.length?{attachments:attachmentMeta}:{}),
+        },
       });
 
       jobId = await this.repository.createJob({
@@ -189,6 +212,7 @@ export class LedgerlyAiGatewayService {
           projectId,
           employeeKey: employee?.key ?? null,
           metadata: redactLedgerlyAiValue(input.metadata ?? {}),
+          attachments:attachmentMeta,
         },
       });
       await progress?.({ type: "queued", at: new Date().toISOString(), data: { chatId: chat.id, jobId, correlationId } });
@@ -206,6 +230,7 @@ export class LedgerlyAiGatewayService {
         agentId,
         projectId,
         correlationId,
+        attachments:safeAttachments,
       });
       if (this.config.LEDGERLY_AI_LOG_PROMPTS) {
         this.logger.info(
@@ -227,6 +252,8 @@ export class LedgerlyAiGatewayService {
         toolName: string;
         riskLevel: "low" | "medium" | "high" | "critical";
         status: "pending";
+        approvalMode?: "single" | "two_step";
+        requiredApprovals?: number;
       } | null = null;
       const toolTrace: Array<Record<string, unknown>> = [];
 
@@ -267,12 +294,16 @@ export class LedgerlyAiGatewayService {
             toolName: invocation.toolName,
             riskLevel: invocation.riskLevel,
             status: "pending",
+            approvalMode: invocation.approvalMode,
+            requiredApprovals: invocation.requiredApprovals,
           };
           toolTrace.push({
             toolName: invocation.toolName,
             toolCallId: invocation.toolCallId,
             status: invocation.status,
             approvalId: invocation.approvalId,
+            approvalMode: invocation.approvalMode,
+            requiredApprovals: invocation.requiredApprovals,
           });
           break;
         }
@@ -398,11 +429,18 @@ export class LedgerlyAiGatewayService {
           approvalId: pendingApproval.id,
           toolCallId: pendingApproval.toolCallId,
           toolName: pendingApproval.toolName,
+          riskLevel: pendingApproval.riskLevel,
+          approvalMode: pendingApproval.approvalMode,
+          requiredApprovals: pendingApproval.requiredApprovals,
         });
         await progress?.({
           type: "waiting_approval",
           at: new Date().toISOString(),
-          data: { chatId: chat.id, jobId, correlationId, approvalId: pendingApproval.id, toolName: pendingApproval.toolName },
+          data: {
+            chatId: chat.id, jobId, correlationId, approvalId: pendingApproval.id,
+            toolName: pendingApproval.toolName, approvalMode: pendingApproval.approvalMode,
+            requiredApprovals: pendingApproval.requiredApprovals,
+          },
         });
       } else {
         await this.repository.completeJob(input.principal.organizationId, jobId, {
