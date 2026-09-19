@@ -25,6 +25,7 @@ from .realization import (
 from .semantic import merge_evidence
 from .tools.base import ToolBroker
 from .tools.registry import DisabledToolBroker
+from .training.models import AdapterRecord, RetrievalExample, StyleProfile
 from .training.retrieval import TrainingRetriever
 from .training.store import TrainingStore
 
@@ -68,8 +69,8 @@ class ResponseIntelligenceEngine:
         reasoning = self.reasoner.derive(request, evidence)
         plan = self.planner.build(request, evidence)
         tool_events: list[dict[str, Any]] = []
-        learned_examples = []
-        style_profile = None
+        learned_examples: list[RetrievalExample] = []
+        style_profile: StyleProfile | None = None
         if self.training_retriever is not None and request.context.organization_id:
             style_profile = self.training_retriever.style_profile(request.context.organization_id)
             learned_examples = self.training_retriever.retrieve(
@@ -91,8 +92,8 @@ class ResponseIntelligenceEngine:
             tool_events = await self._tool_policy_events(request.tool_policy)
 
         delegated_provider = build_delegated_provider(request.generation)
-        active_adapter = None
-        local_adapter_provider = None
+        active_adapter: AdapterRecord | None = None
+        local_adapter_provider: GenerationProvider | None = None
         if (
             self.settings.training_prefer_active_adapter
             and self.training_store is not None
@@ -145,6 +146,9 @@ class ResponseIntelligenceEngine:
                     logger.warning("Response provider %s failed; trying fallback: %s",getattr(candidate,"name","unknown"),exc)
             if request.provider_mode=="required" and not generated:
                 raise RuntimeError(f"All configured generation providers failed: {last_error}")
+            if not generated:
+                active_provider=None
+                use_provider=False
 
         quality = self.critic.evaluate(draft, request, evidence, reasoning)
         if use_provider:
@@ -258,8 +262,8 @@ class ResponseIntelligenceEngine:
         draft: str,
         quality: QualityReport,
         provider: GenerationProvider | None,
-        learned_examples: list[Any],
-        style_profile: Any,
+        learned_examples: list[RetrievalExample],
+        style_profile: StyleProfile | None,
     ) -> tuple[str, QualityReport, int]:
         if provider is None:
             return draft, quality, 0
