@@ -146,12 +146,29 @@ export type LedgerlyAiIncident = {
   organizationId?: string | null;
   fingerprint: string;
   source: string;
+  signalType?: string | null;
   title: string;
   severity: LedgerlyAiRiskLevel;
   status: LedgerlyAiIncidentStatus;
   assignedAgentId?: string | null;
+  assignedAgentKey?: string | null;
   correlationId?: string | null;
   context: Record<string, unknown>;
+  latestContext?: Record<string, unknown>;
+  occurrenceCount?: number;
+  moduleKey?: string | null;
+  errorCode?: string | null;
+  httpStatus?: number | null;
+  branchName?: string | null;
+  workspacePath?: string | null;
+  baseSha?: string | null;
+  fixSha?: string | null;
+  changeRisk?: LedgerlyAiRiskLevel | null;
+  productionApprovalId?: string | null;
+  detectedAt?: string;
+  lastSeenAt?: string;
+  verifiedAt?: string | null;
+  closedAt?: string | null;
 };
 
 export type LedgerlyAiApproval = {

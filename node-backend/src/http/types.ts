@@ -14,6 +14,7 @@ export type AppEnv = {
   Variables: {
     requestId: string;
     principal: AuthPrincipal;
+    incidentCaptured?: boolean;
   };
 };
 

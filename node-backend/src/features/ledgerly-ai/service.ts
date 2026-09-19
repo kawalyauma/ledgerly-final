@@ -9,6 +9,7 @@ import { LedgerlyAiProviderRuntime } from "./providers/runtime.js";
 import { LedgerlyAiToolService } from "./tools/service.js";
 import { LedgerlyAiForgeService } from "./forge/service.js";
 import { LedgerlyAiCustomRuntimeService } from "./custom-runtime/service.js";
+import { LedgerlyAiIncidentService } from "./incidents/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -36,6 +37,7 @@ export class LedgerlyAiFoundationService {
   readonly gateway: LedgerlyAiGatewayService;
   readonly forge: LedgerlyAiForgeService;
   readonly customRuntime: LedgerlyAiCustomRuntimeService;
+  readonly incidents: LedgerlyAiIncidentService;
   private readonly logger: LedgerlyAiLogger;
   private startPromise: Promise<void> | null = null;
 
@@ -70,6 +72,7 @@ export class LedgerlyAiFoundationService {
       this.logger,
     );
     this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway);
+    this.incidents = new LedgerlyAiIncidentService(runtime,this.config,this.providers,this.employees,this.logger);
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,
@@ -130,6 +133,9 @@ export class LedgerlyAiFoundationService {
         customTriggers: string | null;
         customRuns: string | null;
         customEvents: string | null;
+        incidentEvents: string | null;
+        incidentChecks: string | null;
+        incidentDeployments: string | null;
       }>(
         `SELECT
            to_regclass('public.lai_chats')::text AS chats,
@@ -144,12 +150,16 @@ export class LedgerlyAiFoundationService {
            to_regclass('public.lai_custom_agent_shares')::text AS "customShares",
            to_regclass('public.lai_custom_agent_triggers')::text AS "customTriggers",
            to_regclass('public.lai_custom_agent_runs')::text AS "customRuns",
-           to_regclass('public.lai_custom_agent_events')::text AS "customEvents"`,
+           to_regclass('public.lai_custom_agent_events')::text AS "customEvents",
+           to_regclass('public.lai_incident_events')::text AS "incidentEvents",
+           to_regclass('public.lai_incident_checks')::text AS "incidentChecks",
+           to_regclass('public.lai_incident_deployments')::text AS "incidentDeployments"`,
       );
       const row = result.rows[0];
       schema = !row?.chats || !row.audit || !row.memories || !row.memoryAudit
         || !row.agentTemplates || !row.toolCalls || !row.approvals || !row.builderSessions || !row.agentVersions
         || !row.customShares || !row.customTriggers || !row.customRuns || !row.customEvents
+        || !row.incidentEvents || !row.incidentChecks || !row.incidentDeployments
         ? {
             status: "error",
             latencyMs: Math.round(performance.now() - schemaStarted),

@@ -107,8 +107,14 @@ services:
     restart: unless-stopped
     command: ["node", "dist/queue/worker.js"]
     environment: *backend-env
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - app-storage:/data/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/ledgerly-ai/sessions:/var/lib/ledgerly-ai/sessions
+      - /var/lib/ledgerly-ai/workspaces:/var/lib/ledgerly-ai/workspaces
+      - ${LEDGERLY_SOURCE_ROOT:-/opt/ledgerly/source}:/opt/ledgerly/source
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
