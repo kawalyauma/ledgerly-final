@@ -90,7 +90,7 @@ agenticLightRoutes.post("/chat-studio/training-export",requireScope("school:read
 
 agenticLightRoutes.post("/chat-studio/training-adapters/:id/activate",requireScope("school:read"),async c=>{
  const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can activate a trained adapter");
- const data=await activatePythonAdapter(c.env,c.req.param("id"));
+ const data=await activatePythonAdapter(c.env,p.organizationId,c.req.param("id"));
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable or the adapter cannot be activated");
  return c.json({data});
 });
@@ -106,7 +106,7 @@ agenticLightRoutes.get("/chat-studio/training-examples",requireScope("school:rea
 agenticLightRoutes.post("/chat-studio/training-examples/:id/:status",requireScope("school:read"),async c=>{
  const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can approve training material");
  const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
- const data=await setPythonTrainingExampleStatus(c.env,c.req.param("id"),status);
+ const data=await setPythonTrainingExampleStatus(c.env,p.organizationId,c.req.param("id"),status);
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
  return c.json({data});
 });
