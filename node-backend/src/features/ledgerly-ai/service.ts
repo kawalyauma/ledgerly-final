@@ -7,6 +7,7 @@ import { createLedgerlyAiLogger, type LedgerlyAiLogger } from "./logger.js";
 import { LedgerlyAiMemoryService } from "./memory/service.js";
 import { LedgerlyAiProviderRuntime } from "./providers/runtime.js";
 import { LedgerlyAiToolService } from "./tools/service.js";
+import { LedgerlyAiForgeService } from "./forge/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -32,6 +33,7 @@ export class LedgerlyAiFoundationService {
   readonly memory: LedgerlyAiMemoryService;
   readonly tools: LedgerlyAiToolService;
   readonly gateway: LedgerlyAiGatewayService;
+  readonly forge: LedgerlyAiForgeService;
   private readonly logger: LedgerlyAiLogger;
   private startPromise: Promise<void> | null = null;
 
@@ -46,6 +48,15 @@ export class LedgerlyAiFoundationService {
     this.employees = new LedgerlyAiEmployeeRegistry(runtime.db);
     this.memory = new LedgerlyAiMemoryService(runtime.db, this.repository, this.config);
     this.tools = new LedgerlyAiToolService(runtime, this.config, this.employees);
+    this.forge = new LedgerlyAiForgeService(
+      runtime.db,
+      this.config,
+      this.employees,
+      this.repository,
+      this.providers,
+      this.memory,
+      this.tools,
+    );
     this.gateway = new LedgerlyAiGatewayService(
       this.repository,
       this.providers,
@@ -110,6 +121,8 @@ export class LedgerlyAiFoundationService {
         agentTemplates: string | null;
         toolCalls: string | null;
         approvals: string | null;
+        builderSessions: string | null;
+        agentVersions: string | null;
       }>(
         `SELECT
            to_regclass('public.lai_chats')::text AS chats,
@@ -118,11 +131,13 @@ export class LedgerlyAiFoundationService {
            to_regclass('public.lai_memory_audit')::text AS "memoryAudit",
            to_regclass('public.lai_agent_templates')::text AS "agentTemplates",
            to_regclass('public.lai_tool_calls')::text AS "toolCalls",
-           to_regclass('public.lai_approvals')::text AS approvals`,
+           to_regclass('public.lai_approvals')::text AS approvals,
+           to_regclass('public.lai_agent_builder_sessions')::text AS "builderSessions",
+           to_regclass('public.lai_agent_versions')::text AS "agentVersions"`,
       );
       const row = result.rows[0];
       schema = !row?.chats || !row.audit || !row.memories || !row.memoryAudit
-        || !row.agentTemplates || !row.toolCalls || !row.approvals
+        || !row.agentTemplates || !row.toolCalls || !row.approvals || !row.builderSessions || !row.agentVersions
         ? {
             status: "error",
             latencyMs: Math.round(performance.now() - schemaStarted),

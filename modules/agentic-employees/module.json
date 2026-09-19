@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.8.0",
-  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, trainable Python Response Intelligence with institutional RAG and gated web research, output selection, governed writes and professional exports.",
+  "version": "2.9.0",
+  "description": "Tenant-safe Ledgerly AI employees with managed execution, governed tools/actions, memory, advanced reporting and Forge-guided custom AI employee creation.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -32,16 +32,9 @@
       "school_staff_profiles"
     ],
     "providers": [
-      "openai",
-      "google",
-      "anthropic",
-      "groq",
-      "cloudflare",
-      "openrouter",
-      "ollama",
-      "custom"
+      "ledgerly-ai"
     ],
-    "providerScope": "per-organization",
+    "providerScope": "managed",
     "modelRouting": [
       "luna",
       "terra",
@@ -56,12 +49,7 @@
       "librarian"
     ],
     "features": [
-      "per-school-ai-provider",
-      "encrypted-school-api-keys",
-      "provider-model-catalog",
-      "custom-model-ids",
       "provider-connection-test",
-      "advanced-generation-controls",
       "agent-chat-studio",
       "live-agent-status",
       "verified-data-chat",
@@ -208,9 +196,6 @@
       "unsupported-number-detection",
       "reasoning-aware-derived-number-validation",
       "deterministic-safety-fallback",
-      "openai-compatible-response-provider",
-      "anthropic-response-provider",
-      "ollama-compatible-response-provider",
       "future-external-tool-broker",
       "future-web-search-capability",
       "python-response-service-health-monitor",
@@ -270,7 +255,14 @@
       "web-domain-allowlist",
       "web-reference-sanitization",
       "external-numeric-source-attribution",
-      "web-results-not-auto-trusted"
+      "web-results-not-auto-trusted",
+      "ledgerly-ai-managed-runtime",
+      "hidden-provider-execution",
+      "forge-guided-agent-creation",
+      "forge-conversational-spec-builder",
+      "forge-permission-intersection",
+      "forge-sandbox-before-activation",
+      "custom-agent-version-history"
     ]
   }
 }
