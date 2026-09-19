@@ -16,7 +16,7 @@ from .models import (
 )
 from .retrieval import LanguageRetriever
 from .semantic import numeric_facts
-from .strategies import select_strategy
+from .strategies import STRATEGIES, select_strategy
 
 
 DOMAIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -204,6 +204,24 @@ class DiscoursePlanner:
             style_seed=seed,
             editorial_rules=rules,
         )
+
+    def apply_strategy_preference(self,plan:DiscoursePlan,strategy_id:str)->DiscoursePlan:
+        strategy=next(
+            (item for item in STRATEGIES if item.strategy_id==strategy_id and plan.purpose in item.purposes),
+            None,
+        )
+        if strategy is None:
+            return plan
+        order_index={section_id:index for index,section_id in enumerate(strategy.section_order)}
+        plan.sections.sort(key=lambda section:(order_index.get(section.section_id,999),-section.priority))
+        plan.strategy_id=strategy.strategy_id
+        for note in strategy.notes:
+            if note not in plan.editorial_rules:
+                plan.editorial_rules.append(note)
+        learned_rule="Learned organization response emphasis: "+", ".join(strategy.emphasis)+"."
+        if learned_rule not in plan.editorial_rules:
+            plan.editorial_rules.append(learned_rule)
+        return plan
 
     @staticmethod
     def _thesis_hint(request: ResponseRequest, facts: list[Any]) -> str:
