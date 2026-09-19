@@ -126,6 +126,20 @@ class ResponseContext(BaseModel):
     currency: str = "UGX"
 
 
+class GenerationConfig(BaseModel):
+    """Ephemeral provider delegation from Ledgerly.
+
+    Credentials are request-only and are never included in ResponseResult.
+    """
+
+    provider: str = ""
+    api_style: Literal["responses", "chat-completions", "anthropic"] = "chat-completions"
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    timeout_seconds: float = Field(default=45.0, ge=1.0, le=120.0)
+
+
 class ResponseRequest(BaseModel):
     request_id: str = ""
     purpose: Purpose = Purpose.general
@@ -137,6 +151,7 @@ class ResponseRequest(BaseModel):
     detail: Literal["brief", "standard", "deep"] = "standard"
     output_format: Literal["markdown", "plain", "json"] = "markdown"
     provider_mode: Literal["auto", "required", "disabled"] = "auto"
+    generation: GenerationConfig | None = None
     max_words: int = Field(default=1200, ge=80, le=5000)
     tool_policy: list[str] = Field(default_factory=list)
 
