@@ -172,6 +172,14 @@ class KnowledgeStore:
                     )
         return self.get_source(source_id)
 
+    def seed_starter_pack(self,organization_id:str="")->list[KnowledgeSource]:
+        from .starter_pack import starter_analysis_pack
+
+        sources:list[KnowledgeSource]=[]
+        for item in starter_analysis_pack(organization_id):
+            sources.append(self.add_source(item))
+        return sources
+
     def get_source(self,source_id:str)->KnowledgeSource:
         with self._lock,self._connect() as db:
             row=db.execute(
