@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { z } from "zod";
 import type { LedgerlyAiToolDefinition } from "./types.js";
+import { redactLedgerlyAiText } from "../gateway/redaction.js";
+import { assertLedgerlyAiCommandAllowed } from "../security/command-policy.js";
 
 type RunResult = {
   exitCode: number;
@@ -27,12 +29,16 @@ function run(
   maxBytes: number,
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
+    assertLedgerlyAiCommandAllowed(command,args);
     const started = Date.now();
     const child = spawn(command, args, {
       cwd,
       shell: false,
       windowsHide: true,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", CI: "1" },
+      env: {
+        PATH:process.env.PATH,HOME:process.env.HOME,LANG:process.env.LANG,LC_ALL:process.env.LC_ALL,
+        GIT_TERMINAL_PROMPT:"0",CI:"1",
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -41,7 +47,7 @@ function run(
     let settled = false;
     const capture = (kind: "stdout" | "stderr", chunk: Buffer) => {
       if (bytes >= maxBytes) return;
-      const text = chunk.toString("utf8");
+      const text = redactLedgerlyAiText(chunk.toString("utf8"));
       const remaining = maxBytes - bytes;
       const sliced = Buffer.from(text).subarray(0, remaining).toString("utf8");
       bytes += Buffer.byteLength(sliced);

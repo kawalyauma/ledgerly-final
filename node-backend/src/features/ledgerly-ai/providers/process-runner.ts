@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { ProviderStreamEvent } from "./types.js";
+import { redactLedgerlyAiText } from "../gateway/redaction.js";
 
 export type ProcessRunOptions = {
   command: string;
@@ -63,7 +64,8 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
     };
 
     const capture = (stream: "stdout" | "stderr", line: string) => {
-      const bytes = Buffer.byteLength(line, "utf8");
+      const safeLine=redactLedgerlyAiText(line);
+      const bytes = Buffer.byteLength(safeLine, "utf8");
       if (capturedBytes + bytes > options.maxOutputBytes) {
         if (!truncationEmitted) {
           truncationEmitted = true;
@@ -72,8 +74,8 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
         return;
       }
       capturedBytes += bytes;
-      (stream === "stdout" ? stdoutLines : stderrLines).push(line);
-      emit(parseLine(stream, line));
+      (stream === "stdout" ? stdoutLines : stderrLines).push(safeLine);
+      emit(parseLine(stream, safeLine));
     };
 
     const stdout = createInterface({ input: child.stdout });

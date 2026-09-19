@@ -3,6 +3,15 @@ import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 import type { LedgerlyAiSandbox } from "./types.js";
 import { ProviderSessionStore } from "./session.js";
 
+function ensureInside(root:string,candidate:string){
+  const resolvedRoot=path.resolve(root)+path.sep;
+  const resolved=path.resolve(candidate);
+  if(!(resolved+path.sep).startsWith(resolvedRoot)){
+    throw new Error("Ledgerly AI provider workspace escaped the configured work root.");
+  }
+  return resolved;
+}
+
 export type ProviderCommand = {
   command: string;
   args: string[];
@@ -18,14 +27,15 @@ export class ProviderCommandBuilder {
 
   build(provider: LedgerlyAiProviderId, cliArgs: string[], workspacePath: string, sandbox: LedgerlyAiSandbox): ProviderCommand {
     const env = this.sessions.environment(provider);
+    const safeWorkspace=ensureInside(this.config.LEDGERLY_AI_WORK_ROOT,workspacePath);
     if (this.config.LEDGERLY_AI_EXECUTION_MODE === "local") {
-      if (sandbox === "workspace-write" && provider === "claude-code") {
-        throw new Error("Claude Code workspace-write execution requires Docker isolation.");
+      if (sandbox === "workspace-write") {
+        throw new Error("Ledgerly AI workspace-write execution requires Docker isolation.");
       }
       return {
         command: provider === "codex" ? this.config.LEDGERLY_AI_CODEX_BIN : this.config.LEDGERLY_AI_CLAUDE_BIN,
         args: cliArgs,
-        cwd: workspacePath,
+        cwd: safeWorkspace,
         env,
       };
     }
@@ -35,23 +45,27 @@ export class ProviderCommandBuilder {
     const containerSessionTarget = provider === "codex" ? "/home/ledgerly-ai/.codex" : "/home/ledgerly-ai";
     const containerArgs = [
       "run", "--rm",
-      "--network", "bridge",
+      "--network", this.config.LEDGERLY_AI_DOCKER_NETWORK,
       "--read-only",
       "--cap-drop=ALL",
       "--security-opt=no-new-privileges",
-      "--pids-limit=512",
-      "--memory=3g",
-      "--cpus=2",
-      "--tmpfs", "/tmp:rw,noexec,nosuid,size=512m",
+      "--ipc=none",
+      "--user", "1000:1000",
+      "--pids-limit="+String(this.config.LEDGERLY_AI_WORKER_PIDS),
+      "--memory="+String(this.config.LEDGERLY_AI_WORKER_MEMORY_MB)+"m",
+      "--memory-swap="+String(this.config.LEDGERLY_AI_WORKER_MEMORY_MB)+"m",
+      "--cpus="+String(this.config.LEDGERLY_AI_WORKER_CPUS),
+      "--ulimit", "nofile="+String(this.config.LEDGERLY_AI_WORKER_NOFILE)+":"+String(this.config.LEDGERLY_AI_WORKER_NOFILE),
+      "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size="+String(this.config.LEDGERLY_AI_WORKER_TMPFS_MB)+"m",
       "-e", "HOME=/home/ledgerly-ai",
       ...(provider === "codex" ? ["-e", "CODEX_HOME=/home/ledgerly-ai/.codex"] : []),
-      "-v", `${path.resolve(workspacePath)}:/workspace:rw`,
-      "-v", `${sessionHome}:${containerSessionTarget}:rw`,
+      "--mount", `type=bind,src=${safeWorkspace},dst=/workspace,rw`,
+      "--mount", `type=bind,src=${sessionHome},dst=${containerSessionTarget},rw`,
       "-w", "/workspace",
       image,
       ...cliArgs,
     ];
-    return { command: this.config.LEDGERLY_AI_DOCKER_BIN, args: containerArgs, cwd: workspacePath, env };
+    return { command: this.config.LEDGERLY_AI_DOCKER_BIN, args: containerArgs, cwd: safeWorkspace, env };
   }
 
   health(provider: LedgerlyAiProviderId): ProviderCommand {

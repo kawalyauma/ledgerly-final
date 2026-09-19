@@ -16,6 +16,13 @@ const schema = z.object({
   LEDGERLY_AI_DEFAULT_PROVIDER: z.enum(LEDGERLY_AI_PROVIDERS).default("codex"),
   LEDGERLY_AI_FALLBACK_PROVIDER: z.enum(LEDGERLY_AI_PROVIDERS).default("claude-code"),
   LEDGERLY_AI_EXECUTION_MODE: z.enum(["local", "docker"]).default("docker"),
+  LEDGERLY_AI_DOCKER_NETWORK: z.string().trim().min(1).max(120).default("bridge"),
+  LEDGERLY_AI_WORKER_MEMORY_MB: z.coerce.number().int().min(512).max(16384).default(3072),
+  LEDGERLY_AI_WORKER_CPUS: z.coerce.number().min(0.25).max(8).default(2),
+  LEDGERLY_AI_WORKER_PIDS: z.coerce.number().int().min(32).max(2048).default(256),
+  LEDGERLY_AI_WORKER_NOFILE: z.coerce.number().int().min(128).max(65535).default(1024),
+  LEDGERLY_AI_WORKER_TMPFS_MB: z.coerce.number().int().min(64).max(4096).default(512),
+  LEDGERLY_AI_WORKER_MAX_TURNS: z.coerce.number().int().min(1).max(50).default(12),
   LEDGERLY_AI_CODEX_BIN: z.string().min(1).default("codex"),
   LEDGERLY_AI_CLAUDE_BIN: z.string().min(1).default("claude"),
   LEDGERLY_AI_DOCKER_BIN: z.string().min(1).default("docker"),
@@ -74,6 +81,9 @@ const schema = z.object({
     ["LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT","LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT"],
     ["LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT","LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT"],
   ] as const;
+  if (value.LEDGERLY_AI_DOCKER_NETWORK.trim().toLowerCase() === "host") {
+    ctx.addIssue({ code: "custom", path: ["LEDGERLY_AI_DOCKER_NETWORK"], message: "Ledgerly AI workers may not use the Docker host network." });
+  }
   for (const [warn,critical] of orderedThresholds) {
     if (value[critical] <= value[warn]) {
       ctx.addIssue({ code: "custom", path: [critical], message: critical + " must be greater than " + warn + "." });

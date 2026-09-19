@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Runtime } from "../../runtime.js";
 import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 import { createLedgerlyAiCorrelationId, createLedgerlyAiLogger, type LedgerlyAiLogger } from "../logger.js";
+import { createId } from "../../core-identity/security.js";
+import { redactLedgerlyAiValue } from "../gateway/redaction.js";
 import { ClaudeCodeCliProvider } from "./claude-code.js";
 import { ProviderCommandBuilder } from "./command-builder.js";
 import { CodexCliProvider } from "./codex.js";
@@ -45,6 +47,21 @@ export class LedgerlyAiProviderRuntime {
     return this.router.diagnostics();
   }
 
+  private async auditEngineeringExecution(request:ProviderRequest,action:string,metadata:Record<string,unknown>={}){
+    if(request.sandbox!=="workspace-write")return;
+    await this.runtime.db.query(
+      `INSERT INTO lai_privileged_audit(
+        id,organization_id,actor_type,actor_id,action,entity_type,entity_id,correlation_id,risk_level,metadata_json
+      ) VALUES($1,$2,'agent',$3,$4,'provider_execution',$5,$6,'high',$7::jsonb)`,
+      [
+        createId("laisec"),request.organizationId,request.userId,action,request.id,request.correlationId,
+        JSON.stringify(redactLedgerlyAiValue({
+          taskKind:request.taskKind,sandbox:request.sandbox,workspacePath:request.workspacePath??null,...metadata,
+        })),
+      ],
+    );
+  }
+
   cancel(executionId: string) {
     if (this.queue.cancelQueued(executionId)) return true;
     const controller = this.activeControllers.get(executionId);
@@ -62,6 +79,7 @@ export class LedgerlyAiProviderRuntime {
       const candidates = await this.router.rank(request.taskKind);
       const failures: Array<{ provider: LedgerlyAiProviderId; error: string }> = [];
       try {
+        await this.auditEngineeringExecution(request,"ledgerly_ai.security.engineering_execution_started");
         for (const providerId of candidates) {
           const provider = this.providers.get(providerId);
           if (!provider) continue;
@@ -75,7 +93,9 @@ export class LedgerlyAiProviderRuntime {
               [executionId, request.organizationId, request.id, providerId, request.correlationId, JSON.stringify({ taskKind: request.taskKind, attempt })],
             );
             try {
-              const result = await provider.execute({ ...request, workspacePath }, controller.signal);
+              const result = await provider.execute({
+                ...request,workspacePath,maxTurns:request.maxTurns??this.config.LEDGERLY_AI_WORKER_MAX_TURNS,
+              }, controller.signal);
               await this.runtime.db.query(
                 `UPDATE lai_provider_executions
                     SET status='succeeded',exit_code=$1,completed_at=CURRENT_TIMESTAMP,
@@ -87,6 +107,9 @@ export class LedgerlyAiProviderRuntime {
                 { providerInternal: providerId, executionId, jobId: request.id, durationMs: result.durationMs },
                 "Ledgerly AI provider execution succeeded",
               );
+              await this.auditEngineeringExecution(request,"ledgerly_ai.security.engineering_execution_succeeded",{
+                executionId,durationMs:result.durationMs,exitCode:result.exitCode,
+              });
               return result;
             } catch (error) {
               const message = error instanceof Error ? error.message : String(error);
@@ -101,6 +124,11 @@ export class LedgerlyAiProviderRuntime {
                 { providerInternal: providerId, executionId, jobId: request.id, attempt, err: message },
                 "Ledgerly AI provider execution failed",
               );
+              if(attempt===attempts){
+                await this.auditEngineeringExecution(request,"ledgerly_ai.security.engineering_execution_failed",{
+                  executionId,error:message.slice(0,1000),cancelled:controller.signal.aborted,
+                });
+              }
               if (controller.signal.aborted) throw error;
               if (attempt < attempts && this.config.LEDGERLY_AI_RETRY_BACKOFF_MS > 0) {
                 await new Promise((resolve) => setTimeout(resolve, this.config.LEDGERLY_AI_RETRY_BACKOFF_MS * attempt));

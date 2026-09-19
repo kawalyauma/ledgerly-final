@@ -7,6 +7,7 @@ import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 import type { LedgerlyAiEmployee } from "../employees/types.js";
 import { redactLedgerlyAiValue } from "../gateway/redaction.js";
 import type { LedgerlyAiPolicyService } from "../policy/service.js";
+import type { LedgerlyAiSecurityService } from "../security/service.js";
 import { actionTools } from "./action-tools.js";
 import { databaseTools } from "./database-tools.js";
 import { engineeringTools } from "./engineering-tools.js";
@@ -93,6 +94,7 @@ export class LedgerlyAiToolService {
     private readonly config: LedgerlyAiConfig,
     private readonly employees: LedgerlyAiEmployeeRegistry,
     private readonly policy: LedgerlyAiPolicyService,
+    private readonly security: LedgerlyAiSecurityService,
   ) {
     this.registry.registerMany([
       ...schoolTools,
@@ -211,6 +213,10 @@ export class LedgerlyAiToolService {
     jobId?: string | null;
   }): Promise<LedgerlyAiToolInvocationResult> {
     const tool = this.registry.get(input.toolName);
+    await this.security.assertToolBoundary({
+      principal:input.principal,employee:input.employee,toolName:tool.name,
+      arguments:input.arguments,correlationId:input.correlationId,
+    });
     this.registry.assertAllowed(input.principal, input.employee, tool);
     const parsed = tool.inputSchema.safeParse(input.arguments);
     if (!parsed.success) {

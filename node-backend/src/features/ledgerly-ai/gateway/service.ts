@@ -14,6 +14,7 @@ import {
   parseLedgerlyAiToolCall,
 } from "../tools/protocol.js";
 import type { LedgerlyAiToolService } from "../tools/service.js";
+import type { LedgerlyAiSecurityService } from "../security/service.js";
 import { LedgerlyAiContextBuilder } from "./context.js";
 import { LedgerlyAiIdempotency } from "./idempotency.js";
 import { normalizeLedgerlyAiResponse } from "./normalize.js";
@@ -96,6 +97,7 @@ export class LedgerlyAiGatewayService {
     private readonly memory: LedgerlyAiMemoryService,
     private readonly employees: LedgerlyAiEmployeeRegistry,
     private readonly tools: LedgerlyAiToolService,
+    private readonly security: LedgerlyAiSecurityService,
     private readonly config: LedgerlyAiConfig,
     db: Pool,
     private readonly logger: LedgerlyAiLogger,
@@ -129,6 +131,7 @@ export class LedgerlyAiGatewayService {
 
   async run(input: LedgerlyAiGatewayRequest, progress?: LedgerlyAiGatewayProgress): Promise<LedgerlyAiGatewayResponse> {
     const correlationId = createLedgerlyAiCorrelationId();
+    const safeMetadata=await this.security.sanitizeRequestMetadata(input.principal,input.metadata,correlationId);
     const safeAttachments=(input.attachments??[]).map(item=>({
       name:item.name.trim().slice(0,160),
       mimeType:item.mimeType.trim().slice(0,120)||"text/plain",
@@ -144,7 +147,7 @@ export class LedgerlyAiGatewayService {
       agentId: input.agentId ?? null,
       activeModule: input.activeModule ?? null,
       taskKind: input.taskKind,
-      metadata: redactLedgerlyAiValue(input.metadata ?? {}),
+      metadata: safeMetadata,
       attachments:safeAttachments,
     });
     const claim = await this.idempotency.claim({
@@ -184,7 +187,7 @@ export class LedgerlyAiGatewayService {
         throw new AppError(409, "LEDGERLY_AI_CHAT_INACTIVE", "This Ledgerly AI chat is not active.");
       }
 
-      const projectId = projectIdFromMetadata(input.metadata);
+      const projectId = projectIdFromMetadata(safeMetadata);
       await progress?.({ type: "accepted", at: new Date().toISOString(), data: { chatId: chat.id, correlationId } });
       const userMessage = await this.repository.appendMessage({
         principal: input.principal,
@@ -194,7 +197,7 @@ export class LedgerlyAiGatewayService {
         correlationId,
         agentId,
         metadata: {
-          ...(redactLedgerlyAiValue(input.metadata ?? {}) as Record<string, unknown>),
+          ...(safeMetadata as Record<string, unknown>),
           ...(attachmentMeta.length?{attachments:attachmentMeta}:{}),
         },
       });
@@ -211,7 +214,7 @@ export class LedgerlyAiGatewayService {
           activeModule: input.activeModule ?? null,
           projectId,
           employeeKey: employee?.key ?? null,
-          metadata: redactLedgerlyAiValue(input.metadata ?? {}),
+          metadata: safeMetadata,
           attachments:attachmentMeta,
         },
       });

@@ -14,6 +14,7 @@ import { LedgerlyAiGitService } from "./git/service.js";
 import { LedgerlyAiMonitoringService } from "./monitoring/service.js";
 import { LedgerlyAiPolicyService } from "./policy/service.js";
 import { LedgerlyAiConsoleService } from "./console/service.js";
+import { LedgerlyAiSecurityService } from "./security/service.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -37,6 +38,7 @@ export class LedgerlyAiFoundationService {
   readonly repository: LedgerlyAiGatewayRepository;
   readonly employees: LedgerlyAiEmployeeRegistry;
   readonly memory: LedgerlyAiMemoryService;
+  readonly security: LedgerlyAiSecurityService;
   readonly policy: LedgerlyAiPolicyService;
   readonly tools: LedgerlyAiToolService;
   readonly gateway: LedgerlyAiGatewayService;
@@ -59,8 +61,9 @@ export class LedgerlyAiFoundationService {
     this.repository = new LedgerlyAiGatewayRepository(runtime.db);
     this.employees = new LedgerlyAiEmployeeRegistry(runtime.db);
     this.memory = new LedgerlyAiMemoryService(runtime.db, this.repository, this.config);
+    this.security = new LedgerlyAiSecurityService(runtime);
     this.policy = new LedgerlyAiPolicyService(runtime);
-    this.tools = new LedgerlyAiToolService(runtime, this.config, this.employees, this.policy);
+    this.tools = new LedgerlyAiToolService(runtime, this.config, this.employees, this.policy, this.security);
     this.forge = new LedgerlyAiForgeService(
       runtime.db,
       this.config,
@@ -76,6 +79,7 @@ export class LedgerlyAiFoundationService {
       this.memory,
       this.employees,
       this.tools,
+      this.security,
       this.config,
       runtime.db,
       this.logger,
