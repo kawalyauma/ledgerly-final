@@ -399,6 +399,10 @@ export class LedgerlyAiToolService {
             "UPDATE lai_jobs SET status='cancelled',error_text='Approval expired',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'",
             [approval.jobId,principal.organizationId],
           );
+          await client.query(
+            "UPDATE lai_custom_agent_runs SET status='cancelled',error_text='Approval expired',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE organization_id=$1 AND job_id=$2 AND status='waiting_approval'",
+            [principal.organizationId,approval.jobId],
+          );
         }
         await client.query("COMMIT");
       } catch (error) {
@@ -465,22 +469,27 @@ export class LedgerlyAiToolService {
         [JSON.stringify(executed.result),approvalId,principal.organizationId],
       );
       if (approval.jobId) {
+        const completion = {
+          approvalId,
+          toolCallId: approval.toolCallId,
+          toolName: tool.name,
+          approvalStatus: "executed",
+        };
         await this.runtime.db.query(
           `UPDATE lai_jobs
               SET status='completed',
                   result_json=COALESCE(result_json,'{}'::jsonb) || $1::jsonb,
                   completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,error_text=NULL
             WHERE id=$2 AND organization_id=$3 AND status='waiting_approval'`,
-          [
-            JSON.stringify({
-              approvalId,
-              toolCallId: approval.toolCallId,
-              toolName: tool.name,
-              approvalStatus: "executed",
-            }),
-            approval.jobId,
-            principal.organizationId,
-          ],
+          [JSON.stringify(completion),approval.jobId,principal.organizationId],
+        );
+        await this.runtime.db.query(
+          `UPDATE lai_custom_agent_runs
+              SET status='completed',
+                  result_json=COALESCE(result_json,'{}'::jsonb) || $1::jsonb,
+                  completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,error_text=NULL
+            WHERE organization_id=$2 AND job_id=$3 AND status='waiting_approval'`,
+          [JSON.stringify(completion),principal.organizationId,approval.jobId],
         );
       }
       await this.audit({
@@ -506,6 +515,12 @@ export class LedgerlyAiToolService {
               SET status='failed',error_text=$1,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
             WHERE id=$2 AND organization_id=$3 AND status='waiting_approval'`,
           [message.slice(0,4000),approval.jobId,principal.organizationId],
+        );
+        await this.runtime.db.query(
+          `UPDATE lai_custom_agent_runs
+              SET status='failed',error_text=$1,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+            WHERE organization_id=$2 AND job_id=$3 AND status='waiting_approval'`,
+          [message.slice(0,4000),principal.organizationId,approval.jobId],
         );
       }
       throw error;
@@ -548,6 +563,12 @@ export class LedgerlyAiToolService {
                 completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
           WHERE id=$1 AND organization_id=$2 AND status='waiting_approval'`,
         [approval.jobId,principal.organizationId],
+      );
+      await this.runtime.db.query(
+        `UPDATE lai_custom_agent_runs SET status='cancelled',error_text='Human approval rejected',
+                completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+          WHERE organization_id=$1 AND job_id=$2 AND status='waiting_approval'`,
+        [principal.organizationId,approval.jobId],
       );
     }
     await this.audit({

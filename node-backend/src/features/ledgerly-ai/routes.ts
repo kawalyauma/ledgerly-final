@@ -12,6 +12,7 @@ import {
 } from "./memory/routes.js";
 import type { LedgerlyAiFoundationService } from "./service.js";
 import { createLedgerlyAiForgeRoutes } from "./forge/routes.js";
+import { createLedgerlyAiCustomRuntimeRoutes } from "./custom-runtime/routes.js";
 import {
   createLedgerlyAiApprovalRoutes,
   createLedgerlyAiToolRoutes,
@@ -37,7 +38,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.8.0",
+        featureVersion: "0.9.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
@@ -46,6 +47,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
         approvals: true,
         legacyEmployeesIntegrated: true,
         forgeAgentBuilder: true,
+        customAgentRuntime: true,
       },
     }),
   );
@@ -68,6 +70,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   routes.route("/tools", createLedgerlyAiToolRoutes(service.tools, service.employees));
   routes.route("/approvals", createLedgerlyAiApprovalRoutes(service.tools));
   routes.route("/forge", createLedgerlyAiForgeRoutes(service.forge));
-  routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway));
+  routes.route("/custom-agents", createLedgerlyAiCustomRuntimeRoutes(service.customRuntime));
+  routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway, service.employees));
   return routes;
 }

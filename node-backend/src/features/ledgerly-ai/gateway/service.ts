@@ -351,6 +351,28 @@ export class LedgerlyAiGatewayService {
         );
       }
 
+      if (employee?.kind === "custom") {
+        try {
+          await this.memory.captureCustomAgentTurn({
+            principal: input.principal,
+            chatId: chat.id,
+            agentId: employee.id,
+            memoryScope: employee.memoryScope,
+            projectId,
+            userMessageId: userMessage.id,
+            assistantMessageId: assistantMessage.id,
+            userText: input.message,
+            assistantText: normalized.content,
+            correlationId,
+          });
+        } catch (memoryError) {
+          this.logger.warn(
+            { correlationId, chatId: chat.id, agentId: employee.id, err: memoryError instanceof Error ? memoryError.message : String(memoryError) },
+            "Ledgerly AI custom employee memory capture failed",
+          );
+        }
+      }
+
       const response: LedgerlyAiGatewayResponse = {
         chat: {
           id: chat.id,

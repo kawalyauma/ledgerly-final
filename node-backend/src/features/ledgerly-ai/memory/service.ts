@@ -162,16 +162,39 @@ export class LedgerlyAiMemoryService {
 
   private async assertAgentReadable(principal: AuthPrincipal, agentId: string) {
     if (isAdmin(principal)) return;
-    const result = await this.db.query(
-      `SELECT 1
-         FROM lai_chats
+    const agent = await this.db.query<{kind:string;createdBy:string|null}>(
+      `SELECT kind,created_by AS "createdBy" FROM lai_agents
+        WHERE id=$1 AND organization_id=$2 AND status<>'disabled' LIMIT 1`,
+      [agentId,principal.organizationId],
+    );
+    const row=agent.rows[0];
+    if(!row)throw new AppError(404,"LEDGERLY_AI_MEMORY_AGENT_NOT_FOUND","Ledgerly AI employee not found.");
+    if(row.kind==="custom"&&row.createdBy!==principal.userId){
+      const shared=await this.db.query(
+        `SELECT 1 FROM lai_custom_agent_shares s
+          WHERE s.organization_id=$1 AND s.agent_id=$2 AND (
+            (s.subject_type='user' AND s.subject_id=$3)
+            OR (s.subject_type='role' AND s.subject_id=$4)
+            OR (s.subject_type='organization' AND s.subject_id='')
+            OR (s.subject_type='department' AND EXISTS(
+              SELECT 1 FROM school_staff_profiles sp
+               WHERE sp.organization_id=$1 AND sp.user_id=$3
+                 AND sp.department_id=s.subject_id AND sp.deleted_at IS NULL
+                 AND sp.employment_status IN ('active','on_leave')
+            ))
+          ) LIMIT 1`,
+        [principal.organizationId,agentId,principal.userId,principal.role],
+      );
+      if(!shared.rowCount)throw new AppError(403,"FORBIDDEN","Agent memory access is not permitted.");
+    }
+    const chat = await this.db.query(
+      `SELECT 1 FROM lai_chats
         WHERE organization_id=$1 AND created_by=$2 AND agent_id=$3 AND status<>'deleted'
         LIMIT 1`,
       [principal.organizationId, principal.userId, agentId],
     );
-    if (!result.rowCount) throw new AppError(403, "FORBIDDEN", "Agent memory access is not permitted.");
+    if (!chat.rowCount) throw new AppError(403, "FORBIDDEN", "Agent memory access is not permitted.");
   }
-
   private async resolveScope(
     principal: AuthPrincipal,
     scopeType: LedgerlyAiMemoryScope,
@@ -559,6 +582,74 @@ export class LedgerlyAiMemoryService {
     return memory;
   }
 
+  async captureCustomAgentTurn(input: {
+    principal: AuthPrincipal;
+    chatId: string;
+    agentId: string;
+    memoryScope: LedgerlyAiMemoryScope;
+    projectId?: string | null;
+    userMessageId: string;
+    assistantMessageId: string;
+    userText: string;
+    assistantText: string;
+    correlationId: string;
+  }) {
+    if (input.memoryScope === "chat") return null;
+    let scopeType: LedgerlyAiMemoryScope = input.memoryScope;
+    let scopeId: string;
+    let fallbackReason: string | null = null;
+    if (scopeType === "user") {
+      scopeId = input.principal.userId;
+    } else if (scopeType === "agent") {
+      scopeId = input.agentId;
+    } else if (scopeType === "organization") {
+      if (isAdmin(input.principal)) scopeId = input.principal.organizationId;
+      else { scopeType = "agent"; scopeId = input.agentId; fallbackReason = "organization-memory-requires-admin"; }
+    } else if (scopeType === "project") {
+      const projectId = input.projectId?.trim();
+      if (projectId && (hasScope(input.principal,"work:read") || hasScope(input.principal,"work:write"))) {
+        const project = await this.db.query(
+          "SELECT 1 FROM work_projects WHERE id=$1 AND organization_id=$2 LIMIT 1",
+          [projectId,input.principal.organizationId],
+        );
+        if (project.rowCount) scopeId = projectId;
+        else { scopeType = "agent"; scopeId = input.agentId; fallbackReason = "project-not-found"; }
+      } else {
+        scopeType = "agent"; scopeId = input.agentId; fallbackReason = "project-context-unavailable";
+      }
+    } else {
+      scopeType = "agent"; scopeId = input.agentId; fallbackReason = "unsupported-custom-memory-scope";
+    }
+    const content = redactLedgerlyAiText(
+      `User: ${input.userText.slice(0,4000)}\n${input.assistantText.slice(0,6000)}`,
+    );
+    const id = createId("laimem");
+    const result = await this.db.query<MemoryRow>(
+      `INSERT INTO lai_memories(
+        id,organization_id,scope_type,scope_id,memory_kind,title,content,importance,confidence,
+        source_type,source_id,status,metadata_json,created_by,updated_by
+      ) VALUES($1,$2,$3,$4,'summary','Custom employee conversation',$5,0.45,1,
+               'custom_agent_turn',$6,'active',$7::jsonb,$8,$8)
+       RETURNING ${selectColumns}`,
+      [
+        id,input.principal.organizationId,scopeType,scopeId,content,input.assistantMessageId,
+        JSON.stringify({
+          agentId:input.agentId,chatId:input.chatId,userMessageId:input.userMessageId,
+          assistantMessageId:input.assistantMessageId,configuredScope:input.memoryScope,fallbackReason,
+        }),input.principal.userId,
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) return null;
+    const memory = mapMemory(row);
+    await this.audit(this.db,{
+      organizationId:input.principal.organizationId,memoryId:memory.id,actorType:"system",actorId:"ledgerly-ai",
+      action:"created",scopeType:memory.scopeType,scopeId:memory.scopeId,correlationId:input.correlationId,
+      after:{id:memory.id,kind:memory.kind,sourceType:memory.sourceType},
+      metadata:{automatic:true,customAgent:true,agentId:input.agentId,fallbackReason},
+    });
+    return memory;
+  }
   private async retrievalScopeKeys(input: {
     principal: AuthPrincipal;
     chatId: string;

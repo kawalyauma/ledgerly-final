@@ -6,6 +6,7 @@ import type { AppEnv } from "../../../http/types.js";
 import type { LedgerlyAiTaskKind } from "../providers/types.js";
 import type { LedgerlyAiGatewayRepository } from "./repository.js";
 import type { LedgerlyAiGatewayService } from "./service.js";
+import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 
 const taskKinds = ["chat","analysis","report","research","code","engineering","testing","operations"] as const;
 const requestSchema = z.object({
@@ -25,6 +26,7 @@ function idempotencyKey(c: { req: { header(name: string): string | undefined } }
 export function createLedgerlyAiGatewayRoutes(
   repository: LedgerlyAiGatewayRepository,
   gateway: LedgerlyAiGatewayService,
+  employees?: LedgerlyAiEmployeeRegistry,
 ) {
   const routes = new Hono<AppEnv>();
 
@@ -92,8 +94,12 @@ export function createLedgerlyAiGatewayRoutes(
       agentId: z.string().min(1).max(120).nullable().optional(),
     }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid Ledgerly AI chat.", parsed.error.flatten());
+    const principal=c.get("principal");
+    if(parsed.data.agentId&&employees){
+      await employees.resolveSelectable(principal,parsed.data.agentId);
+    }
     const chat = await repository.createChat({
-      principal: c.get("principal"),
+      principal,
       title: parsed.data.title,
       agentId: parsed.data.agentId,
     });

@@ -12,6 +12,7 @@ import type { LedgerlyAiProviderRuntime } from "../providers/runtime.js";
 import { sanitizeLedgerlyAiPublicText } from "../providers/public-output.js";
 import type { LedgerlyAiToolService } from "../tools/service.js";
 import type { LedgerlyAiToolCatalogItem } from "../tools/types.js";
+import { ensureCustomAgentOwnerShare, syncCustomAgentTriggers } from "../custom-runtime/triggers.js";
 import {
   forgeAgentSpecSchema,
   type ForgeAgentSpec,
@@ -590,6 +591,13 @@ export class LedgerlyAiForgeService{
             principal.userId,session.sourceAgentId,principal.organizationId,
           ],
         );
+        await ensureCustomAgentOwnerShare(client,{
+          organizationId:principal.organizationId,agentId:session.sourceAgentId,ownerUserId:principal.userId,
+        });
+        await syncCustomAgentTriggers(client,{
+          organizationId:principal.organizationId,agentId:session.sourceAgentId,
+          createdBy:principal.userId,spec:normalized.spec,
+        });
         await client.query(
           `UPDATE lai_agent_builder_sessions SET status='activated',proposed_agent_id=$1,
               spec_json=$2::jsonb,updated_at=CURRENT_TIMESTAMP
@@ -628,6 +636,12 @@ export class LedgerlyAiForgeService{
           JSON.stringify(normalized.spec.permissions),normalized.spec.visibility,
         ],
       );
+      await ensureCustomAgentOwnerShare(client,{
+        organizationId:principal.organizationId,agentId:id,ownerUserId:principal.userId,
+      });
+      await syncCustomAgentTriggers(client,{
+        organizationId:principal.organizationId,agentId:id,createdBy:principal.userId,spec:normalized.spec,
+      });
       const version=await this.insertVersion(client,{
         organizationId:principal.organizationId,agentId:id,spec:normalized.spec,createdBy:principal.userId,
         changeNote:session.operation==="clone"?"Activated as cloned employee":"Activated from Forge builder",
@@ -728,6 +742,12 @@ export class LedgerlyAiForgeService{
           principal.userId,id,principal.organizationId,
         ],
       );
+      await ensureCustomAgentOwnerShare(client,{
+        organizationId:principal.organizationId,agentId:id,ownerUserId:principal.userId,
+      });
+      await syncCustomAgentTriggers(client,{
+        organizationId:principal.organizationId,agentId:id,createdBy:principal.userId,spec:normalized.spec,
+      });
       await client.query("COMMIT");
     }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
     return{agent:await this.customAgent(principal,id,true),warnings:normalized.warnings,version};
