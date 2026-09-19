@@ -380,6 +380,7 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
 
 function LearningFeedback({result,entityLabel=""}:{result:any;entityLabel?:string}){
   const fingerprint=String(result?.responseMeta?.fingerprint||result?.routing?.responseFingerprint||"");
+  const exampleId=String(result?.responseMeta?.trainingExampleId||result?.routing?.trainingExampleId||"");
   const[state,setState]=useState<"idle"|"correct"|"sending"|"sent">("idle");
   const[correction,setCorrection]=useState("");
   const[message,setMessage]=useState("");
@@ -388,7 +389,7 @@ function LearningFeedback({result,entityLabel=""}:{result:any;entityLabel?:strin
     setState("sending");
     try{
       await post<any>("/agentic-employees/chat-studio/response-feedback",{
-        responseFingerprint:fingerprint,rating,approveOriginal,
+        responseFingerprint:fingerprint,exampleId,rating,approveOriginal,
         correctionText:rating<0?correction.trim():"",entityLabel,
       });
       setMessage(rating>0?"Feedback saved. Trusted reviewers can approve it for learning.":"Correction saved. It will be reviewed before it becomes training material.");
