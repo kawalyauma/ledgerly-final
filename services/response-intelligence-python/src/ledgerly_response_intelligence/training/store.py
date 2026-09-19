@@ -30,10 +30,19 @@ def _now() -> str:
 
 
 class TrainingStore:
-    def __init__(self, path: str, *, privacy_mode: str = "redacted") -> None:
+    def __init__(
+        self,
+        path: str,
+        *,
+        privacy_mode: str = "redacted",
+        min_sft_examples: int = 25,
+        min_preference_examples: int = 20,
+    ) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.privacy_mode = privacy_mode
+        self.min_sft_examples = max(2,min_sft_examples)
+        self.min_preference_examples = max(2,min_preference_examples)
         self._lock = threading.RLock()
         self._init()
 
@@ -313,8 +322,8 @@ class TrainingStore:
         corrections=int(fb["corrections"] or 0) if fb else 0
         readiness="empty"
         if approved or counts.get("candidate",0): readiness="collecting"
-        if approved>=25: readiness="sft-ready"
-        if corrections>=20 and approved>=25: readiness="preference-ready"
+        if approved>=self.min_sft_examples: readiness="sft-ready"
+        if corrections>=self.min_preference_examples and approved>=self.min_sft_examples: readiness="preference-ready"
         return TrainingStats(
             organization_id=organization_id,candidates=counts.get("candidate",0),
             approved=approved,rejected=counts.get("rejected",0),
