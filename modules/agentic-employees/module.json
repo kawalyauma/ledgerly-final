@@ -1,7 +1,7 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, trainable Python Response Intelligence, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
@@ -238,7 +238,16 @@
       "local-peft-adapter-inference",
       "trained-adapter-provider-fallback",
       "configurable-training-readiness",
-      "persistent-training-sqlite"
+      "persistent-training-sqlite",
+      "response-learning-center",
+      "exact-training-candidate-feedback",
+      "tenant-scoped-training-mutations",
+      "multi-identity-training-redaction",
+      "trusted-correction-dpo-promotion",
+      "governed-training-dataset-export",
+      "admin-trained-adapter-activation",
+      "adapter-holdout-evaluation",
+      "trained-adapter-runtime-state-ui"
     ]
   }
 }
