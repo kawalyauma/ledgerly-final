@@ -26,6 +26,7 @@ describe("Python Response Intelligence bridge", () => {
       expect(body.generation.api_style).toBe("responses");
       expect(body.generation.model).toBe("school-model");
       expect(body.generation.api_key).toBe("school-secret");
+      expect(body.tool_policy).toEqual(["web.search"]);
       expect((init?.headers as Record<string, string>)["X-Response-Intelligence-Token"]).toBe("service-token-123456");
       return new Response(JSON.stringify({
         text: "Amina's attendance requires review.",
@@ -49,6 +50,7 @@ describe("Python Response Intelligence bridge", () => {
       purpose: "analysis",
       request: "Analyse Amina's attendance.",
       semanticPayload: { rows: [{ studentName: "Amina", attendancePercent: 72 }] },
+      toolPolicy:["web.search"],
       generation: {
         provider: "openai",
         apiStyle: "responses",
