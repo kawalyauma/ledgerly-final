@@ -65,6 +65,7 @@ type Adapter={
   created_at:string;
 };
 type LearningCenterData={
+  service?:{reachable?:boolean;learningEnabled?:boolean;preferActiveAdapter?:boolean;trainingPrivacyMode?:string};
   status:LearningStatus;
   style:StyleProfile;
   candidates:TrainingExample[];
@@ -74,7 +75,7 @@ type LearningCenterData={
 
 const EMPTY:LearningCenterData={
   status:{candidates:0,approved:0,rejected:0,feedback_positive:0,feedback_negative:0,corrections:0,training_runs:0,adapters:0,readiness:"empty"},
-  style:{},candidates:[],runs:[],adapters:[],
+  service:{},style:{},candidates:[],runs:[],adapters:[],
 };
 
 function pct(value?:number){return `${Math.round(Number(value||0)*100)}%`;}
@@ -172,12 +173,12 @@ export function ResponseLearningCenterPage(){
 
         <section className="rlc-card">
           <div className="rlc-section-head compact"><div><small>TRAINED MODELS</small><h2>Adapters</h2></div></div>
-          {activeAdapter&&<div className="rlc-active-adapter"><ShieldCheck size={17}/><div><small>ACTIVE ADAPTER</small><b>{activeAdapter.name}</b><span>{activeAdapter.base_model}</span></div></div>}
+          {activeAdapter&&<div className="rlc-active-adapter"><ShieldCheck size={17}/><div><small>ACTIVE ADAPTER</small><b>{activeAdapter.name}</b><span>{activeAdapter.base_model}</span><em>{data.service?.preferActiveAdapter?"Local adapter inference enabled":"Registered active; local adapter preference is currently disabled"}</em></div></div>}
           {!data.adapters.length?<Empty title="No adapters registered" text="The response engine will continue using retrieval learning and the school's configured AI provider."/>:<div className="rlc-adapters">{data.adapters.map(adapter=><div key={adapter.adapter_id} className={adapter.active?"active":""}><Database size={14}/><div className="rlc-adapter-copy"><b>{adapter.name}</b><span>{adapter.base_model}</span><small>{adapter.active?"Active":"Available"} · {when(adapter.created_at)}</small></div>{!adapter.active&&<button disabled={busyId===adapter.adapter_id} onClick={()=>void activateAdapter(adapter)}>{busyId===adapter.adapter_id?<Activity className="spin" size={11}/>:<Check size={11}/>}Activate</button>}</div>)}</div>}
         </section>
 
         <section className="rlc-card rlc-governance">
-          <ShieldCheck size={19}/><div><h3>Governed learning</h3><p>Normal user feedback is collected for review. Owner/admin approval is required before it becomes trusted learning material. Training data is privacy-redacted by default.</p></div>
+          <ShieldCheck size={19}/><div><h3>Governed learning</h3><p>Normal user feedback is collected for review. Owner/admin approval is required before it becomes trusted learning material. Training privacy mode: <b>{data.service?.trainingPrivacyMode||"redacted"}</b>.</p></div>
         </section>
       </aside>
     </section>
