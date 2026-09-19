@@ -1,8 +1,8 @@
 {
   "key": "agentic-employees",
   "name": "AI Employees",
-  "version": "2.7.1",
-  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, trainable Python Response Intelligence, output selection, governed writes and professional exports.",
+  "version": "2.8.0",
+  "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, trainable Python Response Intelligence with institutional RAG and gated web research, output selection, governed writes and professional exports.",
   "category": "automation",
   "core": false,
   "active": true,
@@ -248,7 +248,29 @@
       "admin-trained-adapter-activation",
       "adapter-holdout-evaluation",
       "trained-adapter-runtime-state-ui",
-      "trained-adapter-rollback"
+      "trained-adapter-rollback",
+      "institutional-knowledge-rag",
+      "approved-knowledge-retrieval",
+      "knowledge-center",
+      "tenant-isolated-knowledge-store",
+      "sqlite-fts5-knowledge-search",
+      "global-analysis-methodology-pack",
+      "auto-seeded-analysis-methodology",
+      "24-domain-analysis-starter-pack",
+      "knowledge-source-approval",
+      "knowledge-retrieval-preview",
+      "ledgerly-first-evidence-hierarchy",
+      "separate-reference-evidence-channel",
+      "reference-source-attribution",
+      "rag-prompt-injection-defense",
+      "live-web-research",
+      "explicit-research-command",
+      "brave-web-search",
+      "tavily-web-search",
+      "web-domain-allowlist",
+      "web-reference-sanitization",
+      "external-numeric-source-attribution",
+      "web-results-not-auto-trusted"
     ]
   }
 }
