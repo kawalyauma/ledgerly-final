@@ -70,6 +70,25 @@ Final response
 
 The Python service can operate with **no external LLM at all**. In that mode it uses its deterministic reasoning and realization engine. When a provider is configured, the provider is used as a fluent surface realizer and the result is still criticized and revised.
 
+## Per-school provider delegation
+
+When the Node backend calls this service, it delegates the **already resolved provider for that school** with the request over the private service connection. The delegated credential is represented as a Pydantic secret, used only to make the outbound model request, and is never included in `ResponseResult`.
+
+This preserves Ledgerly's existing provider choice:
+
+```text
+School A → OpenAI Responses
+School B → Anthropic
+School C → Gemini OpenAI-compatible endpoint
+School D → OpenRouter
+School E → Ollama on the LAN
+School F → Custom OpenAI-compatible endpoint
+```
+
+A service-wide `RIE_PROVIDER` is optional and acts as a fallback for callers that do not delegate a provider. For normal Ledgerly Node requests, the school's own configured provider is preferred.
+
+Keep the Node ↔ Python service connection private because delegated requests can contain the school's model credential in transit. Use the service token even on a private network.
+
 ## Supported AI providers
 
 The service is provider-agnostic.
@@ -121,6 +140,16 @@ The default service address is:
 ```text
 http://127.0.0.1:8091
 ```
+
+Container deployment is also included:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose ps
+```
+
+The Compose service binds only to `127.0.0.1:8091` by default and includes a health check.
 
 Health:
 
