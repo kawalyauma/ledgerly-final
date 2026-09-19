@@ -169,3 +169,19 @@ def test_training_mutations_enforce_organization_ownership(tmp_path) -> None:
     ))
     with pytest.raises(PermissionError):
         store.activate_adapter(adapter.adapter_id,"org_b")
+
+
+def test_adapter_deactivation_returns_to_provider_chain(tmp_path) -> None:
+    from ledgerly_response_intelligence.training.models import AdapterRegister
+
+    store=TrainingStore(str(tmp_path/"learning.sqlite3"))
+    adapter_dir=tmp_path/"adapter-active"
+    adapter_dir.mkdir()
+    adapter=store.register_adapter(AdapterRegister(
+        organization_id="org_1",name="adapter-active",base_model="example/base",
+        path=str(adapter_dir),activate=True,
+    ))
+    assert store.active_adapter("org_1") is not None
+    assert store.deactivate_adapters("org_1")==1
+    assert store.active_adapter("org_1") is None
+    assert store.get_adapter(adapter.adapter_id).active is False
