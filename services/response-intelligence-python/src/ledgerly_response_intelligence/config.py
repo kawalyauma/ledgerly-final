@@ -25,6 +25,12 @@ class Settings(BaseSettings):
 
     allow_external_tools: bool = False
     allow_web_search: bool = False
+    web_search_provider: Literal["none", "brave", "tavily"] = "none"
+    web_search_api_key: str = ""
+    web_search_base_url: str = ""
+    web_search_timeout_seconds: float = Field(default=15.0, ge=2.0, le=60.0)
+    web_search_max_results: int = Field(default=6, ge=1, le=20)
+    web_search_domain_allowlist: str = ""
 
     knowledge_enabled: bool = True
     knowledge_retrieval_enabled: bool = True
