@@ -7,6 +7,8 @@ services:
       - .env
     ports:
       - "127.0.0.1:8091:8091"
+    volumes:
+      - ./data:/app/data
     healthcheck:
       test:
         - CMD
