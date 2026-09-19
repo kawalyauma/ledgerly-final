@@ -34,7 +34,12 @@
     "providers": [
       "openai",
       "google",
-      "anthropic"
+      "anthropic",
+      "groq",
+      "cloudflare",
+      "openrouter",
+      "ollama",
+      "custom"
     ],
     "providerScope": "per-organization",
     "modelRouting": [
