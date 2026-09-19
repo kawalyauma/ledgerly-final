@@ -18,6 +18,13 @@ def build_provider(settings: Settings) -> GenerationProvider | None:
             timeout_seconds=settings.timeout_seconds,
             base_url=settings.base_url,
         )
+    if settings.provider == "responses":
+        return ResponsesProvider(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            model=settings.model,
+            timeout_seconds=settings.timeout_seconds,
+        )
     if settings.provider == "openai-compatible":
         return OpenAICompatibleProvider(
             base_url=settings.base_url,
