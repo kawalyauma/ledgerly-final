@@ -191,3 +191,27 @@ export async function getPythonTrainingRuns(env:Env,organizationId:string,limit=
 export async function getPythonAdapters(env:Env,organizationId:string):Promise<Array<Record<string,unknown>>|null>{
   return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/training/adapters?organization_id="+encodeURIComponent(organizationId));
 }
+
+
+export async function exportPythonTrainingDataset(
+  env:Env,
+  organizationId:string,
+  format:"sft"|"dpo",
+):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/export",{
+    method:"POST",
+    body:JSON.stringify({
+      organization_id:organizationId,
+      format,
+      min_quality:0.88,
+      include_global:true,
+    }),
+  });
+}
+
+export async function activatePythonAdapter(
+  env:Env,
+  adapterId:string,
+):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/"+encodeURIComponent(adapterId)+"/activate",{method:"POST"});
+}
