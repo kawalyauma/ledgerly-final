@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity, ArrowRight, Bot, Check, ChevronDown, CircleDot, Clock3, Command,
   Database, Download, FileJson, FileSpreadsheet, FileText, Filter, Gauge,
-  Layers3, Play, Search, ShieldCheck, Sparkles, Table2, TerminalSquare, X
+  Layers3, Play, Search, ShieldCheck, Sparkles, Table2, TerminalSquare, ThumbsDown, ThumbsUp, X
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
@@ -373,9 +373,38 @@ function ResultView({value,format}:{value:unknown;format:OutputFormat}){
   const composite:any=value;if(composite?.needsCriteria&&Array.isArray(composite.questions))return <div className="acc-ready-card"><Sparkles size={24}/><b>More criteria needed</b><span>{composite.questions.join(" ")}</span></div>;
   if(composite?.needsEntity&&Array.isArray(composite.entityOptions))return <div className="acc-ready-card"><Search size={24}/><b>Select the correct Ledgerly record</b><span>The name matched more than one record. Choose the student, teacher, staff member, account or other entity above and run again.</span></div>;
   if(format==="json")return <pre className="acc-json">{JSON.stringify(value,null,2)}</pre>;
-  if(composite?.analysis)return <AnalysisResult analysis={composite.analysis} humanResponse={composite.humanResponse} topic={composite.topic} entity={composite.entity}/>;
-  if(composite?.humanResponse)return <div className="acc-human-report"><div className="acc-human-response">{String(composite.humanResponse)}</div><TableResult value={value}/></div>;
+  if(composite?.analysis)return <div className="acc-human-report"><AnalysisResult analysis={composite.analysis} humanResponse={composite.humanResponse} topic={composite.topic} entity={composite.entity}/><LearningFeedback result={composite} entityLabel={composite.entity?.label}/></div>;
+  if(composite?.humanResponse)return <div className="acc-human-report"><div className="acc-human-response">{String(composite.humanResponse)}</div><LearningFeedback result={composite}/><TableResult value={value}/></div>;
   return <TableResult value={value}/>;
+}
+
+function LearningFeedback({result,entityLabel=""}:{result:any;entityLabel?:string}){
+  const fingerprint=String(result?.responseMeta?.fingerprint||result?.routing?.responseFingerprint||"");
+  const[state,setState]=useState<"idle"|"correct"|"sending"|"sent">("idle");
+  const[correction,setCorrection]=useState("");
+  const[message,setMessage]=useState("");
+  if(!fingerprint)return null;
+  async function send(rating:-1|1,approveOriginal=false){
+    setState("sending");
+    try{
+      await post<any>("/agentic-employees/chat-studio/response-feedback",{
+        responseFingerprint:fingerprint,rating,approveOriginal,
+        correctionText:rating<0?correction.trim():"",entityLabel,
+      });
+      setMessage(rating>0?"Approved for learning.":"Feedback saved. Your correction will teach future responses.");
+      setState("sent");
+    }catch(error){setMessage(errorText(error));setState(rating<0?"correct":"idle");}
+  }
+  if(state==="sent")return <div className="acc-learning-saved"><Check size={13}/><span>{message}</span></div>;
+  return <div className="acc-learning-feedback">
+    <div><b>Teach Ledgerly this response</b><small>Approve good answers or correct weak ones. Only approved/corrected examples become learning material.</small></div>
+    <div className="acc-learning-actions">
+      <button type="button" disabled={state==="sending"} onClick={()=>void send(1,true)}><ThumbsUp size={13}/> Good response</button>
+      <button type="button" disabled={state==="sending"} onClick={()=>setState(state==="correct"?"idle":"correct")}><ThumbsDown size={13}/> Improve it</button>
+    </div>
+    {state==="correct"&&<div className="acc-learning-correction"><textarea rows={4} value={correction} onChange={e=>setCorrection(e.target.value)} placeholder="Write the better answer or correction you want Ledgerly to learn…"/><button type="button" disabled={!correction.trim()} onClick={()=>void send(-1,false)}>Save correction</button></div>}
+    {message&&state!=="sent"&&<small className="acc-learning-error">{message}</small>}
+  </div>;
 }
 
 function TableResult({value}:{value:unknown}){
