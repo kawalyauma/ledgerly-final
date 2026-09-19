@@ -9,6 +9,7 @@ import uvicorn
 
 from .config import get_settings
 from .engine import ResponseIntelligenceEngine
+from .knowledge.store import KnowledgeStore
 from .models import ResponseRequest
 from .training.datasets import DatasetBuilder
 from .training.models import AdapterRegister, DatasetExportRequest, FineTuneConfig
@@ -21,6 +22,11 @@ async def _respond(path: Path) -> None:
     request = ResponseRequest.model_validate(payload)
     result = await ResponseIntelligenceEngine(get_settings()).respond(request)
     print(result.model_dump_json(indent=2))
+
+
+def _knowledge_store() -> KnowledgeStore:
+    settings=get_settings()
+    return KnowledgeStore(settings.knowledge_db_path)
 
 
 def _store() -> TrainingStore:
@@ -45,6 +51,22 @@ def _export(args: argparse.Namespace) -> None:
 
 def _stats(args: argparse.Namespace) -> None:
     print(_store().stats(args.organization).model_dump_json(indent=2))
+
+
+def _knowledge_seed(args: argparse.Namespace) -> None:
+    sources=_knowledge_store().seed_starter_pack(args.organization)
+    print(json.dumps({"organization":args.organization,"sources":len(sources)},indent=2))
+
+
+def _knowledge_stats(args: argparse.Namespace) -> None:
+    print(_knowledge_store().stats(args.organization).model_dump_json(indent=2))
+
+
+def _knowledge_search(args: argparse.Namespace) -> None:
+    hits=_knowledge_store().search(
+        organization_id=args.organization,query=args.query,limit=args.limit,include_global=True,
+    )
+    print(json.dumps([item.model_dump(mode="json") for item in hits],ensure_ascii=False,indent=2))
 
 
 def _train(args: argparse.Namespace) -> None:
@@ -108,6 +130,17 @@ def main() -> None:
     export.add_argument("--include-global",action="store_true")
     export.add_argument("--filename",default="")
 
+    knowledge_seed=sub.add_parser("knowledge-seed")
+    knowledge_seed.add_argument("--organization",default="")
+
+    knowledge_stats=sub.add_parser("knowledge-stats")
+    knowledge_stats.add_argument("--organization",default="")
+
+    knowledge_search=sub.add_parser("knowledge-search")
+    knowledge_search.add_argument("query")
+    knowledge_search.add_argument("--organization",default="")
+    knowledge_search.add_argument("--limit",type=int,default=6)
+
     train=sub.add_parser("train-adapter")
     train.add_argument("--organization",default="")
     train.add_argument("--objective",choices=["sft","dpo"],default="sft")
@@ -147,6 +180,12 @@ def main() -> None:
         _export(args)
     elif args.command=="train-adapter":
         _train(args)
+    elif args.command=="knowledge-seed":
+        _knowledge_seed(args)
+    elif args.command=="knowledge-stats":
+        _knowledge_stats(args)
+    elif args.command=="knowledge-search":
+        _knowledge_search(args)
 
 
 if __name__ == "__main__":
