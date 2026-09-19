@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../http/types.js";
 import { requireScope } from "../core-identity/security.js";
+import {
+  createLedgerlyAiEmployeeAdminRoutes,
+  createLedgerlyAiEmployeeRoutes,
+} from "./employees/routes.js";
 import { createLedgerlyAiGatewayRoutes } from "./gateway/routes.js";
 import {
   createLedgerlyAiMemoryAdminRoutes,
@@ -28,10 +32,11 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.4.0",
+        featureVersion: "0.5.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
+        namedEmployees: true,
       },
     }),
   );
@@ -47,7 +52,9 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     });
   });
 
+  routes.route("/internal/employees", createLedgerlyAiEmployeeAdminRoutes(service.employees));
   routes.route("/internal/memories", createLedgerlyAiMemoryAdminRoutes(service.memory));
+  routes.route("/employees", createLedgerlyAiEmployeeRoutes(service.employees));
   routes.route("/memories", createLedgerlyAiMemoryRoutes(service.memory));
   routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway));
   return routes;

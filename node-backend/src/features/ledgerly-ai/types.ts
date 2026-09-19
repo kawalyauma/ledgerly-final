@@ -68,11 +68,16 @@ export type LedgerlyAiAgent = {
   displayName: string;
   role: string;
   description: string;
+  icon?: string | null;
+  avatar: Record<string, unknown>;
+  visibility: "all" | "staff" | "admin";
   kind: LedgerlyAiAgentKind;
   status: LedgerlyAiAgentStatus;
+  permissions: string[];
   capabilities: string[];
   toolAllowlist: string[];
   memoryScope: "chat" | "user" | "agent" | "organization" | "project";
+  templateVersion: number;
   metadata: Record<string, unknown>;
 };
 
