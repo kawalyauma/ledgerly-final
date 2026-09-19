@@ -3,6 +3,7 @@ import type { FrontendModuleDefinition } from "../../frontend-types";
 import { AgenticEmployeesPage } from "./AgenticEmployeesPage";
 import { AgenticChatStudioPage } from "./AgenticChatStudioPage";
 import { AgenticCommandCenterPage } from "./AgenticCommandCenterPage";
+import { ResponseLearningCenterPage } from "./ResponseLearningCenterPage";
 import { ProviderConfigurationPage } from "./ProviderConfigurationPage";
 import { VisionWorkspacePage } from "./VisionWorkspacePage";
 import { MemoryPage } from "./MemoryPage";
@@ -14,6 +15,7 @@ import "./agentic-employees.css";
 import "./chat-studio.css";
 import "./chat-studio-lifecycle.css";
 import "./command-center.css";
+import "./learning-center.css";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "agentic-employees",
@@ -23,6 +25,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   routes: {
     "agentic-employees": { scope: "school:read", view: AgenticChatStudioPage },
     "agentic-employees-command-center": { scope: "school:read", view: AgenticCommandCenterPage },
+    "agentic-employees-learning": { scope: "school:read", view: ResponseLearningCenterPage },
     "agentic-employees-workforce": { scope: "school:read", view: AgenticEmployeesPage },
     "agentic-employees-provider": { scope: "school:read", view: ProviderConfigurationPage },
     "agentic-employees-vision": { scope: "school:read", view: VisionWorkspacePage },
@@ -35,6 +38,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   navigation: [{ label: "Agentic Employees", icon: Bot, order: 75, items: [
     { label: "AI Chat Studio", path: "agentic-employees", scope: "school:read" },
     { label: "Command Center", path: "agentic-employees-command-center", scope: "school:read" },
+    { label: "Learning Center", path: "agentic-employees-learning", scope: "school:read" },
     { label: "AI Provider Configuration", path: "agentic-employees-provider", scope: "school:read" },
     { label: "Image & OCR", path: "agentic-employees-vision", scope: "school:read" },
     { label: "Memory", path: "agentic-employees-memory", scope: "school:read" },
