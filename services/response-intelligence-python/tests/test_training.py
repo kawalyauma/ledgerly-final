@@ -118,6 +118,12 @@ def test_untrusted_correction_stays_candidate_until_review(tmp_path) -> None:
     assert store.get_example(feedback.example_id).status=="candidate"
     assert feedback.trusted_reviewer is False
 
+    store.set_status(feedback.example_id,"approved","org_1")
+    exported=DatasetBuilder(store,str(tmp_path/"datasets"),"redacted").export(
+        DatasetExportRequest(organization_id="org_1",format="dpo",include_global=False)
+    )
+    assert exported.examples==1
+
 
 def test_redacts_multiple_semantic_identities_from_training_text(tmp_path) -> None:
     store=TrainingStore(str(tmp_path/"learning.sqlite3"),privacy_mode="redacted")
