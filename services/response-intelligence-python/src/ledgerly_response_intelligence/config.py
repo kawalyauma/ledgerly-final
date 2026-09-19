@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     knowledge_db_path: str = "data/response-intelligence-knowledge.sqlite3"
     knowledge_retrieval_limit: int = Field(default=6, ge=0, le=30)
     knowledge_include_global: bool = True
+    knowledge_seed_builtin_on_startup: bool = True
     knowledge_max_context_chars: int = Field(default=18000, ge=1000, le=100000)
 
     learning_enabled: bool = True
