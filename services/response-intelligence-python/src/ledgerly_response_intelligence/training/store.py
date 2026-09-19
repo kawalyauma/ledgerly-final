@@ -1,0 +1,367 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from ..memory import fingerprint
+from ..models import Purpose, Register
+from .models import (
+    FeedbackCreate,
+    FeedbackRecord,
+    StyleProfile,
+    TrainingExample,
+    TrainingExampleCreate,
+    TrainingStats,
+)
+from .privacy import sanitize_training_example, stable_json
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+class TrainingStore:
+    def __init__(self, path: str, *, privacy_mode: str = "redacted") -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.privacy_mode = privacy_mode
+        self._lock = threading.RLock()
+        self._init()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=20, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    def _init(self) -> None:
+        with self._lock, self._connect() as db:
+            db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS training_examples(
+                  example_id TEXT PRIMARY KEY,
+                  organization_id TEXT NOT NULL DEFAULT '',
+                  purpose TEXT NOT NULL,
+                  request_text TEXT NOT NULL,
+                  semantic_json TEXT NOT NULL DEFAULT '{}',
+                  response_text TEXT NOT NULL,
+                  register_name TEXT NOT NULL DEFAULT '',
+                  strategy_id TEXT NOT NULL DEFAULT '',
+                  quality_overall REAL NOT NULL DEFAULT 0,
+                  source TEXT NOT NULL DEFAULT 'response',
+                  status TEXT NOT NULL DEFAULT 'candidate',
+                  tags_json TEXT NOT NULL DEFAULT '[]',
+                  response_fingerprint TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_training_examples_org_status
+                  ON training_examples(organization_id,status,purpose);
+                CREATE INDEX IF NOT EXISTS idx_training_examples_fingerprint
+                  ON training_examples(response_fingerprint);
+
+                CREATE TABLE IF NOT EXISTS response_feedback(
+                  feedback_id TEXT PRIMARY KEY,
+                  organization_id TEXT NOT NULL DEFAULT '',
+                  response_fingerprint TEXT NOT NULL,
+                  rating INTEGER NOT NULL,
+                  comment TEXT NOT NULL DEFAULT '',
+                  correction_text TEXT NOT NULL DEFAULT '',
+                  example_id TEXT NOT NULL DEFAULT '',
+                  created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_response_feedback_fingerprint
+                  ON response_feedback(response_fingerprint);
+
+                CREATE TABLE IF NOT EXISTS training_runs(
+                  run_id TEXT PRIMARY KEY,
+                  organization_id TEXT NOT NULL DEFAULT '',
+                  mode TEXT NOT NULL,
+                  base_model TEXT NOT NULL,
+                  dataset_path TEXT NOT NULL,
+                  output_dir TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  config_json TEXT NOT NULL DEFAULT '{}',
+                  metrics_json TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL,
+                  completed_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS model_adapters(
+                  adapter_id TEXT PRIMARY KEY,
+                  organization_id TEXT NOT NULL DEFAULT '',
+                  name TEXT NOT NULL,
+                  base_model TEXT NOT NULL,
+                  path TEXT NOT NULL,
+                  active INTEGER NOT NULL DEFAULT 0,
+                  metrics_json TEXT NOT NULL DEFAULT '{}',
+                  created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_model_adapters_org
+                  ON model_adapters(organization_id,active);
+                """
+            )
+
+    def add_example(self, item: TrainingExampleCreate) -> TrainingExample:
+        request, semantic, response = sanitize_training_example(
+            item.request,
+            item.semantic_payload,
+            item.response_text,
+            entity_label=item.entity_label,
+            mode=self.privacy_mode,
+        )
+        now = _now()
+        example_id = "tex_" + uuid.uuid4().hex
+        response_fp = fingerprint(response)
+        with self._lock, self._connect() as db:
+            existing = db.execute(
+                "SELECT example_id FROM training_examples WHERE organization_id=? AND response_fingerprint=? LIMIT 1",
+                (item.organization_id, response_fp),
+            ).fetchone()
+            if existing:
+                return self.get_example(str(existing["example_id"]))
+            db.execute(
+                """
+                INSERT INTO training_examples(
+                  example_id,organization_id,purpose,request_text,semantic_json,response_text,
+                  register_name,strategy_id,quality_overall,source,status,tags_json,
+                  response_fingerprint,created_at,updated_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    example_id,item.organization_id,item.purpose.value,request,stable_json(semantic),response,
+                    item.register.value if item.register else "",item.strategy_id,item.quality_overall,item.source,
+                    item.status,stable_json(item.tags),response_fp,now,now,
+                ),
+            )
+        return self.get_example(example_id)
+
+    def capture_candidate(
+        self,
+        *,
+        organization_id: str,
+        purpose: Purpose,
+        request: str,
+        semantic_payload: dict[str, Any],
+        response_text: str,
+        register: Register | None,
+        strategy_id: str,
+        quality_overall: float,
+        tags: list[str],
+        entity_label: str = "",
+    ) -> TrainingExample:
+        return self.add_example(
+            TrainingExampleCreate(
+                organization_id=organization_id,
+                purpose=purpose,
+                request=request,
+                semantic_payload=semantic_payload,
+                response_text=response_text,
+                register=register,
+                strategy_id=strategy_id,
+                quality_overall=quality_overall,
+                source="response",
+                status="candidate",
+                tags=tags,
+                entity_label=entity_label,
+            )
+        )
+
+    def get_example(self, example_id: str) -> TrainingExample:
+        with self._lock, self._connect() as db:
+            row = db.execute("SELECT * FROM training_examples WHERE example_id=?", (example_id,)).fetchone()
+        if not row:
+            raise KeyError(example_id)
+        return self._row_example(row)
+
+    def find_by_fingerprint(self, fingerprint_value: str, organization_id: str = "") -> TrainingExample | None:
+        with self._lock, self._connect() as db:
+            row = db.execute(
+                """
+                SELECT * FROM training_examples
+                WHERE response_fingerprint=? AND (?='' OR organization_id=?)
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (fingerprint_value, organization_id, organization_id),
+            ).fetchone()
+        return self._row_example(row) if row else None
+
+    def list_examples(
+        self,
+        *,
+        organization_id: str = "",
+        status: str = "",
+        purpose: str = "",
+        limit: int = 100,
+        include_global: bool = False,
+    ) -> list[TrainingExample]:
+        clauses: list[str] = []
+        args: list[Any] = []
+        if organization_id:
+            if include_global:
+                clauses.append("(organization_id=? OR organization_id='')")
+            else:
+                clauses.append("organization_id=?")
+            args.append(organization_id)
+        elif not include_global:
+            clauses.append("organization_id=''")
+        if status:
+            clauses.append("status=?");args.append(status)
+        if purpose:
+            clauses.append("purpose=?");args.append(purpose)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        args.append(max(1,min(limit,2000)))
+        with self._lock, self._connect() as db:
+            rows = db.execute(
+                f"SELECT * FROM training_examples{where} ORDER BY updated_at DESC LIMIT ?",
+                tuple(args),
+            ).fetchall()
+        return [self._row_example(row) for row in rows]
+
+    def set_status(self, example_id: str, status: str) -> TrainingExample:
+        if status not in {"candidate","approved","rejected"}:
+            raise ValueError("invalid status")
+        with self._lock, self._connect() as db:
+            db.execute(
+                "UPDATE training_examples SET status=?,updated_at=? WHERE example_id=?",
+                (status,_now(),example_id),
+            )
+        return self.get_example(example_id)
+
+    def add_feedback(self, item: FeedbackCreate) -> FeedbackRecord:
+        feedback_id = "fb_" + uuid.uuid4().hex
+        existing = self.find_by_fingerprint(item.response_fingerprint,item.organization_id)
+        example_id = existing.example_id if existing else ""
+        correction = item.correction_text
+        if correction and existing:
+            corrected = self.add_example(
+                TrainingExampleCreate(
+                    organization_id=existing.organization_id,
+                    purpose=existing.purpose,
+                    request=existing.request,
+                    semantic_payload=existing.semantic_payload,
+                    response_text=correction,
+                    register=existing.register,
+                    strategy_id=existing.strategy_id,
+                    quality_overall=max(existing.quality_overall,0.9),
+                    source="correction",
+                    status="approved",
+                    tags=[*existing.tags,"human-correction"],
+                )
+            )
+            example_id = corrected.example_id
+            self.set_status(existing.example_id,"rejected")
+        elif item.approve_original and existing:
+            self.set_status(existing.example_id,"approved")
+        elif item.rating < 0 and existing:
+            self.set_status(existing.example_id,"rejected")
+        with self._lock, self._connect() as db:
+            db.execute(
+                """
+                INSERT INTO response_feedback(
+                  feedback_id,organization_id,response_fingerprint,rating,comment,
+                  correction_text,example_id,created_at
+                ) VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (
+                    feedback_id,item.organization_id,item.response_fingerprint,item.rating,item.comment,
+                    correction,example_id,_now(),
+                ),
+            )
+        return FeedbackRecord(
+            feedback_id=feedback_id,
+            organization_id=item.organization_id,
+            response_fingerprint=item.response_fingerprint,
+            rating=item.rating,
+            comment=item.comment,
+            correction_text=correction,
+            example_id=example_id,
+            created_at=_now(),
+        )
+
+    def stats(self, organization_id: str = "") -> TrainingStats:
+        org_clause = "organization_id=?" if organization_id else "organization_id=''"
+        args = (organization_id,) if organization_id else ()
+        with self._lock, self._connect() as db:
+            status_rows = db.execute(
+                f"SELECT status,COUNT(*) AS n FROM training_examples WHERE {org_clause} GROUP BY status",args
+            ).fetchall()
+            fb = db.execute(
+                f"""SELECT
+                    SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END) positive,
+                    SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END) negative,
+                    SUM(CASE WHEN correction_text<>'' THEN 1 ELSE 0 END) corrections
+                    FROM response_feedback WHERE {org_clause}""",args
+            ).fetchone()
+            runs = db.execute(f"SELECT COUNT(*) n FROM training_runs WHERE {org_clause}",args).fetchone()
+            adapters = db.execute(f"SELECT COUNT(*) n FROM model_adapters WHERE {org_clause}",args).fetchone()
+        counts={str(row["status"]):int(row["n"]) for row in status_rows}
+        approved=counts.get("approved",0)
+        corrections=int(fb["corrections"] or 0) if fb else 0
+        readiness="empty"
+        if approved or counts.get("candidate",0): readiness="collecting"
+        if approved>=25: readiness="sft-ready"
+        if corrections>=20 and approved>=25: readiness="preference-ready"
+        return TrainingStats(
+            organization_id=organization_id,candidates=counts.get("candidate",0),
+            approved=approved,rejected=counts.get("rejected",0),
+            feedback_positive=int(fb["positive"] or 0) if fb else 0,
+            feedback_negative=int(fb["negative"] or 0) if fb else 0,
+            corrections=corrections,training_runs=int(runs["n"] or 0),adapters=int(adapters["n"] or 0),
+            readiness=readiness,
+        )
+
+    def style_profile(self, organization_id: str) -> StyleProfile:
+        examples=self.list_examples(organization_id=organization_id,status="approved",limit=500,include_global=False)
+        if not examples:return StyleProfile(organization_id=organization_id)
+        import re
+        from collections import Counter
+        words=[len(ex.response_text.split()) for ex in examples]
+        sentence_lengths=[]
+        heading=bullet=concise=0
+        registers=Counter();strategies=Counter()
+        for ex in examples:
+            sentences=[s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+",ex.response_text) if s.strip()]
+            sentence_lengths.extend(len(s.split()) for s in sentences)
+            heading+=int(bool(re.search(r"^#{1,4}\s+",ex.response_text,re.M)))
+            bullet+=int(bool(re.search(r"^[-*]\s+",ex.response_text,re.M)))
+            concise+=int(len(ex.response_text.split())<=250)
+            if ex.register:registers[ex.register.value]+=1
+            if ex.strategy_id:strategies[ex.strategy_id]+=1
+        avg_words=sum(words)/len(words)
+        avg_sentence=sum(sentence_lengths)/len(sentence_lengths) if sentence_lengths else 0
+        rules=[
+            f"Learned organization style: typical response length is about {avg_words:.0f} words.",
+            f"Typical sentence length is about {avg_sentence:.0f} words.",
+        ]
+        if heading/len(examples)>0.6:rules.append("This organization usually prefers descriptive headings.")
+        if bullet/len(examples)>0.5:rules.append("This organization often uses short bullet lists where they improve scanning.")
+        if concise/len(examples)>0.7:rules.append("Prefer concise answers unless the request explicitly asks for deep analysis.")
+        return StyleProfile(
+            organization_id=organization_id,approved_examples=len(examples),
+            preferred_register=registers.most_common(1)[0][0] if registers else "",
+            preferred_strategy=strategies.most_common(1)[0][0] if strategies else "",
+            average_words=avg_words,average_sentence_words=avg_sentence,
+            heading_rate=heading/len(examples),bullet_rate=bullet/len(examples),concise_rate=concise/len(examples),
+            rules=rules,
+        )
+
+    @staticmethod
+    def _row_example(row: sqlite3.Row) -> TrainingExample:
+        register_raw=str(row["register_name"] or "")
+        return TrainingExample(
+            example_id=str(row["example_id"]),organization_id=str(row["organization_id"]),
+            purpose=Purpose(str(row["purpose"])),request=str(row["request_text"]),
+            semantic_payload=json.loads(str(row["semantic_json"] or "{}")),response_text=str(row["response_text"]),
+            register=Register(register_raw) if register_raw in Register._value2member_map_ else None,
+            strategy_id=str(row["strategy_id"] or ""),quality_overall=float(row["quality_overall"] or 0),
+            source=str(row["source"] or ""),status=str(row["status"] or ""),
+            tags=list(json.loads(str(row["tags_json"] or "[]"))),response_fingerprint=str(row["response_fingerprint"]),
+            created_at=str(row["created_at"]),updated_at=str(row["updated_at"]),
+        )
