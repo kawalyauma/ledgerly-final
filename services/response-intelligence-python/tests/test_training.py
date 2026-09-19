@@ -42,6 +42,7 @@ def test_human_correction_rejects_original_and_creates_approved_example(tmp_path
     feedback=store.add_feedback(FeedbackCreate(
         organization_id="org_1",response_fingerprint="fp-1",rating=-1,
         correction_text="The records show a decline, but they do not establish a single cause.",
+        trusted_reviewer=True,
     ))
     assert store.get_example(original.example_id).status=="rejected"
     corrected=store.get_example(feedback.example_id)
@@ -88,6 +89,7 @@ def test_exports_sft_and_dpo_datasets(tmp_path) -> None:
     store.add_feedback(FeedbackCreate(
         organization_id="org_1",response_fingerprint=bad.response_fingerprint,rating=-1,
         correction_text="Attendance was low, but the records do not prove that it caused the outcome.",
+        trusted_reviewer=True,
     ))
     builder=DatasetBuilder(store,str(tmp_path/"datasets"),"redacted")
     sft=builder.export(DatasetExportRequest(organization_id="org_1",format="sft",include_global=False))
@@ -99,3 +101,19 @@ def test_exports_sft_and_dpo_datasets(tmp_path) -> None:
     assert sft_row["messages"][-1]["role"]=="assistant"
     assert dpo_row["chosen"][0]["role"]=="assistant"
     assert dpo_row["rejected"][0]["role"]=="assistant"
+
+
+def test_untrusted_correction_stays_candidate_until_review(tmp_path) -> None:
+    store=TrainingStore(str(tmp_path/"learning.sqlite3"))
+    original=store.add_example(TrainingExampleCreate(
+        organization_id="org_1",purpose=Purpose.analysis,request="Analyse attendance.",
+        semantic_payload={"attendancePercent":72},response_text="Original response.",
+        quality_overall=0.9,status="candidate",response_fingerprint="fp-untrusted",
+    ))
+    feedback=store.add_feedback(FeedbackCreate(
+        organization_id="org_1",response_fingerprint="fp-untrusted",rating=-1,
+        correction_text="Suggested correction from a normal user.",trusted_reviewer=False,
+    ))
+    assert store.get_example(original.example_id).status=="candidate"
+    assert store.get_example(feedback.example_id).status=="candidate"
+    assert feedback.trusted_reviewer is False
