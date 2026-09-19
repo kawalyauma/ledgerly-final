@@ -20,6 +20,7 @@ class TrainingExampleCreate(BaseModel):
     status: Literal["candidate", "approved", "rejected"] = "candidate"
     tags: list[str] = Field(default_factory=list)
     entity_label: str = ""
+    response_fingerprint: str = ""
 
 
 class TrainingExample(BaseModel):
@@ -46,6 +47,7 @@ class FeedbackCreate(BaseModel):
     rating: Literal[-1, 0, 1]
     comment: str = Field(default="", max_length=5000)
     correction_text: str = Field(default="", max_length=50000)
+    entity_label: str = ""
     approve_original: bool = False
 
 
