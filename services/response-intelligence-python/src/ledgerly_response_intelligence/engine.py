@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -88,7 +87,7 @@ class ResponseIntelligenceEngine:
                 if request.provider_mode == "required":
                     raise
 
-        quality = self.critic.evaluate(draft, request, evidence)
+        quality = self.critic.evaluate(draft, request, evidence, reasoning)
         if use_provider:
             draft, quality, revision_count = await self._revise_until_acceptable(
                 request=request,
@@ -103,7 +102,7 @@ class ResponseIntelligenceEngine:
         # is safer than returning fluent hallucination.
         if quality.grounding.score < 0.9 or quality.causality.score < 0.7:
             fallback = self.realizer.realize(request, evidence, plan, reasoning)
-            fallback_quality = self.critic.evaluate(fallback, request, evidence)
+            fallback_quality = self.critic.evaluate(fallback, request, evidence, reasoning)
             if fallback_quality.grounding.score >= quality.grounding.score:
                 draft = fallback
                 quality = fallback_quality
@@ -145,7 +144,8 @@ class ResponseIntelligenceEngine:
             purpose=request.purpose,
             provider_mode="disabled",
         )
-        return self.critic.evaluate(request.text, synthetic, evidence)
+        reasoning = self.reasoner.derive(synthetic, evidence)
+        return self.critic.evaluate(request.text, synthetic, evidence, reasoning)
 
     async def _revise_until_acceptable(
         self,
@@ -184,7 +184,7 @@ class ResponseIntelligenceEngine:
             candidate = clean_response(response.text)
             if not candidate:
                 break
-            candidate_quality = self.critic.evaluate(candidate, request, evidence)
+            candidate_quality = self.critic.evaluate(candidate, request, evidence, reasoning)
             if candidate_quality.overall >= current_quality.overall or (
                 candidate_quality.grounding.score > current_quality.grounding.score
             ):
