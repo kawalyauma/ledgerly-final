@@ -75,7 +75,7 @@ class LocalPeftProvider:
         device=next(model.parameters()).device
         encoded={key:value.to(device) for key,value in encoded.items()}
         prompt_length=int(encoded["input_ids"].shape[-1])
-        kwargs={
+        kwargs: dict[str,Any]={
             "max_new_tokens":max_tokens,
             "pad_token_id":tokenizer.pad_token_id or tokenizer.eos_token_id,
             "eos_token_id":tokenizer.eos_token_id,
