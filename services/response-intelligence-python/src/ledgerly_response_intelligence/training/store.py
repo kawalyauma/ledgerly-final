@@ -245,9 +245,12 @@ class TrainingStore:
             ).fetchall()
         return [self._row_example(row) for row in rows]
 
-    def set_status(self, example_id: str, status: str) -> TrainingExample:
+    def set_status(self, example_id: str, status: str, organization_id: str = "") -> TrainingExample:
         if status not in {"candidate","approved","rejected"}:
             raise ValueError("invalid status")
+        current=self.get_example(example_id)
+        if organization_id and current.organization_id!=organization_id:
+            raise PermissionError("Training example does not belong to this organization.")
         with self._lock, self._connect() as db:
             db.execute(
                 "UPDATE training_examples SET status=?,updated_at=? WHERE example_id=?",
@@ -483,8 +486,10 @@ class TrainingStore:
             ).fetchone()
         return self.get_adapter(str(row["adapter_id"])) if row else None
 
-    def activate_adapter(self,adapter_id:str)->AdapterRecord:
+    def activate_adapter(self,adapter_id:str,organization_id:str="")->AdapterRecord:
         adapter=self.get_adapter(adapter_id)
+        if organization_id and adapter.organization_id!=organization_id:
+            raise PermissionError("Adapter does not belong to this organization.")
         if not Path(adapter.path).exists():
             raise FileNotFoundError(f"Cannot activate a missing adapter path: {adapter.path}")
         with self._lock,self._connect() as db:
