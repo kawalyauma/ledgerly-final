@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, SecretStr, model_validator
 
 
 class Purpose(str, Enum):
@@ -135,7 +135,7 @@ class GenerationConfig(BaseModel):
     provider: str = ""
     api_style: Literal["responses", "chat-completions", "anthropic"] = "chat-completions"
     base_url: str = ""
-    api_key: str = ""
+    api_key: SecretStr = Field(default_factory=lambda: SecretStr(""), repr=False)
     model: str = ""
     timeout_seconds: float = Field(default=45.0, ge=1.0, le=120.0)
 
