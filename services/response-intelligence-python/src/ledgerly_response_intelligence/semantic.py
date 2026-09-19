@@ -51,6 +51,48 @@ def _unit_for(key: str, value: Any) -> str | None:
     return None
 
 
+def scalar_fields(
+    value: dict[str, Any],
+    *,
+    max_depth: int = 4,
+    max_fields: int = 160,
+) -> list[tuple[str, Any]]:
+    """Flatten bounded nested object scalars while leaving arrays as separate evidence sets.
+
+    Many Ledgerly tools return wrappers such as
+    {tool, module, result: {data: {...}}}. Analysing only top-level keys would lose the
+    actual result, so nested scalar fields are promoted with a readable path.
+    """
+
+    result: list[tuple[str, Any]] = []
+    seen: set[int] = set()
+
+    def visit(node: Any, path: list[str], depth: int) -> None:
+        if len(result) >= max_fields or depth > max_depth:
+            return
+        if isinstance(node, dict):
+            marker = id(node)
+            if marker in seen:
+                return
+            seen.add(marker)
+            for key, child in node.items():
+                if len(result) >= max_fields:
+                    break
+                child_path = [*path, str(key)]
+                if _scalar(child):
+                    if child not in (None, ""):
+                        result.append((" ".join(child_path), child))
+                elif isinstance(child, dict):
+                    visit(child, child_path, depth + 1)
+                # Arrays are deliberately handled by object_rows rather than flattened
+                # into opaque scalar strings.
+        elif _scalar(node) and node not in (None, ""):
+            result.append((" ".join(path), node))
+
+    visit(value, [], 0)
+    return result
+
+
 def object_rows(value: Any, *, max_depth: int = 6, max_rows: int = 2000) -> list[dict[str, Any]]:
     best: list[dict[str, Any]] = []
     seen: set[int] = set()
@@ -121,23 +163,23 @@ def normalize_semantic_payload(payload: dict[str, Any]) -> EvidenceBundle:
             label=subject,
             metadata={key: row.get(key) for key in _ID_KEYS if row.get(key) is not None},
         )
-        for key, value in row.items():
-            if not _scalar(value) or key in _ID_KEYS or key in _NAME_KEYS:
-                continue
-            if value in (None, ""):
+        for key, value in scalar_fields(row):
+            root_key = key.split(" ", 1)[0]
+            if root_key in _ID_KEYS or root_key in _NAME_KEYS:
                 continue
             fact_id = f"f_{_fingerprint([row_index, key, value, period])}"
+            readable_key = _human_key(key)
             facts.append(
                 Fact(
                     fact_id=fact_id,
                     subject=subject,
-                    predicate=_human_key(key),
+                    predicate=readable_key,
                     value=value,
                     unit=_unit_for(key, value),
                     period=period,
                     confidence=Confidence.direct,
                     sources=[row_source],
-                    tags=[_human_key(key).lower()],
+                    tags=[readable_key.lower()],
                 )
             )
 
