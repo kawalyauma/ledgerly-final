@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Activity, ArrowRight, Bot, Check, ChevronDown, CircleDot, Clock3, Command,
+  Activity, ArrowRight, Bot, Check, ChevronDown, CircleDot, ClipboardCopy, Clock3, Command,
   Database, Download, FileJson, FileSpreadsheet, FileText, Filter, Gauge,
   Layers3, Play, Search, ShieldCheck, Sparkles, Table2, TerminalSquare, ThumbsDown, ThumbsUp, X
 } from "lucide-react";
@@ -260,6 +260,7 @@ export function AgenticCommandCenterPage(){
 
           {step===1&&<div className="acc-panel">
             {criteria.length>0&&<section><div className="acc-section-title"><Search size={16}/><div><b>Query criteria</b><small>Optional filters narrow the data before Ledgerly runs the query.</small></div></div><div className="acc-fields">{criteria.map(f=><Field key={f.name} field={f} value={values[f.name]} agentKey={agentKey} onChange={v=>setValues(x=>({...x,[f.name]:v}))}/>)}</div></section>}
+            {selected.toolName.startsWith("import_")&&<ImportGuide toolName={selected.toolName}/>}
             {(selected.toolName==="__guided_analyse__"||selected.toolName==="__guided_account_for__")?
               <GuidedAnalysisBuilder mode={selected.toolName==="__guided_account_for__"?"account-for":"analyse"} agentKey={agentKey} values={values} onChange={patch=>setValues(x=>({...x,...patch}))}/>:
               inputs.length>0&&<section><div className="acc-section-title"><Database size={16}/><div><b>{selected.readOnly?"Command inputs":"Validated action details"}</b><small>{selected.readOnly?"Choose any records or required context.":"Writes are validated now and still require approval before Ledgerly changes data."}</small></div></div><div className="acc-fields">{inputs.map(f=><Field key={f.name} field={f} value={values[f.name]} agentKey={agentKey} onChange={v=>setValues(x=>({...x,[f.name]:v}))}/>)}</div></section>}
@@ -378,6 +379,26 @@ function GuidedAnalysisBuilder({mode,agentKey,values,onChange}:{mode:AnalysisMod
     </div>
 
     <label className="acc-field acc-field-wide"><span><b>{mode==="account-for"?"Outcome / explanation request":"Analysis request"} *</b><small>Write naturally. The evidence plan and final structure are generated from the request and the data actually found.</small></span><textarea rows={4} value={String(values.prompt||"")} onChange={e=>onChange({prompt:e.target.value})} placeholder={mode==="account-for"?"e.g. Account for Mukisa Abraham failing to achieve Division 1":"e.g. Analyse chronic absenteeism among P6 learners this term"}/></label>
+  </section>;
+}
+
+function ImportGuide({toolName}:{toolName:string}){
+  const[prompt,setPrompt]=useState<string|null>(null),[loading,setLoading]=useState(false),[copied,setCopied]=useState(false),[open,setOpen]=useState(true);
+  useEffect(()=>{let alive=true;setLoading(true);setPrompt(null);setCopied(false);
+    void get<{prompt:string}>(`/agentic-employees/chat-studio/import-guide?toolName=${encodeURIComponent(toolName)}`).then(data=>{if(alive)setPrompt(data.prompt);}).catch(()=>{if(alive)setPrompt(null);}).finally(()=>{if(alive)setLoading(false);});
+    return()=>{alive=false;};
+  },[toolName]);
+  async function copy(){if(!prompt)return;try{await navigator.clipboard.writeText(prompt);setCopied(true);window.setTimeout(()=>setCopied(false),2500);}catch{}}
+  return <section className="acc-import-guide">
+    <div className="acc-section-title"><ClipboardCopy size={16}/><div><b>AI prompt, schema &amp; your Ledgerly data</b><small>Copy this into any AI, then paste the JSON/CSV it returns into the Data field below.</small></div>
+      <button type="button" className="acc-import-guide-toggle" onClick={()=>setOpen(o=>!o)}>{open?"Hide":"Show"}</button>
+    </div>
+    {open&&<>
+      {loading&&<div className="acc-empty"><Activity className="spin" size={15}/>Building the prompt from your live Ledgerly data…</div>}
+      {!loading&&prompt&&<textarea readOnly rows={10} value={prompt}/>}
+      {!loading&&!prompt&&<div className="acc-empty">Could not build the prompt. You can still paste data manually below.</div>}
+      <button type="button" className="acc-import-guide-copy" disabled={!prompt} onClick={()=>void copy()}><ClipboardCopy size={14}/> {copied?"Copied!":"Copy prompt"}</button>
+    </>}
   </section>;
 }
 

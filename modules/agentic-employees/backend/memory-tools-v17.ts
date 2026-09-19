@@ -6,7 +6,7 @@ import {generateDraft,lessonPeriodContext,listRules,matrix,validateTimetable,wee
 import {syncCurriculumLoadRules} from "../../academics/backend/timetable-load-rules";
 import {reviewGeneratedDraft} from "../../academics/backend/timetable-draft-review";
 import {recoveryOptions,substituteCandidates} from "../../academics/backend/timetable-recovery-service";
-import { executeAcademicsImport,exportAcademicsImportKit } from "./academics-import";
+import { executeAcademicsImport,exportAcademicsImportKit,IMPORT_ENTITY_FOR_TOOL } from "./academics-import";
 
 const MEMORY_TOOLS:any[]=[
  {type:"function",name:"search_memory",strict:false,description:"Search this employee's saved working and institutional memory.",parameters:{type:"object",properties:{query:{type:"string"},limit:{type:"integer",minimum:1,maximum:50}},additionalProperties:false}},
@@ -29,7 +29,6 @@ const IMPORT_TOOLS:any[]=[
  {type:"function",name:"import_teacher_assignments",strict:false,description:"Bulk-assign teachers to teach a subject in a class from pasted JSON or CSV.",parameters:{type:"object",properties:{data:{type:"string",description:"JSON array or CSV text of teacher assignments."}},required:["data"],additionalProperties:false}},
  {type:"function",name:"import_lesson_plans",strict:false,description:"Bulk-create lesson plans from pasted JSON or CSV.",parameters:{type:"object",properties:{data:{type:"string",description:"JSON array or CSV text of lesson plans."}},required:["data"],additionalProperties:false}},
 ];
-const IMPORT_ENTITY_FOR_TOOL:Record<string,string>={import_timetable_entries:"timetable_entry",import_scheme_items:"scheme_item",import_subject_assignments:"subject_assignment",import_teacher_assignments:"teacher_assignment",import_lesson_plans:"lesson_plan"};
 const timetableAgent=(key:string)=>key==="dos"||key==="headteacher";
 const timetableAllowed=(agent:any,name:string,requested?:string[]|null)=>timetableAgent(agent.key)&&(!requested||requested.includes(name));
 

@@ -1,5 +1,5 @@
 import { forwardRef,useEffect,useImperativeHandle,useMemo,useRef,useState } from "react";
-import { CheckCircle2,ChevronRight,Command,LoaderCircle,Search,ShieldCheck,X } from "lucide-react";
+import { CheckCircle2,ChevronRight,ClipboardCopy,Command,LoaderCircle,Search,ShieldCheck,X } from "lucide-react";
 import { errorText,get,post } from "../../../web/api";
 
 type FieldControl="text"|"textarea"|"date"|"number"|"boolean"|"enum"|"reference"|"json"|"array";
@@ -78,6 +78,7 @@ export const QuickCommandPalette=forwardRef<QuickCommandPaletteHandle,Props>(fun
       <div className="acs-command-form">
         <div className="acs-command-form-head"><div><span><Command size={15}/> QUICK COMMAND</span><h3>/{chosenAlias||selected.command}</h3><p>{selected.description}</p></div><button onClick={closeForm} disabled={submitting} aria-label="Close"><X size={18}/></button></div>
         <div className="acs-command-form-meta"><span><b>Module</b>{selected.module}</span><span><b>Tool</b>{selected.toolName.replace(/_/g," ")}</span><span><b>Safety</b>{selected.readOnly?"Runs read-only":"Review required before write"}</span><span><b>Form</b>{selected.schemaCoverage}</span></div>
+        {selected.toolName.startsWith("import_")&&<ImportPromptPanel toolName={selected.toolName}/>}
         <div className="acs-command-fields">{selected.fields.map(field=><CommandFieldEditor key={field.name} agentKey={agentKey} field={field} value={values[field.name]} error={errors[field.name]} disabled={submitting} onChange={next=>{setValues(current=>({...current,[field.name]:next}));if(errors[field.name])setErrors(current=>({...current,[field.name]:""}));}}/>)}</div>
         <div className="acs-command-form-foot"><div><ShieldCheck size={14}/><span>{selected.readOnly?"This command reads permitted Ledgerly data directly.":"Ledgerly validates the form again on the server, resolves selected records to canonical IDs, and creates an approval card before any write."}</span></div><button className="secondary" onClick={closeForm} disabled={submitting}>Cancel</button><button className="primary" onClick={()=>void submit()} disabled={submitting}>{submitting?<LoaderCircle className="spin" size={15}/>:<CheckCircle2 size={15}/>} {selected.readOnly?"Run command":"Validate & prepare"}</button></div>
       </div>
@@ -103,5 +104,29 @@ function ReferenceTextbox({id,agentKey,field,value,disabled,onChange}:{id:string
   useEffect(()=>{if(!open&&value&&!query)setQuery(value);},[value,open,query]);
   return <div className="acs-reference-box"><div className="acs-reference-input"><Search size={14}/><input id={id} value={query} disabled={disabled} autoComplete="off" placeholder="Search by name, code or number…" onFocus={()=>setOpen(true)} onChange={e=>{setQuery(e.target.value);onChange(e.target.value);setOpen(true);}}/></div>
     {open&&<div className="acs-reference-results">{loading&&<div className="acs-reference-state"><LoaderCircle className="spin" size={13}/>Searching…</div>}{!loading&&!options.length&&<div className="acs-reference-state">Type to search Ledgerly records</div>}{options.map(option=><button type="button" key={option.value} onMouseDown={e=>e.preventDefault()} onClick={()=>{setQuery(option.label);onChange(option.value);setOpen(false);}}><span><b>{option.label}</b>{option.subtitle&&<small>{option.subtitle}</small>}</span><CheckCircle2 size={13}/></button>)}</div>}
+  </div>;
+}
+
+function ImportPromptPanel({toolName}:{toolName:string}){
+  const[prompt,setPrompt]=useState<string|null>(null),[loading,setLoading]=useState(false),[copied,setCopied]=useState(false),[open,setOpen]=useState(true);
+  useEffect(()=>{let alive=true;setLoading(true);setPrompt(null);setCopied(false);
+    void get<{prompt:string}>(`/agentic-employees/chat-studio/import-guide?toolName=${encodeURIComponent(toolName)}`).then(data=>{if(alive)setPrompt(data.prompt);}).catch(()=>{if(alive)setPrompt(null);}).finally(()=>{if(alive)setLoading(false);});
+    return()=>{alive=false;};
+  },[toolName]);
+  async function copy(){if(!prompt)return;try{await navigator.clipboard.writeText(prompt);setCopied(true);window.setTimeout(()=>setCopied(false),2500);}catch{}}
+  return <div className="acs-import-guide">
+    <div className="acs-import-guide-head">
+      <span><ClipboardCopy size={13}/> AI prompt, schema &amp; your Ledgerly data</span>
+      <button type="button" onClick={()=>setOpen(o=>!o)}>{open?"Hide":"Show"}</button>
+    </div>
+    {open&&<>
+      {loading&&<div className="acs-command-empty"><LoaderCircle className="spin" size={14}/>Building the prompt from your live Ledgerly data…</div>}
+      {!loading&&prompt&&<textarea readOnly rows={9} value={prompt}/>}
+      {!loading&&!prompt&&<div className="acs-command-empty">Could not build the prompt. You can still paste data manually below.</div>}
+      <div className="acs-import-guide-foot">
+        <small>Copy this into any AI, then paste the JSON/CSV it returns into the field below.</small>
+        <button type="button" className="secondary" disabled={!prompt} onClick={()=>void copy()}><ClipboardCopy size={13}/> {copied?"Copied!":"Copy prompt"}</button>
+      </div>
+    </>}
   </div>;
 }

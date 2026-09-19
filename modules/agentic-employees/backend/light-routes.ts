@@ -10,6 +10,7 @@ import { buildLightToolRegistry } from "./light-tool-registry";
 import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOptions } from "./quick-commands";
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge";
 import { searchAnalysisEntities } from "./analysis-entity-resolver";
+import { buildImportPromptText,IMPORT_ENTITY_FOR_TOOL } from "./academics-import";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 
@@ -54,6 +55,13 @@ agenticLightRoutes.get("/chat-studio/analysis-guidance",requireScope("school:rea
  const registry=await buildLightToolRegistry(c.env,p,agent),capabilityText=registry.tools.filter(t=>t.readOnly).map(t=>t.name+" "+t.description+" "+t.module+" "+t.group+" "+t.aliases.join(" ")).join(" ");
  const topics=suggestAnalysisTopics(mode,q,capabilityText).slice(0,40);
  return c.json({data:{mode,topics,categories:[...new Set(topics.map(t=>t.category))],entityTypes:[...new Set(topics.flatMap(t=>t.entityTypes))],stats:{knowledgeTopics:topics.length,readCapabilities:registry.stats.reads}}});
+});
+
+agenticLightRoutes.get("/chat-studio/import-guide",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),toolName=String(c.req.query("toolName")||""),entityKey=IMPORT_ENTITY_FOR_TOOL[toolName];
+ if(!entityKey)throw new AppError(404,"COMMAND_NOT_FOUND","Unknown import command.");
+ const prompt=await buildImportPromptText(c.env.FINANCE_DB,p.organizationId,entityKey);
+ return c.json({data:{prompt}});
 });
 
 agenticLightRoutes.get("/chat-studio/entity-options",requireScope("school:read"),async c=>{

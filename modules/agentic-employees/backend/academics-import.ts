@@ -7,6 +7,7 @@ import { approveAndExecuteAction } from "./executor";
 
 const MAX_ROWS = 300;
 const WEEKDAYS: Record<string, number> = { monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 7 };
+export const IMPORT_ENTITY_FOR_TOOL: Record<string, string> = { import_timetable_entries: "timetable_entry", import_scheme_items: "scheme_item", import_subject_assignments: "subject_assignment", import_teacher_assignments: "teacher_assignment", import_lesson_plans: "lesson_plan" };
 
 type ImportField = {
   name: string;
@@ -196,8 +197,28 @@ function coerceField(field: ImportField, raw: unknown): { value: unknown; issue?
   return { value: String(raw) };
 }
 
+function looksLikeId(value: unknown) { return typeof value === "string" && /^[a-z]{2,18}_[A-Za-z0-9-]{4,}$/i.test(value); }
+
+// Term codes/names (e.g. "T1") repeat across academic years, so resolving termId
+// in isolation is ambiguous whenever a school has more than one year set up.
+// When a row also carries academicYearId, resolve the year first and scope the
+// term lookup to it instead of leaving this to the generic, unscoped resolver.
+async function resolveScopedTermId(db: D1Database, organizationId: string, academicYearRaw: unknown, termRaw: unknown): Promise<{ termId?: string; issue?: string } | null> {
+  const termText = String(termRaw ?? "").trim();
+  if (!termText || looksLikeId(termText)) return null;
+  const yearResolved = await resolveLightReferences(db, organizationId, { academicYearId: academicYearRaw });
+  const academicYearId = (yearResolved.value as any)?.academicYearId;
+  if (!looksLikeId(academicYearId)) return null;
+  const rows = await db.prepare(`SELECT id FROM school_terms WHERE organization_id=? AND academic_year_id=? AND (lower(code)=lower(?) OR lower(name)=lower(?)) LIMIT 3`).bind(organizationId, academicYearId, termText, termText).all<{ id: string }>();
+  const ids = [...new Set(rows.results.map((r) => r.id))];
+  if (ids.length === 1) return { termId: ids[0] };
+  if (ids.length > 1) return { issue: `termId "${termText}" matches multiple terms within that academic year.` };
+  return { issue: `Could not resolve termId "${termText}" within the selected academic year.` };
+}
+
 async function prepareRows(db: D1Database, organizationId: string, entity: ImportEntity, rawRows: Record<string, unknown>[]) {
   if (rawRows.length > MAX_ROWS) throw new AppError(422, "VALIDATION_ERROR", `Import one batch at a time (max ${MAX_ROWS} rows; got ${rawRows.length}).`);
+  const hasScopedTerm = entity.fields.some((f) => f.name === "termId") && entity.fields.some((f) => f.name === "academicYearId");
   const prepared: { row: Record<string, unknown>; issues: string[] }[] = [];
   for (const raw of rawRows) {
     const typed: Record<string, unknown> = {}, issues: string[] = [];
@@ -207,6 +228,11 @@ async function prepareRows(db: D1Database, organizationId: string, entity: Impor
       if (issue) issues.push(issue);
       if (field.required && (value === undefined || value === null || value === "")) issues.push(`${field.name} is required`);
       if (value !== undefined) typed[field.name] = value;
+    }
+    if (hasScopedTerm && typed.termId !== undefined) {
+      const scoped = await resolveScopedTermId(db, organizationId, typed.academicYearId, typed.termId);
+      if (scoped?.termId) typed.termId = scoped.termId;
+      else if (scoped?.issue) { issues.push(scoped.issue); delete typed.termId; }
     }
     const resolved = await resolveLightReferences(db, organizationId, typed);
     issues.push(...resolved.issues);
@@ -252,7 +278,7 @@ async function listRows(db: D1Database, organizationId: string, table: string, c
   return (await db.prepare(`SELECT ${columns} FROM ${table} WHERE organization_id=?${extra} ORDER BY 2 LIMIT ${limit}`).bind(organizationId).all<any>()).results;
 }
 
-export async function exportAcademicsImportKit(db: D1Database, organizationId: string) {
+async function gatherReferenceData(db: D1Database, organizationId: string) {
   const [classLevels, classes, streams, subjects, staff, academicYears, terms, timetables, schemes] = await Promise.all([
     listRows(db, organizationId, "school_class_levels", "id,name,code", " AND active=true"),
     listRows(db, organizationId, "school_classes", "id,name,code", " AND active=true"),
@@ -264,7 +290,7 @@ export async function exportAcademicsImportKit(db: D1Database, organizationId: s
     listRows(db, organizationId, "school_academic_timetables", "id,name,academic_year_id"),
     listRows(db, organizationId, "school_schemes_of_work", "id,title,class_id"),
   ]);
-  const referenceData = {
+  return {
     classLevels: classLevels.map((r: any) => ({ id: r.id, name: r.name, code: r.code })),
     classes: classes.map((r: any) => ({ id: r.id, name: r.name, code: r.code })),
     streams: streams.map((r: any) => ({ id: r.id, name: r.name, code: r.code })),
@@ -275,6 +301,10 @@ export async function exportAcademicsImportKit(db: D1Database, organizationId: s
     timetables: timetables.map((r: any) => ({ id: r.id, name: r.name, academicYearId: r.academic_year_id })),
     schemesOfWork: schemes.map((r: any) => ({ id: r.id, title: r.title, classId: r.class_id })),
   };
+}
+
+export async function exportAcademicsImportKit(db: D1Database, organizationId: string) {
+  const referenceData = await gatherReferenceData(db, organizationId);
   const entities = Object.fromEntries(Object.values(IMPORT_ENTITIES).map((e) => [e.key, {
     importCommand: `/import ${e.label.toLowerCase()}`,
     requiresContainer: e.containerField ? { field: e.containerField.name, notes: e.containerField.notes } : undefined,
@@ -287,4 +317,46 @@ export async function exportAcademicsImportKit(db: D1Database, organizationId: s
     entities,
     instructions: "Give referenceData and the relevant entity's prompt+fields+example to your AI of choice, ask it to return ONLY a JSON array matching the fields (use names/codes from referenceData, not made-up IDs), then paste that array into the matching /import command's Data field (or upload it as CSV with the same column names). Names are resolved to the real Ledgerly record automatically; unresolvable names are reported before anything is written.",
   };
+}
+
+function listLine(label: string, rows: { name?: string; title?: string; code?: string; staffNumber?: string; id: string }[], max = 60) {
+  if (!rows.length) return `${label}: (none yet — create some first, or omit this field)`;
+  const shown = rows.slice(0, max).map((r) => { const name = r.name || r.title || "?", tag = r.code || r.staffNumber; return tag ? `${name} (${tag})` : name; });
+  const more = rows.length > max ? `, …and ${rows.length - max} more` : "";
+  return `${label}: ${shown.join(", ")}${more}`;
+}
+
+export async function buildImportPromptText(db: D1Database, organizationId: string, entityKey: string) {
+  const entity = IMPORT_ENTITIES[entityKey];
+  if (!entity) throw new AppError(404, "COMMAND_NOT_FOUND", "Unknown import type.");
+  const ref = await gatherReferenceData(db, organizationId);
+  const fieldLines = entity.fields.map((f) => `- ${f.name}: ${f.type || "string"}${f.required ? " (required)" : ""}${f.default !== undefined ? ` (default ${JSON.stringify(f.default)})` : ""}`).join("\n");
+  const containerLine = entity.containerField ? `\nCONTAINER: this import also needs a "${entity.containerField.name}" (${entity.containerField.notes}) — pick one from the list below and paste it into that field in Ledgerly separately from the data you generate here.\n` : "";
+  const dataLines = [
+    listLine("Classes", ref.classes),
+    listLine("Class levels", ref.classLevels),
+    listLine("Streams", ref.streams),
+    listLine("Subjects", ref.subjects),
+    listLine("Teachers", ref.teachers.map((t) => ({ name: t.name, staffNumber: t.staffNumber, id: t.id }))),
+    listLine("Academic years", ref.academicYears),
+    listLine("Terms", ref.terms),
+  ];
+  if (entity.containerField?.name === "timetableId") dataLines.push(listLine("Timetables (id in parentheses)", ref.timetables.map((t) => ({ name: t.name, code: t.id, id: t.id }))));
+  if (entity.containerField?.name === "schemeId") dataLines.push(listLine("Schemes of work (id in parentheses)", ref.schemesOfWork.map((s) => ({ name: s.title, code: s.id, id: s.id }))));
+  return [
+    `You are helping generate data to import into Ledgerly (a school management system) as "${entity.label}".`,
+    "",
+    `TASK: ${entity.prompt}`,
+    containerLine.trim(),
+    "FIELDS (name: type, required?):",
+    fieldLines,
+    "",
+    "EXAMPLE ROW:",
+    JSON.stringify(entity.example, null, 2),
+    "",
+    "AVAILABLE LEDGERLY DATA — use these exact names/codes; never invent an ID or a name that isn't listed:",
+    ...dataLines,
+    "",
+    `Return ONLY a JSON array of objects matching the fields above (no explanation, no markdown fences). Produce as many rows as make sense for the request; each row must use names from the data above.`,
+  ].filter(Boolean).join("\n");
 }
