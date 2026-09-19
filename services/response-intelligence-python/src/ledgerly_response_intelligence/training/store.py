@@ -279,6 +279,7 @@ class TrainingStore:
             )
             example_id = corrected.example_id
             if item.trusted_reviewer:
+                self.set_status(corrected.example_id,"approved")
                 self.set_status(existing.example_id,"rejected")
         elif item.approve_original and existing and item.trusted_reviewer:
             self.set_status(existing.example_id,"approved")
@@ -320,7 +321,7 @@ class TrainingStore:
                 f"""SELECT
                     SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END) positive,
                     SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END) negative,
-                    SUM(CASE WHEN correction_text<>'' THEN 1 ELSE 0 END) corrections
+                    SUM(CASE WHEN correction_text<>'' AND trusted_reviewer=1 THEN 1 ELSE 0 END) corrections
                     FROM response_feedback WHERE {org_clause}""",args
             ).fetchone()
             runs = db.execute(f"SELECT COUNT(*) n FROM training_runs WHERE {org_clause}",args).fetchone()
@@ -422,6 +423,8 @@ class TrainingStore:
         return [self.get_training_run(str(row["run_id"])) for row in rows]
 
     def register_adapter(self,item:AdapterRegister)->AdapterRecord:
+        if item.activate and not Path(item.path).exists():
+            raise FileNotFoundError(f"Cannot activate a missing adapter path: {item.path}")
         adapter_id="adp_"+uuid.uuid4().hex
         now=_now()
         with self._lock,self._connect() as db:
@@ -470,6 +473,8 @@ class TrainingStore:
 
     def activate_adapter(self,adapter_id:str)->AdapterRecord:
         adapter=self.get_adapter(adapter_id)
+        if not Path(adapter.path).exists():
+            raise FileNotFoundError(f"Cannot activate a missing adapter path: {adapter.path}")
         with self._lock,self._connect() as db:
             db.execute("UPDATE model_adapters SET active=0 WHERE organization_id=?",(adapter.organization_id,))
             db.execute("UPDATE model_adapters SET active=1 WHERE adapter_id=?",(adapter_id,))
