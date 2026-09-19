@@ -21,6 +21,14 @@ export type PythonResponseRequest={
   };
   detail?:"brief"|"standard"|"deep";
   providerMode?:"auto"|"required"|"disabled";
+  generation?:{
+    provider?:string;
+    apiStyle:"responses"|"chat-completions"|"anthropic";
+    baseUrl:string;
+    apiKey?:string;
+    model:string;
+    timeoutSeconds?:number;
+  };
   maxWords?:number;
   toolPolicy?:string[];
 };
@@ -67,6 +75,14 @@ export async function realizeWithPythonResponseIntelligence(env:Env,input:Python
         },
         detail:input.detail||"standard",
         provider_mode:input.providerMode||"auto",
+        generation:input.generation?{
+          provider:input.generation.provider||"",
+          api_style:input.generation.apiStyle,
+          base_url:input.generation.baseUrl,
+          api_key:input.generation.apiKey||"",
+          model:input.generation.model,
+          timeout_seconds:input.generation.timeoutSeconds||45,
+        }:null,
         max_words:input.maxWords||1200,
         tool_policy:input.toolPolicy||[],
       }),
