@@ -22,7 +22,7 @@ from .models import (
 )
 from .semantic import merge_evidence
 from .training.datasets import DatasetBuilder
-from .training.models import DatasetExportRequest, DatasetExportResult, FeedbackCreate, FeedbackRecord, StyleProfile, TrainingExample, TrainingExampleCreate, TrainingStats
+from .training.models import AdapterRecord, AdapterRegister, DatasetExportRequest, DatasetExportResult, FeedbackCreate, FeedbackRecord, StyleProfile, TrainingExample, TrainingExampleCreate, TrainingRunRecord, TrainingStats
 
 
 logging.basicConfig(level=get_settings().log_level)
@@ -244,3 +244,47 @@ async def export_training_dataset(
         get_settings().training_privacy_mode,
     )
     return builder.export(item)
+
+
+@app.get("/v1/training/runs", response_model=list[TrainingRunRecord], dependencies=[Depends(authorize)])
+async def training_runs(
+    organization_id: str = "",
+    limit: int = 100,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[TrainingRunRecord]:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.list_training_runs(organization_id,limit)
+
+
+@app.get("/v1/training/adapters", response_model=list[AdapterRecord], dependencies=[Depends(authorize)])
+async def training_adapters(
+    organization_id: str = "",
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[AdapterRecord]:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.list_adapters(organization_id)
+
+
+@app.post("/v1/training/adapters", response_model=AdapterRecord, dependencies=[Depends(authorize)])
+async def register_training_adapter(
+    item: AdapterRegister,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> AdapterRecord:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.register_adapter(item)
+
+
+@app.post("/v1/training/adapters/{adapter_id}/activate", response_model=AdapterRecord, dependencies=[Depends(authorize)])
+async def activate_training_adapter(
+    adapter_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> AdapterRecord:
+    require_training(engine)
+    assert engine.training_store is not None
+    try:
+        return engine.training_store.activate_adapter(adapter_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Adapter not found.") from exc
