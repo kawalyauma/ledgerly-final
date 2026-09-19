@@ -30,8 +30,9 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
     try:
         from datasets import load_dataset
         from peft import LoraConfig
+        import torch
         from transformers import BitsAndBytesConfig
-        from trl import SFTConfig,SFTTrainer
+        from trl import DPOConfig,DPOTrainer,SFTConfig,SFTTrainer
     except ImportError as exc:
         raise TrainingDependencyError(
             'Install training extras first: pip install -e ".[training]" '
@@ -55,25 +56,38 @@ def train_adapter(config:FineTuneConfig)->TrainingOutcome:
     if config.mode=="qlora":
         quantization=BitsAndBytesConfig(
             load_in_4bit=True,bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype="bfloat16",
+            bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype=torch.bfloat16,
         )
 
-    args=SFTConfig(
-        output_dir=str(output),num_train_epochs=config.epochs,learning_rate=config.learning_rate,
-        per_device_train_batch_size=config.batch_size,
-        gradient_accumulation_steps=config.gradient_accumulation_steps,
-        max_length=config.max_length,logging_steps=5,save_strategy="epoch",
-        report_to="none",seed=config.seed,gradient_checkpointing=True,
-    )
-    trainer=SFTTrainer(
-        model=config.base_model,args=args,train_dataset=dataset,peft_config=lora,
-        quantization_config=quantization,
-    )
+    if config.objective=="dpo":
+        args=DPOConfig(
+            output_dir=str(output),num_train_epochs=config.epochs,learning_rate=config.learning_rate,
+            per_device_train_batch_size=config.batch_size,
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
+            max_length=config.max_length,beta=config.dpo_beta,logging_steps=5,save_strategy="epoch",
+            report_to="none",seed=config.seed,gradient_checkpointing=True,
+        )
+        trainer=DPOTrainer(
+            model=config.base_model,args=args,train_dataset=dataset,peft_config=lora,
+            quantization_config=quantization,
+        )
+    else:
+        args=SFTConfig(
+            output_dir=str(output),num_train_epochs=config.epochs,learning_rate=config.learning_rate,
+            per_device_train_batch_size=config.batch_size,
+            gradient_accumulation_steps=config.gradient_accumulation_steps,
+            max_length=config.max_length,logging_steps=5,save_strategy="epoch",
+            report_to="none",seed=config.seed,gradient_checkpointing=True,
+        )
+        trainer=SFTTrainer(
+            model=config.base_model,args=args,train_dataset=dataset,peft_config=lora,
+            quantization_config=quantization,
+        )
     result=trainer.train()
     trainer.save_model(str(output))
     metrics={str(key):value for key,value in dict(result.metrics).items()}
     (output/"ledgerly-training.json").write_text(json.dumps({
-        "base_model":config.base_model,"mode":config.mode,"examples":len(dataset),
+        "base_model":config.base_model,"objective":config.objective,"mode":config.mode,"examples":len(dataset),
         "metrics":metrics,"config":config.model_dump(mode="json"),
     },ensure_ascii=False,indent=2),encoding="utf-8")
     return TrainingOutcome(
