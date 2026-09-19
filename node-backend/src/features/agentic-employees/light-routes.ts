@@ -9,7 +9,7 @@ import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOption
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
 import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
-import { activatePythonAdapter,checkPythonResponseIntelligence,deactivatePythonAdapters,exportPythonTrainingDataset,getPythonAdapters,getPythonLearningStatus,getPythonStyleProfile,getPythonTrainingExamples,getPythonTrainingRuns,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
+import { activatePythonAdapter,checkPythonResponseIntelligence,createPythonKnowledgeSource,deactivatePythonAdapters,deletePythonKnowledgeSource,exportPythonTrainingDataset,getPythonAdapters,getPythonKnowledgeSources,getPythonKnowledgeStats,getPythonLearningStatus,getPythonStyleProfile,getPythonTrainingExamples,getPythonTrainingRuns,searchPythonKnowledge,seedPythonKnowledgeStarterPack,setPythonKnowledgeSourceApproval,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -63,6 +63,71 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
    trustedReviewer:p.role==="owner"||p.role==="admin",
  });
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/knowledge-center",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can manage institutional AI knowledge");
+ const [service,stats,sources]=await Promise.all([
+   checkPythonResponseIntelligence(c.env),
+   getPythonKnowledgeStats(c.env,p.organizationId),
+   getPythonKnowledgeSources(c.env,p.organizationId,false,300),
+ ]);
+ if(!stats)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data:{service,stats,sources:sources||[]}});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-sources",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can add institutional AI knowledge");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({
+   title:z.string().trim().min(2).max(500),
+   sourceType:z.enum(["manual","policy","circular","document","web","research","other"]).default("document"),
+   content:z.string().trim().min(10).max(2_000_000),
+   url:z.string().max(4000).optional(),
+   author:z.string().max(500).optional(),
+   publishedAt:z.string().max(100).optional(),
+   approved:z.boolean().optional(),
+   tags:z.array(z.string().max(100)).max(30).optional(),
+ });
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR",parsed.error.issues[0]?.message||"Invalid knowledge source");
+ const data=await createPythonKnowledgeSource(c.env,{
+   organizationId:p.organizationId,title:parsed.data.title,sourceType:parsed.data.sourceType,
+   content:parsed.data.content,url:parsed.data.url,author:parsed.data.author,publishedAt:parsed.data.publishedAt,
+   approved:parsed.data.approved,tags:parsed.data.tags,
+ });
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-sources/:id/:status",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can approve institutional AI knowledge");
+ const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
+ const data=await setPythonKnowledgeSourceApproval(c.env,p.organizationId,c.req.param("id"),status==="approve");
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.delete("/chat-studio/knowledge-sources/:id",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can delete institutional AI knowledge");
+ const data=await deletePythonKnowledgeSource(c.env,p.organizationId,c.req.param("id"));
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-seed",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can seed institutional AI knowledge");
+ const data=await seedPythonKnowledgeStarterPack(c.env,p.organizationId);
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data:{sources:data,count:data.length}});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-search",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({query:z.string().trim().min(2).max(5000),limit:z.number().int().min(1).max(30).optional()});
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Search query is required");
+ const data=await searchPythonKnowledge(c.env,{organizationId:p.organizationId,query:parsed.data.query,limit:parsed.data.limit,includeGlobal:true});
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
  return c.json({data});
 });
 
