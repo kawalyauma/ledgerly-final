@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ledgerly-response-intelligence"
-version = "1.0.0"
+version = "1.1.0"
 description = "Professional evidence-grounded natural-language reasoning and response realization service for Ledgerly."
 requires-python = ">=3.11"
 dependencies = [
@@ -54,3 +54,8 @@ target-version = "py311"
 python_version = "3.11"
 strict = true
 warn_unused_ignores = true
+
+
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "datasets", "datasets.*", "peft", "peft.*", "transformers", "transformers.*", "trl", "trl.*", "bitsandbytes", "bitsandbytes.*"]
+ignore_missing_imports = true
