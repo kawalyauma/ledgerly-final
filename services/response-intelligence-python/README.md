@@ -228,6 +228,10 @@ The response contains:
 
 Returns the discourse plan without generating a final response.
 
+### POST /v1/reason
+
+Returns deterministic, fact-linked reasoning insights without generating prose. This is useful for debugging, audit views and future external-knowledge retrieval.
+
 ### POST /v1/evaluate
 
 Scores an existing response against verified evidence.
