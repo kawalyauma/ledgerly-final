@@ -3,6 +3,9 @@ import { z } from "zod";
 const schema=z.object({
   LEDGERLY_HOST:z.string().default("127.0.0.1"),
   LEDGERLY_PORT:z.coerce.number().int().min(1).max(65535).default(8080),
+  // Delegated Agentic actions must use the canonical Node API, not the modular app.
+  // Docker Compose exposes the Node API to sibling containers as "api".
+  LEDGERLY_CORE_API_URL:z.string().url().default("http://api:8080"),
   DATABASE_URL:z.string().min(1),
   LEDGERLY_STORAGE_DIR:z.string().default("./data/objects"),
   ENVIRONMENT:z.string().default("production"),
