@@ -59,12 +59,14 @@ agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:re
    organizationId:p.organizationId,responseFingerprint:parsed.data.responseFingerprint,rating:parsed.data.rating,
    comment:parsed.data.comment,correctionText:parsed.data.correctionText,entityLabel:parsed.data.entityLabel,
    approveOriginal:parsed.data.approveOriginal,
+   trustedReviewer:p.role==="owner"||p.role==="admin",
  });
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
  return c.json({data});
 });
 
 agenticLightRoutes.post("/chat-studio/training-examples/:id/:status",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can approve training material");
  const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
  const data=await setPythonTrainingExampleStatus(c.env,c.req.param("id"),status);
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
