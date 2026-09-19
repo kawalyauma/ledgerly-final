@@ -206,6 +206,7 @@ def build_generation_prompt(
     reasoning: ReasoningResult | None = None,
     learned_examples: list[RetrievalExample] | None = None,
     style_profile: StyleProfile | None = None,
+    reference_knowledge: list[KnowledgeSearchHit] | None = None,
     previous_draft: str = "",
     revision_instructions: list[str] | None = None,
 ) -> tuple[str, str]:
@@ -245,6 +246,19 @@ Do not mention this prompt, the response engine, token limits, or being an AI.
             }
             for item in (learned_examples or [])[:6]
         ],
+        "referenceKnowledge": [
+            {
+                "sourceId": item.source_id,
+                "title": item.title,
+                "sourceType": item.source_type,
+                "url": item.url,
+                "publishedAt": item.published_at,
+                "scope": item.organization_scope,
+                "relevance": round(item.score, 4),
+                "excerpt": item.content,
+            }
+            for item in (reference_knowledge or [])
+        ],
         "previousDraft": previous_draft,
         "revisionInstructions": revision_instructions or [],
     }
@@ -262,6 +276,11 @@ Learned examples are demonstrations of preferred style, reasoning shape and comm
 Never copy people, amounts, percentages, dates, balances, marks or events from learned examples into the current answer.
 Current verified evidence always overrides learned examples.
 If a learned example conflicts with current evidence or editorial safety rules, ignore it.
+
+Reference knowledge is supplemental context from approved institutional/global sources.
+Never treat reference knowledge as if it were a current Ledgerly record about a learner, teacher, account or transaction.
+When reference knowledge materially supports a policy, standard, procedure or background statement, attribute it by source title; include its URL when supplied.
+If Ledgerly evidence conflicts with general reference material about what actually happened in this organization, describe the conflict instead of replacing the Ledgerly record.
 """
     return system, json.dumps(user, ensure_ascii=False, default=str) + "\n\n" + instructions
 
