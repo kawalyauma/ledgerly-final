@@ -51,6 +51,16 @@ const ACCOUNT_FOR_COMMAND:CommandDescriptor={
   outputFormats:["table","json","csv","xlsx","pdf"],
 };
 
+const RESEARCH_COMMAND:CommandDescriptor={
+  toolName:"__web_research__",
+  command:"research",
+  aliases:["web research","search web","search the web","online research","external research","public sources","latest public information"],
+  description:"Research current or external public information using the configured web-search provider, with source attribution and Ledgerly evidence kept separate.",
+  module:"agentic",group:"external research",kind:"analysis",source:"native",readOnly:true,schemaCoverage:"live-web-reference-research",
+  fields:[{name:"prompt",requestKey:"prompt",label:"What should Ledgerly research?",control:"textarea",required:true,location:"meta",notes:"Ask for external or current public information. Web research is used only when the server has an enabled search provider."}],
+  outputFormats:["table","json","pdf"],
+};
+
 const COMPOSITE_COMMAND:CommandDescriptor={
   toolName:"__composite_report__",
   command:"composite report",
@@ -108,7 +118,7 @@ export function AgenticCommandCenterPage(){
   const kinds=useMemo(()=>[...new Set((catalog?.commands||[]).map(c=>c.kind))].sort(),[catalog]);
   const matches=useMemo(()=>{
     const needle=search.trim().replace(/^\//,"").toLowerCase();
-    return [ANALYSE_COMMAND,ACCOUNT_FOR_COMMAND,COMPOSITE_COMMAND,...(catalog?.commands||[])]
+    return [ANALYSE_COMMAND,ACCOUNT_FOR_COMMAND,RESEARCH_COMMAND,COMPOSITE_COMMAND,...(catalog?.commands||[])]
       .filter(c=>moduleFilter==="all"||c.module===moduleFilter)
       .filter(c=>kindFilter==="all"||c.kind===kindFilter)
       .map(c=>({c,score:scoreCommand(c,needle)}))
@@ -122,6 +132,10 @@ export function AgenticCommandCenterPage(){
     const defaults:Record<string,unknown>={};
     for(const field of command.fields)if(field.defaultValue!==undefined)defaults[field.name]=field.defaultValue==="$today"?new Date().toISOString().slice(0,10):field.defaultValue;
     if(command.toolName==="__composite_report__")defaults.prompt=search.trim().replace(/^\//,"");
+    if(command.toolName==="__web_research__"){
+      const raw=search.trim().replace(/^\//,"");
+      defaults.prompt=raw.replace(/^research\s*/i,"");
+    }
     if(command.toolName==="__guided_analyse__"||command.toolName==="__guided_account_for__"){
       const raw=search.trim().replace(/^\//,"");
       defaults.prompt=raw.replace(command.toolName==="__guided_analyse__"?/^analy[sz]e\s*/i:/^account\s+for\s*/i,"");
@@ -166,6 +180,24 @@ export function AgenticCommandCenterPage(){
         setResult(composite);setPrepared(false);setStep(3);
         setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:false,result:composite},...h].slice(0,20));
         if(["csv","xlsx","pdf"].includes(format)&&!composite?.needsCriteria)exportResult(composite,format,selected.command);
+      }else if(selected.toolName==="__web_research__"){
+        const prompt=String(values.prompt||"").trim();
+        const response=await post<any>("/agentic-employees/conversations/"+conversation.id+"/light-messages",{content:"/research "+prompt});
+        const research={
+          humanResponse:response.content,
+          model:response.model,
+          toolEvents:response.toolEvents||[],
+          routing:response.routing||{},
+          responseMeta:{
+            fingerprint:response.routing?.responseFingerprint,
+            trainingExampleId:response.routing?.trainingExampleId,
+            responseEngine:response.routing?.responseEngine,
+            responseQuality:response.routing?.responseQuality,
+          },
+        };
+        setResult(research);setPrepared(false);setStep(3);
+        setHistory(h=>[{id:String(Date.now()),command:selected.command,agent:agentKey,format,when:new Date().toISOString(),prepared:false,result:research},...h].slice(0,20));
+        if(format==="pdf")exportResult(research,format,selected.command);
       }else{
         const response=await post<RunResponse>("/agentic-employees/chat-studio/conversations/"+conversation.id+"/quick-command",{
           toolName:selected.toolName,values,commandText:"/"+selected.command,outputFormat:format
@@ -275,7 +307,7 @@ function Welcome({catalog}:{catalog:CommandCatalog|null}){return <div className=
   <span className="acc-welcome-icon"><Command size={30}/></span>
   <p>COMMAND-DRIVEN OPERATIONS</p><h2>Start with <code>/</code> and tell Ledgerly what you want to do.</h2>
   <span>This is not a raw developer shell. It discovers permitted business capabilities, asks for safe criteria and inputs, validates references, lets you choose the output, and routes writes through approval.</span>
-  <div className="acc-example-grid">{["/analyse","/account for","/composite report","/create student","/report fee balances","/find staff attendance"].map(x=><code key={x}>{x}</code>)}</div>
+  <div className="acc-example-grid">{["/analyse","/account for","/research","/composite report","/create student","/report fee balances","/find staff attendance"].map(x=><code key={x}>{x}</code>)}</div>
   <div className="acc-welcome-stats"><b>{catalog?.stats.toolCount??"Hundreds of"} live tools</b><span>expanded into {catalog?.stats.commandCount??"many"} searchable command phrases.</span></div>
 </div>;}
 
