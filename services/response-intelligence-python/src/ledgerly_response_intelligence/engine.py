@@ -134,7 +134,7 @@ class ResponseIntelligenceEngine:
         # External retrieval is deliberately policy-gated. The interface is live now so
         # web/search/document tools can be added later without changing the response engine.
         if request.tool_policy:
-            tool_events = await self._tool_policy_events(request.tool_policy)
+            tool_events.extend(await self._tool_policy_events(request.tool_policy))
 
         delegated_provider = build_delegated_provider(request.generation)
         active_adapter: AdapterRecord | None = None
@@ -338,6 +338,7 @@ class ResponseIntelligenceEngine:
                 reasoning=reasoning,
                 learned_examples=learned_examples,
                 style_profile=style_profile,
+                reference_knowledge=reference_knowledge,
                 previous_draft=current,
                 revision_instructions=current_quality.revision_instructions,
             )
