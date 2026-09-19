@@ -32,16 +32,6 @@ class FakeWebBroker:
         )
 
 
-def test_web_search_registry_is_disabled_without_explicit_flags() -> None:
-    registry=build_external_tool_registry(Settings(
-        allow_external_tools=False,allow_web_search=False,
-        web_search_provider="brave",web_search_api_key="secret",
-    ))
-    capability=pytest.run(async_fn=registry.capabilities) if False else None
-    # Keep the test async-free by inspecting through a small coroutine below.
-    assert capability is None
-
-
 @pytest.mark.asyncio
 async def test_web_registry_capability_requires_all_gates() -> None:
     disabled=build_external_tool_registry(Settings(
