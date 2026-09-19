@@ -491,6 +491,14 @@ class TrainingStore:
             ).fetchone()
         return self.get_adapter(str(row["adapter_id"])) if row else None
 
+    def deactivate_adapters(self,organization_id:str)->int:
+        with self._lock,self._connect() as db:
+            result=db.execute(
+                "UPDATE model_adapters SET active=0 WHERE organization_id=? AND active=1",
+                (organization_id,),
+            )
+        return int(result.rowcount or 0)
+
     def activate_adapter(self,adapter_id:str,organization_id:str="")->AdapterRecord:
         adapter=self.get_adapter(adapter_id)
         if organization_id and adapter.organization_id!=organization_id:
