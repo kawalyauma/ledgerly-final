@@ -9,7 +9,7 @@ import { QuickCommandPalette, type QuickCommandPaletteHandle } from "./QuickComm
 
 type Agent={key:string;name:string;title:string;description:string;modelTier:"luna"|"terra"|"sol";enabled:boolean;configuredTools:string[]};
 type Conversation={id:string;agentKey:string;title:string;status:string;lastMessageAt?:string;createdAt?:string};
-type Message={id:string;role:"user"|"assistant";content:string;model?:string;createdAt?:string;routing?:{responseFingerprint?:string};responseMeta?:{fingerprint?:string}};
+type Message={id:string;role:"user"|"assistant";content:string;model?:string;createdAt?:string;routing?:{responseFingerprint?:string;trainingExampleId?:string};responseMeta?:{fingerprint?:string;trainingExampleId?:string}};
 type Settings={provider:string;configured:boolean;models:Record<string,string>};
 type Action={id:string;agentKey:string;actionType:string;title:string;summary:string;requiredScope:string;status:string;approvalId?:string|null;payload:Record<string,unknown>;resultEntityType?:string|null;resultEntityId?:string|null;failureText?:string|null;createdAt?:string;updatedAt?:string};
 type Artifact={id:string;title:string;format:"pdf"|"docx"|"xlsx"|"pptx";sourceMimeType:string;sourceSizeBytes:number;pdfSizeBytes:number;pdfPageCount:number;status:string;createdAt?:string};
@@ -228,12 +228,13 @@ export function AgenticChatStudioPage(){
 
 function ChatLearningFeedback({message}:{message:Message}){
   const fingerprint=String(message.routing?.responseFingerprint||message.responseMeta?.fingerprint||"");
+  const exampleId=String(message.routing?.trainingExampleId||message.responseMeta?.trainingExampleId||"");
   const[state,setState]=useState<"idle"|"correct"|"sending"|"sent">("idle"),[correction,setCorrection]=useState(""),[note,setNote]=useState("");
   if(!fingerprint)return null;
   async function send(rating:-1|1,approveOriginal=false){
     setState("sending");
     try{
-      await post<any>("/agentic-employees/chat-studio/response-feedback",{responseFingerprint:fingerprint,rating,approveOriginal,correctionText:rating<0?correction.trim():""});
+      await post<any>("/agentic-employees/chat-studio/response-feedback",{responseFingerprint:fingerprint,exampleId,rating,approveOriginal,correctionText:rating<0?correction.trim():""});
       setNote(rating>0?"Feedback saved for learning review.":"Correction saved for learning review.");setState("sent");
     }catch(error){setNote(errorText(error));setState(rating<0?"correct":"idle");}
   }
