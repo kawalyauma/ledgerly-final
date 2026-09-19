@@ -110,7 +110,7 @@ class ResponseIntelligenceEngine:
                 model = ""
 
         draft = self._limit_words(clean_response(draft), request.max_words)
-        quality = self.critic.evaluate(draft, request, evidence)
+        quality = self.critic.evaluate(draft, request, evidence, reasoning)
 
         return ResponseResult(
             request_id=request.request_id,
