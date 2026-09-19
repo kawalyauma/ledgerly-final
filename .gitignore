@@ -10,3 +10,6 @@ attendance-mobile/mobile.zip
 attendance-mobile/android/app/src/main/assets/facenet.tflite
 
 /ledgerly/
+
+# Local Response Intelligence learning datasets, SQLite state and trained adapters
+services/response-intelligence-python/data/

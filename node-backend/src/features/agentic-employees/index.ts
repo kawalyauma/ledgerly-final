@@ -21,7 +21,7 @@ function createBucketAdapter(runtime:Runtime){return{
 
 export const agenticEmployeesFeature: BackendFeature = {
   key: "agentic-employees",
-  version: "2.1.0-node",
+  version: "2.8.0-node",
   mount(app: NodeApp, runtime: Runtime) {
     const d1 = createD1Compat(runtime.db);
     const workBucket=createBucketAdapter(runtime);
@@ -34,6 +34,9 @@ export const agenticEmployeesFeature: BackendFeature = {
       OPENAI_MODEL_TERRA: runtime.config.OPENAI_MODEL_TERRA,
       OPENAI_MODEL_SOL: runtime.config.OPENAI_MODEL_SOL,
       AI_PROVIDER_ENCRYPTION_KEY: runtime.config.AI_PROVIDER_ENCRYPTION_KEY,
+      RESPONSE_INTELLIGENCE_URL: runtime.config.RESPONSE_INTELLIGENCE_URL,
+      RESPONSE_INTELLIGENCE_TOKEN: runtime.config.RESPONSE_INTELLIGENCE_TOKEN,
+      RESPONSE_INTELLIGENCE_TIMEOUT_MS: runtime.config.RESPONSE_INTELLIGENCE_TIMEOUT_MS,
       WORK_FILES_BUCKET: workBucket,
       AGENT_DOCUMENT_SERVICE: createAgentDocumentService(runtime.storage),
     };

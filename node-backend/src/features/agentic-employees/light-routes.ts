@@ -3,9 +3,13 @@ import { z } from "zod";
 import { AppError,createId,requireScope } from "./shared.js";
 import type { AppVariables,Env } from "./shared.js";
 import { AGENTS,allowedTools,isAgentKey,type AgentDefinition,type AgentKey,type ModelTier } from "./policy.js";
-import { runLightAgent } from "./light-mode.js";
+import { runLightAgent, runCompositeReport, runGuidedAnalysis } from "./light-mode.js";
 import { buildLightToolRegistry } from "./light-tool-registry.js";
 import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOptions } from "./quick-commands.js";
+import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
+import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
+import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
+import { activatePythonAdapter,checkPythonResponseIntelligence,createPythonKnowledgeSource,deactivatePythonAdapters,deletePythonKnowledgeSource,exportPythonTrainingDataset,getPythonAdapters,getPythonKnowledgeSources,getPythonKnowledgeStats,getPythonLearningStatus,getPythonStyleProfile,getPythonTrainingExamples,getPythonTrainingRuns,searchPythonKnowledge,seedPythonKnowledgeStarterPack,setPythonKnowledgeSourceApproval,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -28,6 +32,172 @@ agenticLightRoutes.get("/chat-studio/reference-options",requireScope("school:rea
  return c.json({data:await searchQuickReferenceOptions(c.env.FINANCE_DB,p.organizationId,field,q,limit,{env:c.env,principal:p,agent,registry})});
 });
 
+
+agenticLightRoutes.get("/chat-studio/response-intelligence",requireScope("school:read"),async c=>c.json({data:{stats:responseLibraryStats(),registers:Object.keys(RESPONSE_LIBRARY.registers),paragraphPatterns:RESPONSE_LIBRARY.paragraphPatterns.length,bannedBoilerplate:RESPONSE_LIBRARY.bannedBoilerplate.length}}));
+
+agenticLightRoutes.get("/chat-studio/response-intelligence-python",requireScope("school:read"),async c=>{
+ return c.json({data:await checkPythonResponseIntelligence(c.env)});
+});
+
+agenticLightRoutes.get("/chat-studio/learning-status",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),data=await getPythonLearningStatus(c.env,p.organizationId);
+ return c.json({data:data||{organization_id:p.organizationId,readiness:"unavailable",approved:0,candidates:0,corrections:0}});
+});
+
+agenticLightRoutes.post("/chat-studio/response-feedback",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({
+   responseFingerprint:z.string().min(4).max(128),
+   exampleId:z.string().max(128).optional(),
+   rating:z.union([z.literal(-1),z.literal(0),z.literal(1)]),
+   comment:z.string().max(5000).optional(),
+   correctionText:z.string().max(50000).optional(),
+   entityLabel:z.string().max(500).optional(),
+   approveOriginal:z.boolean().optional(),
+ });
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR",parsed.error.issues[0]?.message||"Invalid feedback");
+ const data=await submitPythonResponseFeedback(c.env,{
+   organizationId:p.organizationId,exampleId:parsed.data.exampleId,responseFingerprint:parsed.data.responseFingerprint,rating:parsed.data.rating,
+   comment:parsed.data.comment,correctionText:parsed.data.correctionText,entityLabel:parsed.data.entityLabel,
+   approveOriginal:parsed.data.approveOriginal,
+   trustedReviewer:p.role==="owner"||p.role==="admin",
+ });
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/knowledge-center",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can manage institutional AI knowledge");
+ const [service,stats,sources]=await Promise.all([
+   checkPythonResponseIntelligence(c.env),
+   getPythonKnowledgeStats(c.env,p.organizationId),
+   getPythonKnowledgeSources(c.env,p.organizationId,false,300),
+ ]);
+ if(!stats)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data:{service,stats,sources:sources||[]}});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-sources",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can add institutional AI knowledge");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({
+   title:z.string().trim().min(2).max(500),
+   sourceType:z.enum(["manual","policy","circular","document","web","research","other"]).default("document"),
+   content:z.string().trim().min(10).max(2_000_000),
+   url:z.string().max(4000).optional(),
+   author:z.string().max(500).optional(),
+   publishedAt:z.string().max(100).optional(),
+   approved:z.boolean().optional(),
+   tags:z.array(z.string().max(100)).max(30).optional(),
+ });
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR",parsed.error.issues[0]?.message||"Invalid knowledge source");
+ const data=await createPythonKnowledgeSource(c.env,{
+   organizationId:p.organizationId,title:parsed.data.title,sourceType:parsed.data.sourceType,
+   content:parsed.data.content,url:parsed.data.url,author:parsed.data.author,publishedAt:parsed.data.publishedAt,
+   approved:parsed.data.approved,tags:parsed.data.tags,
+ });
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-sources/:id/:status",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can approve institutional AI knowledge");
+ const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
+ const data=await setPythonKnowledgeSourceApproval(c.env,p.organizationId,c.req.param("id"),status==="approve");
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.delete("/chat-studio/knowledge-sources/:id",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can delete institutional AI knowledge");
+ const data=await deletePythonKnowledgeSource(c.env,p.organizationId,c.req.param("id"));
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-seed",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can seed institutional AI knowledge");
+ const data=await seedPythonKnowledgeStarterPack(c.env,p.organizationId);
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data:{sources:data,count:data.length}});
+});
+
+agenticLightRoutes.post("/chat-studio/knowledge-search",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),raw=await c.req.json().catch(()=>({})) as Record<string,unknown>;
+ const schema=z.object({query:z.string().trim().min(2).max(5000),limit:z.number().int().min(1).max(30).optional()});
+ const parsed=schema.safeParse(raw);if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Search query is required");
+ const data=await searchPythonKnowledge(c.env,{organizationId:p.organizationId,query:parsed.data.query,limit:parsed.data.limit,includeGlobal:true});
+ if(!data)throw new AppError(503,"RESPONSE_KNOWLEDGE_UNAVAILABLE","Institutional knowledge service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/learning-center",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can manage Response Intelligence learning");
+ const [service,status,style,candidates,runs,adapters]=await Promise.all([
+   checkPythonResponseIntelligence(c.env),
+   getPythonLearningStatus(c.env,p.organizationId),
+   getPythonStyleProfile(c.env,p.organizationId),
+   getPythonTrainingExamples(c.env,p.organizationId,"candidate",100),
+   getPythonTrainingRuns(c.env,p.organizationId,50),
+   getPythonAdapters(c.env,p.organizationId),
+ ]);
+ if(!status)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data:{service,status,style:style||{},candidates:candidates||[],runs:runs||[],adapters:adapters||[]}});
+});
+
+agenticLightRoutes.post("/chat-studio/training-export",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can export training data");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,format=raw.format==="dpo"?"dpo":"sft";
+ const data=await exportPythonTrainingDataset(c.env,p.organizationId,format);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/training-adapters/deactivate",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can deactivate a trained adapter");
+ const data=await deactivatePythonAdapters(c.env,p.organizationId);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/training-adapters/:id/activate",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can activate a trained adapter");
+ const data=await activatePythonAdapter(c.env,p.organizationId,c.req.param("id"));
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable or the adapter cannot be activated");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/training-examples",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can review training material");
+ const status=String(c.req.query("status")||"candidate"),limit=Number(c.req.query("limit")||100);
+ const data=await getPythonTrainingExamples(c.env,p.organizationId,status,limit);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/training-examples/:id/:status",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can approve training material");
+ const status=c.req.param("status");if(status!=="approve"&&status!=="reject")throw new AppError(422,"VALIDATION_ERROR","Status must be approve or reject");
+ const data=await setPythonTrainingExampleStatus(c.env,p.organizationId,c.req.param("id"),status);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.get("/chat-studio/analysis-guidance",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),key=c.req.query("agentKey")||"headteacher",mode=(c.req.query("mode")==="account-for"?"account-for":"analyse") as AnalysisMode,q=String(c.req.query("q")||"");
+ if(!isAgentKey(key))throw new AppError(422,"VALIDATION_ERROR","Unknown AI employee");
+ const agent=await effective(c.env.FINANCE_DB,p.organizationId,key);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const registry=await buildLightToolRegistry(c.env,p,agent),capabilityText=registry.tools.filter(t=>t.readOnly).map(t=>t.name+" "+t.description+" "+t.module+" "+t.group+" "+t.aliases.join(" ")).join(" ");
+ const topics=suggestAnalysisTopics(mode,q,capabilityText).slice(0,40);
+ return c.json({data:{mode,topics,categories:[...new Set(topics.map(t=>t.category))],entityTypes:[...new Set(topics.flatMap(t=>t.entityTypes))],stats:{knowledgeTopics:topics.length,readCapabilities:registry.stats.reads}}});
+});
+
+agenticLightRoutes.get("/chat-studio/entity-options",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),q=String(c.req.query("q")||""),types=String(c.req.query("types")||"").split(",").map(x=>x.trim()).filter(Boolean),limit=Number(c.req.query("limit")||24);
+ if(q.trim().length<2)return c.json({data:[]});
+ return c.json({data:await searchAnalysisEntities(c.env.FINANCE_DB,p.organizationId,q,limit,types.length?types:undefined)});
+});
+
 agenticLightRoutes.post("/chat-studio/conversations/:id/quick-command",requireScope("school:read"),async c=>{
  const p=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");
  const agent=await effective(c.env.FINANCE_DB,p.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
@@ -35,6 +205,37 @@ agenticLightRoutes.post("/chat-studio/conversations/:id/quick-command",requireSc
  if(!toolName)throw new AppError(422,"VALIDATION_ERROR","Quick command tool is required");
  const registry=await buildLightToolRegistry(c.env,p,agent);
  return c.json({data:await executeQuickCommand({db:c.env.FINANCE_DB,env:c.env,principal:p,agent,conversationId:thread.id,registry,toolName,values,commandText:String(raw.commandText||"")})});
+});
+
+
+
+agenticLightRoutes.post("/chat-studio/conversations/:id/guided-analysis",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");
+ const agent=await effective(c.env.FINANCE_DB,p.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,mode=(raw.mode==="account-for"?"account-for":"analyse") as AnalysisMode,prompt=String(raw.prompt||"").trim(),topicId=raw.topicId?String(raw.topicId):null,entity=raw.entity&&typeof raw.entity==="object"&&!Array.isArray(raw.entity)?raw.entity as any:null;
+ if(!prompt)throw new AppError(422,"VALIDATION_ERROR","Describe what you want Ledgerly to analyse.");
+ const userId=createId("aam");await c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'user',?,?,?)").bind(userId,p.organizationId,thread.id,prompt,p.userId,JSON.stringify({mode,topicId,entity})).run();
+ let result;try{result=await runGuidedAnalysis({db:c.env.FINANCE_DB,env:c.env,principal:p,agent,conversationId:thread.id,messages:[{role:"user",content:prompt}]},{mode,prompt,topicId,entity});}catch(e){await c.env.FINANCE_DB.prepare("DELETE FROM ae_messages WHERE id=? AND organization_id=? AND conversation_id=?").bind(userId,p.organizationId,thread.id).run();throw e;}
+ const assistantId=createId("aam"),summary=result.needsEntity?"Analysis needs an entity selection.":result.needsCriteria?"Analysis needs more criteria: "+result.questions.join(" "):String((result as any).humanResponse||result.analysis?.summary||result.analysis?.title||"Analysis completed.");
+ await c.env.FINANCE_DB.batch([
+  c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?)").bind(assistantId,p.organizationId,thread.id,summary.slice(0,12000),p.userId,result.model||"guided-analysis",JSON.stringify({mode,topic:result.topic?.id,entity:result.entity,plan:result.plan,sources:result.sources,responseMeta:(result as any).responseMeta,usage:result.usage})),
+  c.env.FINANCE_DB.prepare("UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(thread.id,p.organizationId),
+ ]);
+ return c.json({data:result});
+});
+
+agenticLightRoutes.post("/chat-studio/conversations/:id/composite-report",requireScope("school:read"),async c=>{
+ const p=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");
+ const agent=await effective(c.env.FINANCE_DB,p.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");
+ const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,prompt=String(raw.prompt||"").trim();if(!prompt)throw new AppError(422,"VALIDATION_ERROR","Describe the composite report you want Ledgerly to build.");
+ const userId=createId("aam");await c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'user',?,?,?)").bind(userId,p.organizationId,thread.id,prompt,p.userId,JSON.stringify({mode:"composite-report"})).run();
+ let result;try{result=await runCompositeReport({db:c.env.FINANCE_DB,env:c.env,principal:p,agent,conversationId:thread.id,messages:[{role:"user",content:prompt}]},prompt);}catch(e){await c.env.FINANCE_DB.prepare("DELETE FROM ae_messages WHERE id=? AND organization_id=? AND conversation_id=?").bind(userId,p.organizationId,thread.id).run();throw e;}
+ const assistantId=createId("aam"),summary=result.needsCriteria?"Composite report needs criteria: "+result.questions.join(" "):String((result as any).humanResponse||("Composite report completed with "+result.data.rows.length+" row(s)."));
+ await c.env.FINANCE_DB.batch([
+  c.env.FINANCE_DB.prepare("INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?)").bind(assistantId,p.organizationId,thread.id,summary.slice(0,12000),p.userId,result.model||"composite-report",JSON.stringify({mode:"composite-report",plan:result.plan,sources:result.sources,responseMeta:(result as any).responseMeta,usage:result.usage})),
+  c.env.FINANCE_DB.prepare("UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(thread.id,p.organizationId),
+ ]);
+ return c.json({data:result});
 });
 
 agenticLightRoutes.post("/conversations/:id/light-messages",requireScope("school:read"),async c=>{const parsed=z.object({content:z.string().trim().min(1).max(12000)}).safeParse(await c.req.json());if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Message is required",parsed.error.flatten());const p=c.get("principal"),thread=await conversation(c.env.FINANCE_DB,p.organizationId,c.req.param("id"));if(thread.status==="closed")throw new AppError(409,"CONVERSATION_CLOSED","This chat is closed. Start a new chat to continue.");if(!isAgentKey(thread.agentKey))throw new AppError(409,"AGENT_INVALID","Conversation agent is invalid");const agent=await effective(c.env.FINANCE_DB,p.organizationId,thread.agentKey);if(!agent.enabled)throw new AppError(409,"AGENT_DISABLED","This AI employee is disabled");const userId=createId("aam");await c.env.FINANCE_DB.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,metadata_json) VALUES(?,?,?,'user',?,?,?)`).bind(userId,p.organizationId,thread.id,parsed.data.content,p.userId,JSON.stringify({mode:"light"})).run();const history=await c.env.FINANCE_DB.prepare("SELECT role,content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role IN ('user','assistant') ORDER BY created_at DESC,id DESC LIMIT 16").bind(p.organizationId,thread.id).all<{role:"user"|"assistant";content:string}>();let result;try{result=await runLightAgent({db:c.env.FINANCE_DB,env:c.env,principal:p,agent,conversationId:thread.id,messages:[...history.results].reverse()});}catch(e){await c.env.FINANCE_DB.prepare("DELETE FROM ae_messages WHERE id=? AND organization_id=? AND conversation_id=?").bind(userId,p.organizationId,thread.id).run();throw e;}const assistantId=createId("aam");await c.env.FINANCE_DB.batch([c.env.FINANCE_DB.prepare(`INSERT INTO ae_messages(id,organization_id,conversation_id,role,content,user_id,model,provider_response_id,metadata_json) VALUES(?,?,?,'assistant',?,?,?,?,?)`).bind(assistantId,p.organizationId,thread.id,result.text,p.userId,result.model,result.providerResponseId,JSON.stringify({mode:"light",usage:result.usage,toolEvents:result.toolEvents,routing:result.routing})),c.env.FINANCE_DB.prepare("UPDATE ae_conversations SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND organization_id=?").bind(thread.id,p.organizationId)]);return c.json({data:{id:assistantId,role:"assistant",content:result.text,model:result.model,mode:"light",toolEvents:result.toolEvents,routing:result.routing}});});

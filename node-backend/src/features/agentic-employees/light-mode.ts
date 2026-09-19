@@ -13,6 +13,10 @@ import {
   type LightToolDescriptor,
 } from "./light-tool-registry.js";
 import { resolveLightReferences } from "./light-reference-resolver.js";
+import { analysisKnowledgeSummary, getAnalysisTopic, suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
+import { identifyAnalysisEntity, type AnalysisEntityOption } from "./analysis-entity-resolver.js";
+import { buildResponseLanguageBrief,buildResponseRealizationPrompt,cleanHumanResponse,composeFallbackHumanResponse,responseFingerprint,templateRisk } from "./response-intelligence/engine.js";
+import { realizeWithPythonResponseIntelligence } from "./response-intelligence/python-client.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type LightInput = {
@@ -41,6 +45,30 @@ type UsageSummary = {
 };
 
 const KINDS: LightTaskKind[] = ["query", "report", "create", "update", "delete", "action", "communication", "document", "analysis"];
+
+function responseToolPolicy(request:string){
+  const text=String(request||"");
+  const explicitWeb=(
+    /(^|\s)\/research\b/i.test(text)
+    || /\b(search|check|look up|find)\s+(the\s+)?(web|internet|online)\b/i.test(text)
+    || /\b(use|with|from)\s+(online|web|internet|external|public)\s+(sources?|research|information|evidence)\b/i.test(text)
+    || /\b(latest|current|recent)\s+(public|online|web|internet)\s+(information|sources?|research|guidance|policy|news)\b/i.test(text)
+    || /\bsearch\s+external\s+sources?\b/i.test(text)
+  );
+  return explicitWeb?["web.search"]:[];
+}
+
+function pythonGeneration(runtime:Runtime){
+  const apiStyle=runtime.apiStyle==="anthropic"?"anthropic":runtime.apiStyle==="responses"?"responses":"chat-completions";
+  return{
+    provider:String(runtime.provider||""),
+    apiStyle,
+    baseUrl:String(runtime.baseUrl||""),
+    apiKey:String(runtime.apiKey||""),
+    model:String(runtime.model||""),
+    timeoutSeconds:Math.min(Math.max(Number(runtime.config?.timeoutMs||45000)/1000,1),120),
+  } as const;
+}
 
 function latestUser(input: LightInput) {
   return [...input.messages].reverse().find(message => message.role === "user")?.content.trim() || "";
@@ -525,6 +553,230 @@ export async function runLightAgent(input: LightInput) {
   const prepared = results.filter(item => item.result?.prepared && item.result?.requiresHumanApproval);
   if (prepared.length) return { text: prepared.length === 1 ? "I prepared the requested Ledgerly action. Review or edit the approval card below, then approve it when ready." : `I prepared ${prepared.length} Ledgerly actions. Review or edit the approval cards below before approving them.`, model: runtime.model, provider: runtime.provider, providerResponseId: null, usage, toolEvents: events, routing };
 
-  const answer = await aiText(input, runtime, usage, "light_write_answer", `Answer using ONLY these verified Ledgerly results. Be concise but complete. Use a markdown table for exact comparisons when useful. Never invent missing values.\nUser request: ${prompt}\nVerified results: ${JSON.stringify(results).slice(0, 22_000)}`, 900);
-  return { text: answer.text || "The Ledgerly lookup completed.", model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing };
+  const recentResponses=input.messages.filter(message=>message.role==="assistant").slice(-5).map(message=>message.content),recentText=recentResponses.join("\n\n").slice(0,12000);
+  const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+    requestId:createId("rsp"),
+    purpose:kinds.includes("analysis")?"analysis":"general",
+    request:prompt,
+    semanticPayload:{results},
+    context:{
+      organizationId:input.principal.organizationId,
+      conversationId:input.conversationId,
+      actor:input.principal.role,
+      audience:input.agent.title||input.agent.key,
+      topic:modules.join(", "),
+      category:kinds.join(", "),
+      recentResponses,
+      locale:"en-UG",
+      currency:"UGX",
+    },
+    detail:"standard",
+    providerMode:"auto",
+    generation:pythonGeneration(runtime),
+    toolPolicy:responseToolPolicy(prompt),
+    maxWords:900,
+  });
+  if(pythonResponse){
+    const text=cleanHumanResponse(pythonResponse.text);
+    return { text, model: pythonResponse.model||runtime.model, provider: "response-intelligence-python", providerResponseId:null, usage, toolEvents:events, routing:{...routing,responseFingerprint:pythonResponse.response_fingerprint||responseFingerprint(text),templateRisk:false,responseQuality:pythonResponse.quality,responseEngine:"python",trainingExampleId:String(pythonResponse.metadata?.trainingExampleId||"")} };
+  }
+  const languageBrief=buildResponseLanguageBrief({purpose:kinds.includes("analysis")?"analysis":"general",request:prompt,seed:createId("rsp"),topic:modules.join(", "),category:kinds.join(", "),detail:"standard",audience:input.agent.title||input.agent.key,recentText});
+  const answer = await aiText(input, runtime, usage, "light_write_answer", `${languageBrief}\n\nAnswer using ONLY these verified Ledgerly results. Be concise but complete. Use a markdown table for exact comparisons when useful. Never invent missing values.\nUser request: ${prompt}\nVerified results: ${JSON.stringify(results).slice(0, 22_000)}`, 1200);
+  const text=cleanHumanResponse(answer.text||"The Ledgerly lookup completed.");
+  return { text, model: runtime.model, provider: runtime.provider, providerResponseId: answer.id, usage, toolEvents: events, routing:{...routing,responseFingerprint:responseFingerprint(text),templateRisk:templateRisk(text).risk,responseEngine:"typescript-fallback"} };
+}
+
+
+type CompositeCompiled = {
+  title?: string; joinKey?: string; columns?: unknown; rows?: unknown; summary?: unknown;
+  appliedFilters?: unknown; calculations?: unknown; missingData?: unknown; notes?: unknown;
+};
+function compositeSearchText(prompt: string) {
+  let extra = "";
+  if (/\b(attendance|absent|present|late)\b/i.test(prompt)) extra += " student class attendance report present absent marked percentage";
+  if (/\b(fee|fees|balance|arrears|outstanding|billing)\b/i.test(prompt)) extra += " school fees balances arrears billed paid outstanding student";
+  if (/\b(performance|academic|grade|marks?|results?|division|aggregate)\b/i.test(prompt)) extra += " academics exams results report cards marks grades aggregate division";
+  if (/\b(last|previous|current|term|year|compare|trend|fallen|improved|declined)\b/i.test(prompt)) extra += " terms academic years exams comparison current previous";
+  if (/\b(class|p[1-7]|learner|student)\b/i.test(prompt)) extra += " students classes streams enrollment";
+  return (prompt + " " + extra).trim();
+}
+function compositeCandidate(tool: LightToolDescriptor) {
+  return { name: tool.name, module: tool.module, group: tool.group, kind: tool.kind, source: tool.source, method: tool.method, path: tool.pathTemplate, description: tool.description.slice(0, 260), aliases: tool.aliases.slice(0, 6) };
+}
+function compositeStrings(value: unknown) { return Array.isArray(value) ? value.map(String).map(item => item.trim()).filter(Boolean) : []; }
+function compositeObjectRows(value: unknown): Record<string, unknown>[] {
+  const seen = new Set<unknown>(); let best: Record<string, unknown>[] = [];
+  function visit(node: unknown, depth: number) {
+    if (depth > 5 || node === null || node === undefined || seen.has(node)) return;
+    if (typeof node === "object") seen.add(node);
+    if (Array.isArray(node)) {
+      const rows = node.filter(item => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown>[];
+      if (rows.length > best.length) best = rows;
+      for (const item of node.slice(0, 30)) visit(item, depth + 1);
+      return;
+    }
+    if (typeof node === "object") for (const child of Object.values(node as Record<string, unknown>)) visit(child, depth + 1);
+  }
+  visit(value, 0); return best.slice(0, 1000);
+}
+function sanitizeComposite(value: CompositeCompiled, fallbackRows: Record<string, unknown>[]) {
+  const rows = Array.isArray(value.rows) ? value.rows.filter(row => row && typeof row === "object" && !Array.isArray(row)).slice(0, 1000) as Record<string, unknown>[] : fallbackRows;
+  const columns = compositeStrings(value.columns);
+  const derived = columns.length ? columns : [...new Set(rows.flatMap(row => Object.keys(row)))].slice(0, 40);
+  return {
+    title: String(value.title || "Composite Ledgerly Report").slice(0, 180),
+    joinKey: String(value.joinKey || "studentId").slice(0, 80),
+    columns: derived, rows, summary: value.summary ?? {}, appliedFilters: compositeStrings(value.appliedFilters),
+    calculations: compositeStrings(value.calculations), missingData: compositeStrings(value.missingData), notes: compositeStrings(value.notes),
+  };
+}
+
+export async function runCompositeReport(input: LightInput, prompt: string) {
+  const request = String(prompt || "").trim();
+  if (!request) throw new AppError(422, "VALIDATION_ERROR", "Describe the report you want Ledgerly to build.");
+  const runtime = await resolveRuntimeProvider(input.db, input.env, input.principal.organizationId, "luna"), usage = emptyUsage();
+  const registry = await stage(input, "composite_build_registry", () => buildLightToolRegistry(input.env, input.principal, input.agent));
+  const readable = registry.tools.filter(tool => tool.readOnly && (tool.kind === "query" || tool.kind === "report" || tool.kind === "analysis"));
+  if (!readable.length) throw new AppError(409, "COMPOSITE_REPORT_UNAVAILABLE", "No permitted read capabilities are available for this AI employee.");
+  const candidates = shortlist(compositeSearchText(request), readable, 60);
+  const plannerPrompt = "Plan a READ-ONLY composite Ledgerly report. The user may combine school, attendance, fees, exams, staff, books or finance data.\nUser request: " + request + "\nAvailable READ-ONLY capabilities: " + JSON.stringify(candidates.map(compositeCandidate)) + "\nReturn JSON with steps, questions and joinKey. Each step is {tool,purpose,instruction}. Rules: use 1 to 8 steps and only exact tool names above; the same tool may appear more than once when comparing periods; put prerequisite lookups before dependent reads; prefer studentId/staffId/guardianId as join keys; never join different people only because names look similar; resolve relative periods such as last term from Ledgerly data when possible; questions is only for criteria impossible to resolve safely; never select a write capability.";
+  const planner = await aiJson<{ steps?: unknown; questions?: unknown; joinKey?: unknown }>(input, runtime, usage, "composite_plan", plannerPrompt, { steps: [], questions: [], joinKey: "studentId" }, 1500);
+  const allowed = new Map(candidates.map(tool => [tool.name, tool]));
+  const rawSteps = Array.isArray(planner.steps) ? planner.steps as Array<Record<string, unknown>> : [];
+  const steps = rawSteps.map(step => ({ tool: String(step.tool || ""), purpose: String(step.purpose || ""), instruction: String(step.instruction || "") })).filter(step => allowed.has(step.tool)).slice(0, 8);
+  const questions = compositeStrings(planner.questions);
+  const plan = { joinKey: String(planner.joinKey || "studentId"), steps: steps.length ? steps : candidates.slice(0, 1).map(tool => ({ tool: tool.name, purpose: "Fetch the primary data requested", instruction: request })) };
+  if (questions.length) return { mode: "composite-report", request, needsCriteria: true, questions, plan, data: { columns: [], rows: [], summary: {}, appliedFilters: [], calculations: [], missingData: questions, notes: [] }, sources: [], usage };
+
+  const events: Array<Record<string, unknown>> = [], executed: Array<ToolExecution & { purpose: string; instruction: string }> = [];
+  for (const step of plan.steps) {
+    const tool = allowed.get(step.tool); if (!tool) continue;
+    const previous = executed.length ? "\nPrevious verified step results (use IDs/periods from these when needed): " + JSON.stringify(executed.map(item => ({ tool: item.tool.name, purpose: item.purpose, result: item.result }))).slice(0, 10000) : "";
+    const instruction = "Composite report step: " + (step.instruction || step.purpose || request) + "\nOverall user request: " + request + previous + "\nThis step is read-only. Do not invent IDs, dates or records.";
+    const item = await executeSelected(input, runtime, tool, instruction, executed, events, usage);
+    executed.push({ ...item, purpose: step.purpose, instruction: step.instruction });
+    if (item.result?.needsClarification) break;
+  }
+  const issues = executed.flatMap(item => item.result?.needsClarification && Array.isArray(item.result.issues) ? item.result.issues.map(String) : []);
+  const sourcePayload = executed.map(item => ({ tool: item.tool.name, module: item.tool.module, purpose: item.purpose, result: item.result }));
+  const sourceInfo = executed.map(item => ({ tool: item.tool.name, module: item.tool.module, purpose: item.purpose, rowCount: compositeObjectRows(item.result).length }));
+  if (issues.length) return { mode: "composite-report", request, needsCriteria: true, questions: [...new Set(issues)], plan, data: { columns: [], rows: [], summary: {}, appliedFilters: [], calculations: [], missingData: [...new Set(issues)], notes: [] }, sources: sourceInfo, toolEvents: events, usage };
+
+  const fallbackRows = sourcePayload.length === 1 ? compositeObjectRows(sourcePayload[0]!.result) : [];
+  const compilePrompt = "Compile a structured composite report using ONLY the verified Ledgerly source results below.\nUser request: " + request + "\nPreferred join key: " + plan.joinKey + "\nVerified sources: " + JSON.stringify(sourcePayload).slice(0, 36000) + "\nReturn JSON {title,joinKey,columns,rows,summary,appliedFilters,calculations,missingData,notes}. Never invent a learner, ID, amount, mark, attendance count, date or other source fact. Join learner data by studentId whenever available; never merge people merely by matching names. Apply every numeric/comparison condition exactly. For attendance percentage calculate only from verified counts and state the formula. For academic trend compare verified current and previous performance values and state the measure. Values ending in Minor are minor-unit values; do not silently reinterpret currency scale. If a human-currency threshold cannot be compared safely, put that in missingData instead of guessing. Keep rows flat and export-friendly. Include studentId plus a human identifier/name when available. If a requested field cannot be derived, list it in missingData. Rows must contain only records satisfying the requested filters.";
+  const compiled = await aiJson<CompositeCompiled>(input, runtime, usage, "composite_compile", compilePrompt, { title: "Composite Ledgerly Report", joinKey: plan.joinKey, columns: [], rows: fallbackRows, summary: {}, appliedFilters: [], calculations: [], missingData: [], notes: [] }, 5200);
+  const data = sanitizeComposite(compiled, fallbackRows),summaryText=typeof data.summary==="string"?data.summary:(data.summary&&typeof data.summary==="object"?JSON.stringify(data.summary):""),reportSemantic={title:data.title,summary:summaryText,sections:data.calculations.length?[{title:"How the result was derived",analysis:data.calculations.join(". ")}]:[],findings:data.notes,limitations:data.missingData,rows:data.rows},recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 5").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),recentResponses=recentRows.results.map(row=>row.content),responseInput={purpose:"report" as const,request,seed:createId("rsp"),topic:"composite report",category:"report",detail:"standard" as const,audience:input.agent.title||input.agent.key,recentText:recentResponses.join("\n\n").slice(0,12000)};
+  const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+    requestId:createId("rsp"),
+    purpose:"report",
+    request,
+    semanticPayload:{...data,sources:sourceInfo},
+    context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:"composite report",category:"report",recentResponses,locale:"en-UG",currency:"UGX"},
+    detail:"standard",
+    providerMode:"auto",
+    generation:pythonGeneration(runtime),
+    toolPolicy:responseToolPolicy(request),
+    maxWords:1400,
+  });
+  let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(reportSemantic,responseInput);
+  if(!pythonResponse){try{const realized=await aiText(input,runtime,usage,"composite_response_realize",buildResponseRealizationPrompt(responseInput,reportSemantic,sourcePayload),2400);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}}
+  return { mode: "composite-report", request, needsCriteria: false, questions: [], plan, data, humanResponse, responseMeta:{fingerprint:pythonResponse?.response_fingerprint||responseFingerprint(humanResponse),templateRisk:pythonResponse?false:templateRisk(humanResponse).risk,responseQuality:pythonResponse?.quality,responseEngine:pythonResponse?"python":"typescript-fallback",trainingExampleId:String(pythonResponse?.metadata?.trainingExampleId||"")}, sources: sourceInfo, toolEvents: events, model: pythonResponse?.model||runtime.model, provider: pythonResponse?"response-intelligence-python":runtime.provider, usage };
+}
+
+
+type GuidedAnalysisSection={title?:unknown;analysis?:unknown;evidence?:unknown;metrics?:unknown};
+type GuidedAnalysisCompiled={
+ title?:unknown;summary?:unknown;sections?:unknown;findings?:unknown;metrics?:unknown;relationships?:unknown;
+ limitations?:unknown;unanswered?:unknown;suggestedActions?:unknown;rows?:unknown;confidenceNote?:unknown;
+};
+function analysisArray(value:unknown){return Array.isArray(value)?value:[];}
+function analysisStrings(value:unknown){return analysisArray(value).map(String).map(x=>x.trim()).filter(Boolean);}
+function sanitizeGuidedAnalysis(value:GuidedAnalysisCompiled){
+ const sections=analysisArray(value.sections).filter(x=>x&&typeof x==="object").slice(0,12).map((x:any)=>({
+  title:String(x.title||"Analysis").slice(0,160),analysis:String(x.analysis||"").slice(0,6000),
+  evidence:analysisStrings(x.evidence).slice(0,20),metrics:analysisArray(x.metrics).slice(0,20)
+ }));
+ const rows=analysisArray(value.rows).filter(x=>x&&typeof x==="object"&&!Array.isArray(x)).slice(0,1000);
+ return{
+  title:String(value.title||"Ledgerly Analysis").slice(0,180),summary:String(value.summary||"").slice(0,8000),sections,
+  findings:analysisArray(value.findings).slice(0,30),metrics:analysisArray(value.metrics).slice(0,40),
+  relationships:analysisArray(value.relationships).slice(0,30),limitations:analysisStrings(value.limitations).slice(0,30),
+  unanswered:analysisStrings(value.unanswered).slice(0,30),suggestedActions:analysisArray(value.suggestedActions).slice(0,30),
+  rows,confidenceNote:String(value.confidenceNote||"").slice(0,2000)
+ };
+}
+function guidedCapabilitySearch(prompt:string,topicText:string){return (prompt+" "+topicText).slice(0,12000);}
+
+export async function runGuidedAnalysis(input:LightInput,payload:{mode:AnalysisMode;prompt:string;topicId?:string|null;entity?:AnalysisEntityOption|null}){
+ const mode:AnalysisMode=payload.mode==="account-for"?"account-for":"analyse",request=String(payload.prompt||"").trim();
+ if(!request)throw new AppError(422,"VALIDATION_ERROR","Describe what you want Ledgerly to analyse.");
+ const runtime=await resolveRuntimeProvider(input.db,input.env,input.principal.organizationId,"luna"),usage=emptyUsage();
+ const registry=await stage(input,"analysis_build_registry",()=>buildLightToolRegistry(input.env,input.principal,input.agent));
+ const readable=registry.tools.filter(tool=>tool.readOnly&&(tool.kind==="query"||tool.kind==="report"||tool.kind==="analysis"));
+ if(!readable.length)throw new AppError(409,"ANALYSIS_UNAVAILABLE","No permitted read capabilities are available for this AI employee.");
+
+ let topic=getAnalysisTopic(payload.topicId||null);
+ if(!topic){
+  const suggestions=suggestAnalysisTopics(mode,request,readable.map(tool=>tool.name+" "+tool.description+" "+tool.aliases.join(" ")).join(" ")).slice(0,12);
+  const classified=await aiJson<{topicId?:unknown}>(input,runtime,usage,"analysis_classify_topic",
+   "Choose the best investigation topic for this request. Return one topicId or an empty string if none is a good fit.\nRequest: "+request+"\nTopics: "+JSON.stringify(suggestions.map(item=>({id:item.id,label:item.label,description:item.description,evidence:item.evidence.slice(0,5)}))),
+   {topicId:suggestions[0]?.id||""},300);
+  topic=getAnalysisTopic(String(classified.topicId||""))||suggestions[0]||null;
+ }
+ const knowledge=analysisKnowledgeSummary(topic);
+ let entity=payload.entity||null,entityResolution:any=null;
+ if(!entity){
+  const extracted=await aiJson<{mention?:unknown;types?:unknown}>(input,runtime,usage,"analysis_extract_entity",
+   "Extract the primary named Ledgerly entity only if the user clearly names one specific person, account, class, stream, subject, department, term, product or contact. Do not treat generic phrases such as P6 learners, all teachers or the school as a named entity. Return {mention:'',types:[]} when there is no specific named entity.\nRequest: "+request+"\nLikely entity types for this topic: "+JSON.stringify(topic?.entityTypes||[]),
+   {mention:"",types:[]},260);
+  const mention=String(extracted.mention||"").trim(),types=analysisStrings(extracted.types);
+  if(mention.length>=2){
+   entityResolution=await identifyAnalysisEntity(input.db,input.principal.organizationId,mention,types.length?types:topic?.entityTypes);
+   if(entityResolution.status==="resolved")entity=entityResolution.entity;
+   else if(entityResolution.status==="ambiguous")return{mode,request,topic,needsEntity:true,entityQuery:mention,entityOptions:entityResolution.options,needsCriteria:false,questions:[],plan:null,analysis:null,sources:[],usage};
+  }
+ }
+
+ const topicText=topic?[topic.label,topic.description,...topic.keywords,...topic.evidence].join(" "):knowledge;
+ const candidates=shortlist(guidedCapabilitySearch(request,topicText),readable,72);
+ const plannerPrompt="Build a fresh READ-ONLY evidence investigation for Ledgerly. This is not a report template. Select evidence because it can answer this exact request.\nMode: "+mode+"\nRequest: "+request+"\nResolved entity: "+JSON.stringify(entity)+"\nInvestigation knowledge: "+knowledge+"\nAvailable capabilities: "+JSON.stringify(candidates.map(compositeCandidate))+"\nReturn {steps:[{tool,purpose,instruction}],questions:[],joinKey}. Use 1 to 10 steps. The same read tool may appear more than once for different periods or comparison groups. Use the resolved entity ID/type exactly when present. Include comparison/baseline evidence when it materially helps. For account-for requests, investigate competing explanations and counter-evidence; do not jump from correlation to causation. Never use a write tool. Ask questions only when a required identifier, period or comparison truly cannot be resolved from Ledgerly.";
+ const planned=await aiJson<{steps?:unknown;questions?:unknown;joinKey?:unknown}>(input,runtime,usage,"analysis_plan",plannerPrompt,{steps:[],questions:[],joinKey:entity?.type==="staff"||entity?.type==="teacher"?"staffId":"studentId"},1800);
+ const rawSteps=Array.isArray(planned.steps)?planned.steps as Array<Record<string,unknown>>:[],allowed=new Map(candidates.map(tool=>[tool.name,tool]));
+ const steps=rawSteps.map(step=>({tool:String(step.tool||""),purpose:String(step.purpose||""),instruction:String(step.instruction||"")})).filter(step=>allowed.has(step.tool)).slice(0,10);
+ const questions=analysisStrings(planned.questions);
+ const plan={joinKey:String(planned.joinKey||"studentId"),steps:steps.length?steps:candidates.slice(0,1).map(tool=>({tool:tool.name,purpose:"Retrieve primary evidence",instruction:request}))};
+ if(questions.length)return{mode,request,topic,entity,needsEntity:false,needsCriteria:true,questions,plan,analysis:null,sources:[],usage};
+
+ const events:Array<Record<string,unknown>>=[],executed:Array<ToolExecution&{purpose:string;instruction:string}>=[];
+ for(const step of plan.steps){
+  const tool=allowed.get(step.tool);if(!tool)continue;
+  const prior=executed.length?"\nVerified results from earlier steps that may provide IDs, dates or baselines: "+JSON.stringify(executed.map(item=>({tool:item.tool.name,purpose:item.purpose,result:item.result}))).slice(0,12000):"";
+  const instruction="Investigation step purpose: "+(step.purpose||"evidence")+"\nStep instruction: "+(step.instruction||request)+"\nOverall request: "+request+"\nResolved entity: "+JSON.stringify(entity)+prior+"\nUse only read operations and never invent an ID, period or record.";
+  const item=await executeSelected(input,runtime,tool,instruction,executed,events,usage);executed.push({...item,purpose:step.purpose,instruction:step.instruction});
+  if(item.result?.needsClarification)break;
+ }
+ const issues=executed.flatMap(item=>item.result?.needsClarification&&Array.isArray(item.result.issues)?item.result.issues.map(String):[]);
+ const sources=executed.map(item=>({tool:item.tool.name,module:item.tool.module,purpose:item.purpose,rowCount:compositeObjectRows(item.result).length}));
+ if(issues.length)return{mode,request,topic,entity,needsEntity:false,needsCriteria:true,questions:[...new Set(issues)],plan,analysis:null,sources,toolEvents:events,usage};
+
+ const verified=executed.map(item=>({tool:item.tool.name,module:item.tool.module,purpose:item.purpose,result:item.result}));
+ const compilePrompt="Perform a genuine evidence-based Ledgerly "+(mode==="account-for"?"explanation/investigation":"analysis")+". Do NOT fill a fixed report template and do NOT force the same headings used in other analyses. Decide the number and titles of sections from the evidence and the user's question.\nRequest: "+request+"\nTopic knowledge (a checklist of evidence to consider, not conclusions): "+knowledge+"\nResolved entity: "+JSON.stringify(entity)+"\nVerified Ledgerly evidence: "+JSON.stringify(verified).slice(0,42000)+"\nReturn JSON {title,summary,sections:[{title,analysis,evidence,metrics}],findings,metrics,relationships,limitations,unanswered,suggestedActions,rows,confidenceNote}. Rules: every factual claim must be traceable to verified evidence above; distinguish direct facts, calculations, associations and explanations; never invent missing records; never infer private motives; never blame a teacher, learner or guardian from correlation alone; for account-for, identify strongest observed contributors, counter-evidence and alternative explanations, and explicitly say when causation cannot be established; use comparisons and calculations only when denominators/periods are compatible; suggestedActions are advisory only and must not claim they were executed; rows should be flat supporting data when useful. Vary the analysis structure according to what the evidence actually shows.";
+ const compiled=await aiJson<GuidedAnalysisCompiled>(input,runtime,usage,"analysis_synthesize",compilePrompt,{title:topic?.label||"Ledgerly Analysis",summary:"",sections:[],findings:[],metrics:[],relationships:[],limitations:[],unanswered:[],suggestedActions:[],rows:[],confidenceNote:""},6200);
+ const analysis=sanitizeGuidedAnalysis(compiled),recentRows=await input.db.prepare("SELECT content FROM ae_messages WHERE organization_id=? AND conversation_id=? AND role='assistant' ORDER BY created_at DESC,id DESC LIMIT 5").bind(input.principal.organizationId,input.conversationId).all<{content:string}>(),recentResponses=recentRows.results.map(row=>row.content),recentText=recentResponses.join("\n\n").slice(0,12000),responseInput={purpose:(mode==="account-for"?"account-for":"analysis") as const,request,seed:createId("rsp"),topic:topic?.label||null,category:topic?.category||null,entityType:entity?.type||null,detail:"deep" as const,audience:input.agent.title||input.agent.key,recentText};
+ const pythonResponse=await realizeWithPythonResponseIntelligence(input.env,{
+   requestId:createId("rsp"),
+   purpose:mode==="account-for"?"account-for":"analysis",
+   request,
+   semanticPayload:{rows:analysis.rows,summary:{summary:analysis.summary},relationships:analysis.relationships,limitations:analysis.limitations,sources,findings:analysis.findings,metrics:analysis.metrics},
+   context:{organizationId:input.principal.organizationId,conversationId:input.conversationId,actor:input.principal.role,audience:input.agent.title||input.agent.key,topic:topic?.label||"",category:topic?.category||"",entityType:entity?.type||"",entityLabel:entity?.label||"",recentResponses,locale:"en-UG",currency:"UGX"},
+   detail:"deep",
+   providerMode:"auto",
+    generation:pythonGeneration(runtime),
+   toolPolicy:responseToolPolicy(request),
+   maxWords:1800,
+ });
+ let humanResponse=pythonResponse?.text||composeFallbackHumanResponse(analysis,responseInput),responseModel=pythonResponse?.model||runtime.model;
+ if(!pythonResponse){try{const realized=await aiText(input,runtime,usage,"analysis_response_realize",buildResponseRealizationPrompt(responseInput,analysis,verified.map(item=>({tool:item.tool,module:item.module,purpose:item.purpose,result:item.result}))),3200);if(realized.text.trim())humanResponse=cleanHumanResponse(realized.text);}catch{}}
+ const responseQuality=templateRisk(humanResponse);
+ return{mode,request,topic,entity,needsEntity:false,needsCriteria:false,questions:[],plan,analysis,humanResponse,responseMeta:{fingerprint:pythonResponse?.response_fingerprint||responseFingerprint(humanResponse),templateRisk:pythonResponse?false:responseQuality.risk,responseQuality:pythonResponse?.quality,responseEngine:pythonResponse?"python":"typescript-fallback",trainingExampleId:String(pythonResponse?.metadata?.trainingExampleId||""),registerBrief:buildResponseLanguageBrief(responseInput).split("\n").slice(0,5),model:responseModel},sources,toolEvents:events,model:responseModel,provider:pythonResponse?"response-intelligence-python":runtime.provider,usage};
 }
