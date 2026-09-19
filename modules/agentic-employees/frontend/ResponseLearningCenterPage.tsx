@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Brain, Check, CheckCircle2, Database, RefreshCcw, ShieldCheck,
   Sparkles, ThumbsDown, TrendingUp, X, XCircle,
@@ -163,7 +163,7 @@ export function ResponseLearningCenterPage(){
   </main>;
 }
 
-function Score({title,value,detail,icon}:{title:string;value:string|number;detail:string;icon:React.ReactNode}){return <div className="rlc-score"><span>{icon}</span><div><small>{title}</small><b>{value}</b><p>{detail}</p></div></div>;}
+function Score({title,value,detail,icon}:{title:string;value:string|number;detail:string;icon:ReactNode}){return <div className="rlc-score"><span>{icon}</span><div><small>{title}</small><b>{value}</b><p>{detail}</p></div></div>;}
 function Mini({label,value}:{label:string;value:string}){return <div className="rlc-mini"><small>{label}</small><b>{value}</b></div>;}
 function Loading(){return <div className="rlc-loading"><Activity className="spin" size={18}/><span>Loading learning state…</span></div>;}
 function Empty({title,text}:{title:string;text:string}){return <div className="rlc-empty"><Brain size={21}/><b>{title}</b><span>{text}</span></div>;}
