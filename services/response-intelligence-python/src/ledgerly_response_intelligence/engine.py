@@ -48,7 +48,12 @@ class ResponseIntelligenceEngine:
         self.realizer = DeterministicRealizer()
         self.critic = ResponseCritic()
         self.training_store = (
-            TrainingStore(settings.training_db_path, privacy_mode=settings.training_privacy_mode)
+            TrainingStore(
+                settings.training_db_path,
+                privacy_mode=settings.training_privacy_mode,
+                min_sft_examples=settings.training_min_sft_examples,
+                min_preference_examples=settings.training_min_preference_examples,
+            )
             if settings.learning_enabled
             else None
         )
