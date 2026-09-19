@@ -134,6 +134,7 @@ export async function submitPythonResponseFeedback(env:Env,input:{
   correctionText?:string;
   entityLabel?:string;
   approveOriginal?:boolean;
+  trustedReviewer?:boolean;
 }):Promise<Record<string,unknown>|null>{
   return trainingRequest<Record<string,unknown>>(env,"/v1/training/feedback",{
     method:"POST",
@@ -145,6 +146,7 @@ export async function submitPythonResponseFeedback(env:Env,input:{
       correction_text:input.correctionText||"",
       entity_label:input.entityLabel||"",
       approve_original:Boolean(input.approveOriginal),
+      trusted_reviewer:Boolean(input.trustedReviewer),
     }),
   });
 }
