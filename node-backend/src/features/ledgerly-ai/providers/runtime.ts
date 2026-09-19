@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Runtime } from "../../runtime.js";
 import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
-import { createLedgerlyAiCorrelationId, createLedgerlyAiLogger } from "../logger.js";
+import { createLedgerlyAiCorrelationId, createLedgerlyAiLogger, type LedgerlyAiLogger } from "../logger.js";
 import { ClaudeCodeCliProvider } from "./claude-code.js";
 import { ProviderCommandBuilder } from "./command-builder.js";
 import { CodexCliProvider } from "./codex.js";
@@ -17,7 +17,7 @@ export class LedgerlyAiProviderRuntime {
   readonly router: LedgerlyAiProviderRouter;
   private readonly providers: Map<LedgerlyAiProviderId, CodexCliProvider | ClaudeCodeCliProvider>;
   private readonly activeControllers = new Map<string, AbortController>();
-  private readonly logger;
+  private readonly logger: LedgerlyAiLogger;
 
   constructor(
     private readonly runtime: Runtime,

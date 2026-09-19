@@ -58,9 +58,9 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
 
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
     const sandbox = request.sandbox ?? "read-only";
-    const args = ["exec", "--json", "--sandbox", sandbox];
-    if (request.sessionId) args.push("resume", request.sessionId);
-    args.push(request.prompt);
+    const args = request.sessionId
+      ? ["exec", "--json", "--sandbox", sandbox, "resume", request.sessionId, request.prompt]
+      : ["exec", "--json", "--sandbox", sandbox, request.prompt];
     if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
     const command = this.commands.build(this.id, args, request.workspacePath, sandbox);
     const result = await runProviderProcess({
@@ -71,9 +71,7 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
     });
     if (result.timedOut) throw new Error("Ledgerly AI provider execution timed out.");
     if (result.aborted) throw new Error("Ledgerly AI provider execution was cancelled.");
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderrLines.at(-1) || "Ledgerly AI provider execution failed.");
-    }
+    if (result.exitCode !== 0) throw new Error(result.stderrLines.at(-1) || "Ledgerly AI provider execution failed.");
 
     let text = "";
     let sessionId = request.sessionId;
@@ -82,9 +80,7 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
       if (!event.data || typeof event.data !== "object") continue;
       const data = event.data as Record<string, unknown>;
       if (data.type === "thread.started" && typeof data.thread_id === "string") sessionId = data.thread_id;
-      if (data.type === "turn.completed" && data.usage && typeof data.usage === "object") {
-        usage = data.usage as Record<string, unknown>;
-      }
+      if (data.type === "turn.completed" && data.usage && typeof data.usage === "object") usage = data.usage as Record<string, unknown>;
       if (data.type === "item.completed" && data.item && typeof data.item === "object") {
         const item = data.item as Record<string, unknown>;
         if (item.type === "agent_message" && typeof item.text === "string") text = item.text;

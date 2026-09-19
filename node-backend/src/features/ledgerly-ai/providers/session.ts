@@ -1,4 +1,4 @@
-import { mkdir, readdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 
@@ -14,18 +14,24 @@ export class ProviderSessionStore {
     return path.join(this.config.LEDGERLY_AI_SESSION_ROOT, provider);
   }
 
+  private authMarker(provider: LedgerlyAiProviderId) {
+    return provider === "codex"
+      ? path.join(this.home(provider), "auth.json")
+      : path.join(this.home(provider), ".claude", ".credentials.json");
+  }
+
   async initialize() {
     await Promise.all([
       mkdir(this.home("codex"), { recursive: true, mode: 0o700 }),
-      mkdir(this.home("claude-code"), { recursive: true, mode: 0o700 }),
+      mkdir(path.join(this.home("claude-code"), ".claude"), { recursive: true, mode: 0o700 }),
       mkdir(this.config.LEDGERLY_AI_WORK_ROOT, { recursive: true, mode: 0o700 }),
     ]);
   }
 
   async configured(provider: LedgerlyAiProviderId) {
     try {
-      const entries = await readdir(this.home(provider), { withFileTypes: true });
-      return entries.some((entry) => !entry.name.startsWith(".ledgerly-placeholder"));
+      const info = await stat(this.authMarker(provider));
+      return info.isFile() && info.size > 0;
     } catch {
       return false;
     }
