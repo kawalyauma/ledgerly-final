@@ -495,3 +495,146 @@ Back up this directory together with the rest of the self-hosted Ledgerly produc
 Owners and administrators can manage the supervised learning lifecycle from **Agentic Employees → Learning Center**. The page shows readiness, approved/candidate counts, learned style, recent training runs and registered adapters. It supports candidate approval/rejection, SFT/DPO dataset export, adapter activation and safe adapter rollback.
 
 Choosing **Use provider only** deactivates the organization's trained adapter without deleting it. The normal delegated/service provider chain then handles responses again.
+
+
+## Institutional knowledge and RAG
+
+Response Intelligence has a separate persistent knowledge store for approved reference material.
+
+The evidence hierarchy is deliberately strict:
+
+```text
+1. Live Ledgerly records
+   students, staff, attendance, fees, academics, finance, tasks, books, etc.
+        ↓
+2. Approved institutional/global knowledge
+   school policies, manuals, circulars, procedures, research methodology
+        ↓
+3. Optional live web research
+   current/public external reference material
+```
+
+Reference knowledge is **not merged into the deterministic Ledgerly fact graph**. This prevents a policy threshold or web statistic from becoming a fake current value for a learner, teacher, account or transaction.
+
+The generation layer receives reference passages separately with title, source type, URL, scope and relevance. Material policy/background claims should be attributed to the source. External numeric claims are penalized by the critic when the response does not name the retrieved source or source domain.
+
+### Built-in analysis database
+
+On startup, the service can automatically seed an approved global methodology pack:
+
+```bash
+RIE_KNOWLEDGE_SEED_BUILTIN_ON_STARTUP=true
+```
+
+The starter pack covers professional analytical reasoning for areas including:
+
+- chronic absenteeism,
+- fee balances and payment patterns,
+- lesson delivery and syllabus coverage,
+- academic performance trends,
+- teacher attendance and instructional continuity,
+- assessment participation,
+- class/stream comparisons,
+- learner risk synthesis,
+- guardian engagement,
+- discipline records,
+- timetable exposure,
+- subject diagnosis,
+- teacher workload,
+- cash collection,
+- budget versus actual,
+- books and learning materials,
+- enrollment/retention,
+- staffing gaps,
+- operational exceptions,
+- evidence-based “account for” reports,
+- recommendation quality,
+- data quality,
+- trend interpretation,
+- correlation versus causation.
+
+This material contains **general analytical methodology**, not local school facts.
+
+### Knowledge Center
+
+Owners and administrators can use **Agentic Employees → Knowledge Center** to:
+
+- inspect source/chunk counts,
+- seed an organization copy of the professional starter pack,
+- add school policies, circulars, manuals, procedures, research notes or other text,
+- keep a source unapproved while it is being reviewed,
+- approve or withdraw a source from retrieval,
+- delete obsolete sources,
+- preview what the retriever would return for a query.
+
+Only approved sources are automatically retrieved.
+
+### Knowledge configuration
+
+```bash
+RIE_KNOWLEDGE_ENABLED=true
+RIE_KNOWLEDGE_RETRIEVAL_ENABLED=true
+RIE_KNOWLEDGE_DB_PATH=data/response-intelligence-knowledge.sqlite3
+RIE_KNOWLEDGE_RETRIEVAL_LIMIT=6
+RIE_KNOWLEDGE_INCLUDE_GLOBAL=true
+RIE_KNOWLEDGE_SEED_BUILTIN_ON_STARTUP=true
+RIE_KNOWLEDGE_MAX_CONTEXT_CHARS=18000
+```
+
+The Docker data volume persists this SQLite knowledge store.
+
+## Live web research
+
+Live web research is optional and disabled by default.
+
+It has two independent gates plus a configured provider:
+
+```bash
+RIE_ALLOW_EXTERNAL_TOOLS=true
+RIE_ALLOW_WEB_SEARCH=true
+RIE_WEB_SEARCH_PROVIDER=brave
+RIE_WEB_SEARCH_API_KEY=...
+```
+
+Supported providers:
+
+- `brave`
+- `tavily`
+
+Brave example:
+
+```bash
+RIE_ALLOW_EXTERNAL_TOOLS=true
+RIE_ALLOW_WEB_SEARCH=true
+RIE_WEB_SEARCH_PROVIDER=brave
+RIE_WEB_SEARCH_API_KEY=...
+RIE_WEB_SEARCH_MAX_RESULTS=6
+```
+
+Tavily example:
+
+```bash
+RIE_ALLOW_EXTERNAL_TOOLS=true
+RIE_ALLOW_WEB_SEARCH=true
+RIE_WEB_SEARCH_PROVIDER=tavily
+RIE_WEB_SEARCH_API_KEY=...
+RIE_WEB_SEARCH_MAX_RESULTS=6
+```
+
+An optional domain allowlist can constrain research:
+
+```bash
+RIE_WEB_SEARCH_DOMAIN_ALLOWLIST=example.edu,example.gov
+```
+
+Web search is requested only when the user explicitly asks for external/current research, including **`/research`** or phrases such as “search the web” and “use online sources”.
+
+Web results:
+- are source-attributed,
+- remain outside the Ledgerly fact graph,
+- are not automatically saved as approved institutional knowledge,
+- are sanitized before prompt inclusion,
+- are treated as untrusted quoted data,
+- cannot issue instructions to the response engine.
+
+A web source that should become durable institutional knowledge must still be deliberately added/approved through the Knowledge Center.
