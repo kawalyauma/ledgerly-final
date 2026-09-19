@@ -23,6 +23,7 @@ const REFERENCES:Record<string,RefSpec>={
   studentid:{table:"school_students",textColumns:["admission_number","student_number","first_name","last_name"]},
   guardianid:{table:"school_guardians",textColumns:["first_name","last_name","phone_primary","email"],activeColumn:"active"},
   staffid:{table:"school_staff_profiles",textColumns:["staff_number","first_name","last_name"]},
+  teacherstaffid:{table:"school_staff_profiles",textColumns:["staff_number","first_name","last_name"]},
   teacheruserid:{table:"school_staff_profiles",returnColumn:"user_id",textColumns:["staff_number","first_name","last_name"]},
   classteacheruserid:{table:"school_staff_profiles",returnColumn:"user_id",textColumns:["staff_number","first_name","last_name"]},
   headuserid:{table:"school_staff_profiles",returnColumn:"user_id",textColumns:["staff_number","first_name","last_name"]},

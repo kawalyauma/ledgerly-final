@@ -88,8 +88,8 @@ export const moduleCatalog = [
   {
     "key": "agentic-employees",
     "name": "AI Employees",
-    "version": "2.1.0",
-    "description": "Tenant-safe AI school employees with a professional Chat Studio, searchable slash quick commands, schema-driven validated forms, governed Ledgerly actions and professional PDF, DOCX, XLSX and PPTX reporting.",
+    "version": "2.8.0",
+    "description": "Tenant-safe AI school employees with Chat Studio and a high-end Agentic Command Center featuring searchable slash commands, query criteria, composite multi-tool reports, guided evidence analysis and explanation, output selection, governed writes and professional exports.",
     "category": "automation",
     "core": false,
     "active": true,
@@ -121,7 +121,12 @@ export const moduleCatalog = [
       "providers": [
         "openai",
         "google",
-        "anthropic"
+        "anthropic",
+        "groq",
+        "cloudflare",
+        "openrouter",
+        "ollama",
+        "custom"
       ],
       "providerScope": "per-organization",
       "modelRouting": [
@@ -228,7 +233,32 @@ export const moduleCatalog = [
         "searchable-reference-pickers",
         "deterministic-command-validation",
         "direct-read-quick-commands",
-        "governed-write-quick-commands"
+        "governed-write-quick-commands",
+        "dedicated-agentic-command-center",
+        "query-criteria-builder",
+        "command-output-format-selector",
+        "interactive-command-results",
+        "command-csv-export",
+        "command-xlsx-export",
+        "command-pdf-export",
+        "expanded-command-synonyms",
+        "5000-route-node-capability-ceiling",
+        "composite-report-planner",
+        "multi-tool-read-plans",
+        "cross-module-student-joins",
+        "repeated-tool-period-comparisons",
+        "composite-report-criteria-prompts",
+        "composite-report-export",
+        "guided-analysis-catalog",
+        "guided-account-for",
+        "cross-entity-analysis-resolution",
+        "teacher-student-account-entity-detection",
+        "evidence-family-guidance",
+        "dynamic-analysis-planning",
+        "counter-evidence-analysis",
+        "non-template-analysis-synthesis",
+        "analysis-suggested-follow-up",
+        "43-domain-analysis-knowledge-base"
       ]
     }
   },

@@ -98,7 +98,7 @@ function title(value:string){return human(value).replace(/\b\w/g,x=>x.toUpperCas
 function singular(value:string){const n=normalize(value);if(NOUN_OVERRIDES[n])return NOUN_OVERRIDES[n];const v=human(value).toLowerCase();if(v.endsWith("ies"))return `${v.slice(0,-3)}y`;if(v.endsWith("sses"))return v.slice(0,-2);if(v.endsWith("s")&&!v.endsWith("ss"))return v.slice(0,-1);return v;}
 function pathStatic(path:string){return path.split("?")[0]!.split("/").filter(Boolean).slice(2).filter(x=>!x.startsWith(":"));}
 function entityFor(tool:LightToolDescriptor){
-  const promoted=tool.name.match(/^(?:create|list|get|update|delete|report|search|prepare|open)_([a-z0-9_]+)$/);
+  const promoted=tool.name.match(/^(?:create|list|get|update|delete|report|search|prepare|open|import|export)_([a-z0-9_]+)$/);
   if(promoted)return singular(promoted[1]!.replace(/_/g," "));
   const parts=pathStatic(tool.pathTemplate||"").filter(x=>!["school","setup","student-management","staff-management","api","v1"].includes(x.toLowerCase()));
   let last=parts.at(-1)||tool.group||tool.module||"item";
@@ -130,6 +130,8 @@ function aliasesFor(tool:LightToolDescriptor){
   const variants=ENTITY_SYNONYMS[entity]||ENTITY_SYNONYMS[noun]||[noun];
   for(const variant of variants)for(const verb of verbs)values.add(`${verb} ${variant}`);
   if(tool.kind==="create")for(const variant of ENTITY_SYNONYMS[entity]||[entity]){values.add(`add new ${variant}`);values.add(`create new ${variant}`);}
+  if(tool.name.startsWith("import_"))for(const variant of ENTITY_SYNONYMS[entity]||[entity]){values.add(`import ${variant}`);values.add(`upload ${variant}`);values.add(`paste ${variant}`);}
+  if(tool.name.startsWith("export_"))for(const variant of ENTITY_SYNONYMS[entity]||[entity])values.add(`export ${variant}`);
   if(tool.kind==="query"&&!queryIsCollection)for(const variant of ENTITY_SYNONYMS[entity]||[entity]){values.add(`open ${variant} record`);values.add(`search ${variant} records`);}
   return[...values].map(v=>v.toLowerCase().replace(/\s+/g," ").trim()).filter(v=>v.length>1&&v.length<100).slice(0,30);
 }
@@ -166,7 +168,7 @@ function pathFields(tool:LightToolDescriptor):QuickCommandField[]{
 }
 function nativeFields(tool:LightToolDescriptor):QuickCommandField[]{
   const params=(tool.parameters||{}) as any,props=(params.properties||{}) as Record<string,any>,required=new Set<string>(Array.isArray(params.required)?params.required.map(String):[]);
-  return Object.entries(props).map(([name,spec])=>{const type=String(spec?.type||"string"),enumValues=Array.isArray(spec?.enum)?spec.enum.map(String):undefined,key=referenceKey(name);return{name,requestKey:name,label:title(name),control:controlFor(name,type,enumValues),required:required.has(name),location:"native",enum:enumValues,notes:String(spec?.description||""),referenceKey:key,min:Number.isFinite(spec?.minimum)?Number(spec.minimum):undefined,max:Number.isFinite(spec?.maximum)?Number(spec.maximum):undefined,integer:type==="integer"};});
+  return Object.entries(props).map(([name,spec])=>{const type=String(spec?.type||"string"),enumValues=Array.isArray(spec?.enum)?spec.enum.map(String):undefined,key=referenceKey(name);const forcedTextarea=/^(data|content|csv|bulkdata)$/i.test(name);return{name,requestKey:name,label:title(name),control:forcedTextarea?"textarea":controlFor(name,type,enumValues),required:required.has(name),location:"native",enum:enumValues,notes:String(spec?.description||""),referenceKey:key,min:Number.isFinite(spec?.minimum)?Number(spec.minimum):undefined,max:Number.isFinite(spec?.maximum)?Number(spec.maximum):undefined,integer:type==="integer"};});
 }
 function queryCriteriaFor(tool:LightToolDescriptor):QuickCommandField[]{
   if(tool.source!=="route"||!tool.readOnly||tool.method!=="GET")return[];
@@ -304,7 +306,7 @@ export async function executeQuickCommand(input:{db:D1Database;env:Env;principal
   if(tool.source==="native"){
     const args:Record<string,unknown>={};for(const field of descriptor.fields.filter(f=>f.location==="native"))if(typed[field.name]!==undefined)args[field.requestKey]=typed[field.name];
     const resolved=await resolveLightReferences(input.db,input.principal.organizationId,args);if(resolved.issues.length)throw new AppError(422,"VALIDATION_ERROR",resolved.issues.join(" "));
-    result=await executeTool({db:input.db,principal:input.principal,agent:input.agent,conversationId:input.conversationId,requestedTools:null},tool.nativeName||tool.name,resolved.value);
+    result=await executeTool({db:input.db,env:input.env,principal:input.principal,agent:input.agent,conversationId:input.conversationId,requestedTools:null},tool.nativeName||tool.name,resolved.value);
     const actionId=result?.action?.id;
     if(actionId){
       const{action:executedAction,result:apiResult}=await approveAndExecuteAction(input.env,input.principal,actionId);

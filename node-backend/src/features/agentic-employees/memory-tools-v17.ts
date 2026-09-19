@@ -6,6 +6,7 @@ import {syncCurriculumLoadRules} from "./stubs.js";
 import {reviewGeneratedDraft} from "./stubs.js";
 import {recoveryOptions,substituteCandidates} from "./stubs.js";
 import { executeSemanticTool,isSemanticTool,semanticOpenAiTools } from "./semantic-tools.js";
+import { executeAcademicsImport,exportAcademicsImportKit } from "./academics-import.js";
 
 const MEMORY_TOOLS:any[]=[
  {type:"function",name:"search_memory",strict:false,description:"Search this employee's saved working and institutional memory.",parameters:{type:"object",properties:{query:{type:"string"},limit:{type:"integer",minimum:1,maximum:50}},additionalProperties:false}},
@@ -20,6 +21,15 @@ const TIMETABLE_TOOLS:any[]=[
  {type:"function",name:"timetable_lesson_context",strict:false,description:"Answer what is scheduled to be taught on a specific date and period using actual Ledgerly timetable occurrences, including subject, teacher, scheme lesson/topic, lesson plan and competencies. Never guess lesson content when no scheme lesson is linked.",parameters:{type:"object",properties:{timetableId:{type:"string"},date:{type:"string",description:"YYYY-MM-DD"}},required:["timetableId","date"],additionalProperties:false}},
  {type:"function",name:"timetable_contingency_options",strict:false,description:"Find professional options for a disrupted dated timetable period. For kind=substitute, rank free teachers with same-subject qualification first, then class familiarity, availability and daily load. For kind=recovery, find future conflict-free slots preserving the same teacher, class, subject and scheme lesson. This is read-only advice; changing the timetable still requires a governed Ledgerly action.",parameters:{type:"object",properties:{occurrenceId:{type:"string"},kind:{type:"string",enum:["substitute","recovery"]},horizonDays:{type:"integer",minimum:1,maximum:60}},required:["occurrenceId","kind"],additionalProperties:false}}
 ];
+const IMPORT_TOOLS:any[]=[
+ {type:"function",name:"export_academics_import_kit",strict:false,description:"Export current classes, streams, subjects, teachers, academic years, terms, timetables and schemes as reference data, plus a ready-to-use prompt and field schema for each importable academics entity (timetable periods, scheme of work items, subject assignments, teacher assignments, lesson plans). Give the referenceData and prompt to an external AI to generate a JSON array, then use the matching import_* tool to load it.",parameters:{type:"object",properties:{},additionalProperties:false}},
+ {type:"function",name:"import_timetable_entries",strict:false,description:"Bulk-create timetable periods (day/time/class/subject/teacher) in an existing timetable from pasted JSON or CSV. Validates every row and resolves names before writing anything; if any row has a problem, nothing is written.",parameters:{type:"object",properties:{timetableId:{type:"string",description:"The timetable to add periods to."},data:{type:"string",description:"JSON array or CSV text of timetable periods."}},required:["timetableId","data"],additionalProperties:false}},
+ {type:"function",name:"import_scheme_items",strict:false,description:"Bulk-create scheme-of-work items (week-by-week syllabus coverage) in an existing scheme from pasted JSON or CSV.",parameters:{type:"object",properties:{schemeId:{type:"string",description:"The scheme of work to add items to."},data:{type:"string",description:"JSON array or CSV text of scheme items."}},required:["schemeId","data"],additionalProperties:false}},
+ {type:"function",name:"import_subject_assignments",strict:false,description:"Bulk-assign subjects to class levels from pasted JSON or CSV.",parameters:{type:"object",properties:{data:{type:"string",description:"JSON array or CSV text of subject assignments."}},required:["data"],additionalProperties:false}},
+ {type:"function",name:"import_teacher_assignments",strict:false,description:"Bulk-assign teachers to teach a subject in a class from pasted JSON or CSV.",parameters:{type:"object",properties:{data:{type:"string",description:"JSON array or CSV text of teacher assignments."}},required:["data"],additionalProperties:false}},
+ {type:"function",name:"import_lesson_plans",strict:false,description:"Bulk-create lesson plans from pasted JSON or CSV.",parameters:{type:"object",properties:{data:{type:"string",description:"JSON array or CSV text of lesson plans."}},required:["data"],additionalProperties:false}},
+];
+const IMPORT_ENTITY_FOR_TOOL:Record<string,string>={import_timetable_entries:"timetable_entry",import_scheme_items:"scheme_item",import_subject_assignments:"subject_assignment",import_teacher_assignments:"teacher_assignment",import_lesson_plans:"lesson_plan"};
 const timetableAgent=(key:string)=>key==="dos"||key==="headteacher";
 const timetableAllowed=(agent:any,name:string,requested?:string[]|null)=>timetableAgent(agent.key)&&(!requested||requested.includes(name));
 
@@ -34,11 +44,19 @@ export function openAiTools(agent:any,requested?:string[]|null){
   ...baseTools(agent,requested),
   ...MEMORY_TOOLS,
   ...TIMETABLE_TOOLS.filter(tool=>timetableAllowed(agent,tool.name,requested)),
+  ...IMPORT_TOOLS.filter(tool=>timetableAllowed(agent,tool.name,requested)),
  ]);
 }
 
 export async function executeTool(ctx:ToolContext & {env?:any},name:string,raw:unknown){
  if(isSemanticTool(name))return executeSemanticTool(ctx,name,raw);
+ if(IMPORT_TOOLS.some(x=>x.name===name)){
+  if(!timetableAllowed(ctx.agent,name,ctx.requestedTools))throw new Error(`${name} is not enabled for this employee run`);
+  const args=(raw&&typeof raw==="object"?raw:{}) as Record<string,any>;
+  if(name==="export_academics_import_kit")return exportAcademicsImportKit(ctx.db,ctx.principal.organizationId);
+  if(!ctx.env)throw new Error("Ledgerly command gateway is unavailable.");
+  return executeAcademicsImport(ctx as any,IMPORT_ENTITY_FOR_TOOL[name]!,args);
+ }
  const tt=TIMETABLE_TOOLS.some(x=>x.name===name);
  if(tt){
   if(!timetableAllowed(ctx.agent,name,ctx.requestedTools))throw new Error(`${name} is not enabled for this employee run`);
