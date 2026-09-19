@@ -15,7 +15,7 @@ from .models import (
 )
 from .planner import DiscoursePlanner
 from .providers.base import GenerationProvider
-from .providers.factory import build_delegated_provider, build_provider
+from .providers.factory import build_delegated_provider, build_local_adapter_provider, build_provider
 from .reasoning import ReasoningEngine
 from .realization import (
     DeterministicRealizer,
@@ -91,8 +91,28 @@ class ResponseIntelligenceEngine:
             tool_events = await self._tool_policy_events(request.tool_policy)
 
         delegated_provider = build_delegated_provider(request.generation)
-        active_provider = delegated_provider or self.provider
-        use_provider = request.provider_mode != "disabled" and active_provider is not None
+        active_adapter = None
+        local_adapter_provider = None
+        if (
+            self.settings.training_prefer_active_adapter
+            and self.training_store is not None
+            and request.context.organization_id
+        ):
+            active_adapter = self.training_store.active_adapter(request.context.organization_id)
+            if active_adapter is not None:
+                local_adapter_provider = build_local_adapter_provider(
+                    base_model=active_adapter.base_model,
+                    adapter_path=active_adapter.path,
+                    device_map=self.settings.local_adapter_device_map,
+                    temperature=self.settings.local_adapter_temperature,
+                )
+
+        provider_candidates: list[GenerationProvider] = []
+        for candidate in [local_adapter_provider, delegated_provider, self.provider]:
+            if candidate is not None and all(candidate is not item for item in provider_candidates):
+                provider_candidates.append(candidate)
+        active_provider: GenerationProvider | None = provider_candidates[0] if provider_candidates else None
+        use_provider = request.provider_mode != "disabled" and bool(provider_candidates)
         if request.provider_mode == "required" and not use_provider:
             raise RuntimeError("A generation provider is required for this request but none is configured.")
 
@@ -102,22 +122,29 @@ class ResponseIntelligenceEngine:
         revision_count = 0
 
         if use_provider:
-            try:
-                system, prompt = build_generation_prompt(request, evidence, plan, reasoning=reasoning, learned_examples=learned_examples, style_profile=style_profile)
-                assert active_provider is not None
-                response = await active_provider.generate(
-                    system=system,
-                    prompt=prompt,
-                    max_tokens=self._token_budget(request.max_words),
-                )
-                if response.text.strip():
-                    draft = clean_response(response.text)
-                    provider_name = response.provider
-                    model = response.model
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Response provider failed; using deterministic realization: %s", exc)
-                if request.provider_mode == "required":
-                    raise
+            system, prompt = build_generation_prompt(
+                request,evidence,plan,reasoning=reasoning,
+                learned_examples=learned_examples,style_profile=style_profile,
+            )
+            last_error: Exception | None = None
+            generated = False
+            for candidate in provider_candidates:
+                try:
+                    response = await candidate.generate(
+                        system=system,prompt=prompt,max_tokens=self._token_budget(request.max_words),
+                    )
+                    if response.text.strip():
+                        draft=clean_response(response.text)
+                        provider_name=response.provider
+                        model=response.model
+                        active_provider=candidate
+                        generated=True
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    last_error=exc
+                    logger.warning("Response provider %s failed; trying fallback: %s",getattr(candidate,"name","unknown"),exc)
+            if request.provider_mode=="required" and not generated:
+                raise RuntimeError(f"All configured generation providers failed: {last_error}")
 
         quality = self.critic.evaluate(draft, request, evidence, reasoning)
         if use_provider:
@@ -191,8 +218,11 @@ class ResponseIntelligenceEngine:
             response_fingerprint=final_fingerprint,
             tool_events=tool_events,
             metadata={
-                "providerConfigured": bool(active_provider),
+                "providerConfigured": bool(provider_candidates),
                 "providerDelegated": delegated_provider is not None,
+                "activeAdapterId": active_adapter.adapter_id if active_adapter else "",
+                "activeAdapterPreferred": self.settings.training_prefer_active_adapter,
+                "providerFallbacks": [getattr(item,"name","unknown") for item in provider_candidates],
                 "externalToolsEnabled": self.settings.allow_external_tools,
                 "webSearchEnabled": self.settings.allow_web_search,
                 "factCount": len(evidence.facts),
