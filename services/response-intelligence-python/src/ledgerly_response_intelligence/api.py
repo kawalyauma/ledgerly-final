@@ -21,6 +21,8 @@ from .models import (
     ResponseResult,
 )
 from .semantic import merge_evidence
+from .training.datasets import DatasetBuilder
+from .training.models import DatasetExportRequest, DatasetExportResult, FeedbackCreate, FeedbackRecord, StyleProfile, TrainingExample, TrainingExampleCreate, TrainingStats
 
 
 logging.basicConfig(level=get_settings().log_level)
@@ -137,3 +139,108 @@ async def respond(
         return await engine.respond(request)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def require_training(engine: ResponseIntelligenceEngine) -> None:
+    if engine.training_store is None:
+        raise HTTPException(status_code=503, detail="Response learning is disabled.")
+
+
+@app.get("/v1/training/stats", response_model=TrainingStats, dependencies=[Depends(authorize)])
+async def training_stats(
+    organization_id: str = "",
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> TrainingStats:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.stats(organization_id)
+
+
+@app.get("/v1/training/examples", response_model=list[TrainingExample], dependencies=[Depends(authorize)])
+async def training_examples(
+    organization_id: str = "",
+    status_filter: str = "",
+    purpose: str = "",
+    limit: int = 100,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> list[TrainingExample]:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.list_examples(
+        organization_id=organization_id,
+        status=status_filter,
+        purpose=purpose,
+        limit=limit,
+        include_global=False,
+    )
+
+
+@app.post("/v1/training/examples", response_model=TrainingExample, dependencies=[Depends(authorize)])
+async def create_training_example(
+    item: TrainingExampleCreate,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> TrainingExample:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.add_example(item)
+
+
+@app.post("/v1/training/feedback", response_model=FeedbackRecord, dependencies=[Depends(authorize)])
+async def training_feedback(
+    item: FeedbackCreate,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> FeedbackRecord:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.add_feedback(item)
+
+
+@app.post("/v1/training/examples/{example_id}/approve", response_model=TrainingExample, dependencies=[Depends(authorize)])
+async def approve_training_example(
+    example_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> TrainingExample:
+    require_training(engine)
+    assert engine.training_store is not None
+    try:
+        return engine.training_store.set_status(example_id, "approved")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Training example not found.") from exc
+
+
+@app.post("/v1/training/examples/{example_id}/reject", response_model=TrainingExample, dependencies=[Depends(authorize)])
+async def reject_training_example(
+    example_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> TrainingExample:
+    require_training(engine)
+    assert engine.training_store is not None
+    try:
+        return engine.training_store.set_status(example_id, "rejected")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Training example not found.") from exc
+
+
+@app.get("/v1/training/style-profile", response_model=StyleProfile, dependencies=[Depends(authorize)])
+async def training_style_profile(
+    organization_id: str,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> StyleProfile:
+    require_training(engine)
+    assert engine.training_store is not None
+    return engine.training_store.style_profile(organization_id)
+
+
+@app.post("/v1/training/export", response_model=DatasetExportResult, dependencies=[Depends(authorize)])
+async def export_training_dataset(
+    item: DatasetExportRequest,
+    engine: ResponseIntelligenceEngine = Depends(get_engine),
+) -> DatasetExportResult:
+    require_training(engine)
+    assert engine.training_store is not None
+    builder = DatasetBuilder(
+        engine.training_store,
+        get_settings().training_dataset_dir,
+        get_settings().training_privacy_mode,
+    )
+    return builder.export(item)
