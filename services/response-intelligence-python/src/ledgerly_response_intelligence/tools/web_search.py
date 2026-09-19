@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 import httpx
@@ -7,6 +8,13 @@ import httpx
 from ..config import Settings
 from .base import ToolCapability, ToolRequest, ToolResult
 from .registry import ToolRegistry
+
+
+def _clean_snippet(value:object,max_chars:int=5000)->str:
+    text=str(value or "").replace("\x00"," ").replace("\r"," ").strip()
+    text=re.sub(r"<[^>]{1,200}>"," ",text)
+    text=re.sub(r"[ \t]{2,}"," ",text)
+    return text[:max_chars].rstrip()
 
 
 def _allowed_domains(settings:Settings)->list[str]:
@@ -45,7 +53,7 @@ async def _brave(settings:Settings,request:ToolRequest)->ToolResult:
         result={
             "title":str(item.get("title") or ""),
             "url":url,
-            "snippet":str(item.get("description") or ""),
+            "snippet":_clean_snippet(item.get("description")),
             "age":str(item.get("age") or ""),
             "provider":"brave",
         }
@@ -86,7 +94,7 @@ async def _tavily(settings:Settings,request:ToolRequest)->ToolResult:
         result={
             "title":str(item.get("title") or ""),
             "url":url,
-            "snippet":str(item.get("content") or ""),
+            "snippet":_clean_snippet(item.get("content")),
             "score":float(item.get("score") or 0),
             "provider":"tavily",
         }
