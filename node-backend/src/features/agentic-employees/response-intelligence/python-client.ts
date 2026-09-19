@@ -228,3 +228,101 @@ export async function deactivatePythonAdapters(
   const query="?organization_id="+encodeURIComponent(organizationId);
   return trainingRequest<Record<string,unknown>>(env,"/v1/training/adapters/deactivate"+query,{method:"POST"});
 }
+
+
+export async function getPythonKnowledgeStats(env:Env,organizationId:string):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/knowledge/stats?organization_id="+encodeURIComponent(organizationId));
+}
+
+export async function getPythonKnowledgeSources(
+  env:Env,
+  organizationId:string,
+  approvedOnly=false,
+  limit=200,
+):Promise<Array<Record<string,unknown>>|null>{
+  const query=new URLSearchParams({
+    organization_id:organizationId,
+    approved_only:String(approvedOnly),
+    limit:String(Math.max(1,Math.min(limit,500))),
+  });
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/knowledge/sources?"+query.toString());
+}
+
+export async function createPythonKnowledgeSource(env:Env,input:{
+  organizationId:string;
+  title:string;
+  sourceType:string;
+  content:string;
+  url?:string;
+  author?:string;
+  publishedAt?:string;
+  approved?:boolean;
+  tags?:string[];
+  metadata?:Record<string,unknown>;
+}):Promise<Record<string,unknown>|null>{
+  return trainingRequest<Record<string,unknown>>(env,"/v1/knowledge/sources",{
+    method:"POST",
+    body:JSON.stringify({
+      organization_id:input.organizationId,
+      title:input.title,
+      source_type:input.sourceType,
+      content:input.content,
+      url:input.url||"",
+      author:input.author||"",
+      published_at:input.publishedAt||"",
+      approved:Boolean(input.approved),
+      tags:input.tags||[],
+      metadata:input.metadata||{},
+    }),
+  });
+}
+
+export async function setPythonKnowledgeSourceApproval(
+  env:Env,
+  organizationId:string,
+  sourceId:string,
+  approved:boolean,
+):Promise<Record<string,unknown>|null>{
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Record<string,unknown>>(
+    env,
+    "/v1/knowledge/sources/"+encodeURIComponent(sourceId)+"/"+(approved?"approve":"reject")+query,
+    {method:"POST"},
+  );
+}
+
+export async function deletePythonKnowledgeSource(
+  env:Env,
+  organizationId:string,
+  sourceId:string,
+):Promise<Record<string,unknown>|null>{
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Record<string,unknown>>(env,"/v1/knowledge/sources/"+encodeURIComponent(sourceId)+query,{method:"DELETE"});
+}
+
+export async function seedPythonKnowledgeStarterPack(
+  env:Env,
+  organizationId:string,
+):Promise<Array<Record<string,unknown>>|null>{
+  const query="?organization_id="+encodeURIComponent(organizationId);
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/knowledge/seed-starter-pack"+query,{method:"POST"});
+}
+
+export async function searchPythonKnowledge(env:Env,input:{
+  organizationId:string;
+  query:string;
+  limit?:number;
+  includeGlobal?:boolean;
+  sourceTypes?:string[];
+}):Promise<Array<Record<string,unknown>>|null>{
+  return trainingRequest<Array<Record<string,unknown>>>(env,"/v1/knowledge/search",{
+    method:"POST",
+    body:JSON.stringify({
+      organization_id:input.organizationId,
+      query:input.query,
+      limit:Math.max(1,Math.min(input.limit||6,30)),
+      include_global:input.includeGlobal!==false,
+      source_types:input.sourceTypes||[],
+    }),
+  });
+}
