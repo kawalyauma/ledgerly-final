@@ -4,7 +4,7 @@ import { LedgerlyAiFoundationService } from "./service.js";
 
 export const ledgerlyAiFeature: BackendFeature = {
   key: "ledgerly-ai",
-  version: "0.1.0",
+  version: "0.2.0",
   mount(app, runtime) {
     const service = new LedgerlyAiFoundationService(runtime);
     service.start();

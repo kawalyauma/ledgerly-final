@@ -30,11 +30,6 @@ services:
       timeout: 3s
       retries: 20
 
-  # migrate/api/queue/scheduler run on the host network, not the compose bridge
-  # network, so they can reach real AI providers (OpenAI/Gemini/Claude/Workers
-  # AI) — some sandboxed Docker hosts block outbound internet from the default
-  # bridge network entirely. Postgres/Redis are reached via the published
-  # loopback ports above instead of their service-name DNS.
   migrate:
     build:
       context: .
@@ -49,7 +44,6 @@ services:
       STORAGE_DRIVER: local
       STORAGE_LOCAL_ROOT: /data/storage
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
-      # Keep the main Node API and modular/self-host API on one token authority.
       JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
       JWT_AUDIENCE: ${JWT_AUDIENCE:-your-finance-pro-api}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
@@ -59,6 +53,16 @@ services:
       OPENAI_MODEL_LUNA: ${OPENAI_MODEL_LUNA:-}
       OPENAI_MODEL_TERRA: ${OPENAI_MODEL_TERRA:-}
       OPENAI_MODEL_SOL: ${OPENAI_MODEL_SOL:-}
+      LEDGERLY_AI_ENABLED: ${LEDGERLY_AI_ENABLED:-true}
+      LEDGERLY_AI_DEFAULT_PROVIDER: ${LEDGERLY_AI_DEFAULT_PROVIDER:-codex}
+      LEDGERLY_AI_FALLBACK_PROVIDER: ${LEDGERLY_AI_FALLBACK_PROVIDER:-claude-code}
+      LEDGERLY_AI_EXECUTION_MODE: ${LEDGERLY_AI_EXECUTION_MODE:-docker}
+      LEDGERLY_AI_CODEX_IMAGE: ${LEDGERLY_AI_CODEX_IMAGE:-ledgerly-ai-codex:local}
+      LEDGERLY_AI_CLAUDE_IMAGE: ${LEDGERLY_AI_CLAUDE_IMAGE:-ledgerly-ai-claude-code:local}
+      LEDGERLY_AI_SESSION_ROOT: /var/lib/ledgerly-ai/sessions
+      LEDGERLY_AI_WORK_ROOT: /var/lib/ledgerly-ai/workspaces
+      LEDGERLY_AI_MAX_CONCURRENCY: ${LEDGERLY_AI_MAX_CONCURRENCY:-4}
+      LEDGERLY_AI_MAX_QUEUE: ${LEDGERLY_AI_MAX_QUEUE:-100}
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -72,8 +76,13 @@ services:
     environment:
       <<: *backend-env
       PORT: ${LEDGERLY_API_PORT:-8787}
+    group_add:
+      - "${DOCKER_GID:-999}"
     volumes:
       - app-storage:/data/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/ledgerly-ai/sessions:/var/lib/ledgerly-ai/sessions
+      - /var/lib/ledgerly-ai/workspaces:/var/lib/ledgerly-ai/workspaces
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }

@@ -1,6 +1,7 @@
 import type { Runtime } from "../../runtime.js";
 import { parseLedgerlyAiConfig, type LedgerlyAiConfig } from "./config.js";
 import { createLedgerlyAiLogger, type LedgerlyAiLogger } from "./logger.js";
+import { LedgerlyAiProviderRuntime } from "./providers/runtime.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -13,12 +14,14 @@ export type LedgerlyAiHealth = {
     config: { status: "ok" | "error" };
     postgres: { status: "ok" | "error"; latencyMs: number; error?: string };
     schema: { status: "ok" | "error"; latencyMs: number; error?: string };
+    providerPool: { status: "ok" | "error"; available: number; configured: number };
   };
 };
 
 export class LedgerlyAiFoundationService {
   readonly config: LedgerlyAiConfig;
   readonly startedAt = new Date().toISOString();
+  readonly providers: LedgerlyAiProviderRuntime;
   private readonly logger: LedgerlyAiLogger;
 
   constructor(
@@ -27,24 +30,27 @@ export class LedgerlyAiFoundationService {
   ) {
     this.config = parseLedgerlyAiConfig(env);
     this.logger = createLedgerlyAiLogger(runtime.logger);
+    this.providers = new LedgerlyAiProviderRuntime(runtime, this.config);
     this.logger.info(
       {
         enabled: this.config.LEDGERLY_AI_ENABLED,
+        executionMode: this.config.LEDGERLY_AI_EXECUTION_MODE,
         maxConcurrency: this.config.LEDGERLY_AI_MAX_CONCURRENCY,
         startupHealthcheck: this.config.LEDGERLY_AI_STARTUP_HEALTHCHECK,
       },
-      "Ledgerly AI foundation initialized",
+      "Ledgerly AI initialized",
     );
   }
 
   start() {
-    if (!this.config.LEDGERLY_AI_STARTUP_HEALTHCHECK) return;
-    void this.health()
-      .then((health) => {
+    void this.providers.initialize()
+      .then(async () => {
+        if (!this.config.LEDGERLY_AI_STARTUP_HEALTHCHECK) return;
+        const health = await this.health();
         if (health.ready) this.logger.info({ health }, "Ledgerly AI startup health check passed");
         else this.logger.warn({ health }, "Ledgerly AI startup health check is degraded");
       })
-      .catch((error) => this.logger.error({ err: error }, "Ledgerly AI startup health check failed"));
+      .catch((error) => this.logger.error({ err: error }, "Ledgerly AI startup failed"));
   }
 
   async health(): Promise<LedgerlyAiHealth> {
@@ -69,15 +75,9 @@ export class LedgerlyAiFoundationService {
         "SELECT to_regclass('public.lai_chats')::text AS chats, to_regclass('public.lai_audit_events')::text AS audit",
       );
       const row = result.rows[0];
-      if (!row?.chats || !row.audit) {
-        schema = {
-          status: "error",
-          latencyMs: Math.round(performance.now() - schemaStarted),
-          error: "Ledgerly AI database migration is not applied.",
-        };
-      } else {
-        schema = { status: "ok", latencyMs: Math.round(performance.now() - schemaStarted) };
-      }
+      schema = !row?.chats || !row.audit
+        ? { status: "error", latencyMs: Math.round(performance.now() - schemaStarted), error: "Ledgerly AI database migration is not applied." }
+        : { status: "ok", latencyMs: Math.round(performance.now() - schemaStarted) };
     } catch (error) {
       schema = {
         status: "error",
@@ -86,7 +86,17 @@ export class LedgerlyAiFoundationService {
       };
     }
 
-    const ready = disabled ? false : postgres.status === "ok" && schema.status === "ok";
+    let providerPool: LedgerlyAiHealth["components"]["providerPool"];
+    try {
+      const diagnostics = await this.providers.diagnostics();
+      const available = diagnostics.filter((item) => item.available).length;
+      const configured = diagnostics.filter((item) => item.sessionConfigured).length;
+      providerPool = { status: available > 0 ? "ok" : "error", available, configured };
+    } catch {
+      providerPool = { status: "error", available: 0, configured: 0 };
+    }
+
+    const ready = disabled ? false : postgres.status === "ok" && schema.status === "ok" && providerPool.status === "ok";
     return {
       name: "Ledgerly AI",
       enabled: !disabled,
@@ -94,11 +104,7 @@ export class LedgerlyAiFoundationService {
       ready,
       startedAt: this.startedAt,
       checkedAt: new Date().toISOString(),
-      components: {
-        config: { status: "ok" },
-        postgres,
-        schema,
-      },
+      components: { config: { status: "ok" }, postgres, schema, providerPool },
     };
   }
 }
