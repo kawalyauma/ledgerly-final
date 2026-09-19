@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
 from typing import Any
 
 from .library import REGISTER_RULES
