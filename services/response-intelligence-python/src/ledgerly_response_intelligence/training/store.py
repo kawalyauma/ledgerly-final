@@ -22,7 +22,7 @@ from .models import (
     TrainingExampleCreate,
     TrainingStats,
 )
-from .privacy import redact_text, sanitize_training_example, stable_json
+from .privacy import collect_sensitive_literals, redact_literals, redact_text, sanitize_training_example, stable_json
 
 
 def _now() -> str:
@@ -268,8 +268,11 @@ class TrainingStore:
         if existing is None:
             existing=self.find_by_fingerprint(item.response_fingerprint,item.organization_id)
         example_id = existing.example_id if existing else ""
-        correction = redact_text(item.correction_text,item.entity_label)
-        comment = redact_text(item.comment,item.entity_label)
+        sensitive_literals=collect_sensitive_literals(existing.semantic_payload) if existing else set()
+        if item.entity_label.strip():
+            sensitive_literals.add(item.entity_label.strip())
+        correction = redact_literals(redact_text(item.correction_text,item.entity_label),sensitive_literals)
+        comment = redact_literals(redact_text(item.comment,item.entity_label),sensitive_literals)
         if correction and existing:
             corrected = self.add_example(
                 TrainingExampleCreate(
