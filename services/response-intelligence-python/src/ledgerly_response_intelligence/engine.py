@@ -5,6 +5,9 @@ from typing import Any
 
 from .config import Settings
 from .critic import ResponseCritic
+from .knowledge.models import KnowledgeSearchHit
+from .knowledge.retrieval import KnowledgeRetriever
+from .knowledge.store import KnowledgeStore
 from .memory import fingerprint
 from .models import (
     EvaluationRequest,
@@ -63,6 +66,12 @@ class ResponseIntelligenceEngine:
             if self.training_store is not None and settings.learning_retrieval_enabled
             else None
         )
+        self.knowledge_store = KnowledgeStore(settings.knowledge_db_path) if settings.knowledge_enabled else None
+        self.knowledge_retriever = (
+            KnowledgeRetriever(self.knowledge_store)
+            if self.knowledge_store is not None and settings.knowledge_retrieval_enabled
+            else None
+        )
 
     async def respond(self, request: ResponseRequest) -> ResponseResult:
         evidence = merge_evidence(request.evidence, request.semantic_payload)
@@ -71,6 +80,7 @@ class ResponseIntelligenceEngine:
         tool_events: list[dict[str, Any]] = []
         learned_examples: list[RetrievalExample] = []
         style_profile: StyleProfile | None = None
+        reference_knowledge: list[KnowledgeSearchHit] = []
         if self.training_retriever is not None and request.context.organization_id:
             style_profile = self.training_retriever.style_profile(request.context.organization_id)
             learned_examples = self.training_retriever.retrieve(
@@ -87,6 +97,39 @@ class ResponseIntelligenceEngine:
             for rule in style_profile.rules:
                 if rule not in plan.editorial_rules:
                     plan.editorial_rules.append(rule)
+
+        if (
+            self.knowledge_retriever is not None
+            and request.context.organization_id
+            and self.settings.knowledge_retrieval_limit>0
+        ):
+            query=" ".join(
+                item for item in [
+                    request.request,
+                    request.context.topic,
+                    request.context.category,
+                    request.context.entity_type,
+                ] if item
+            ).strip()
+            if query:
+                reference_knowledge=self._trim_knowledge(
+                    self.knowledge_retriever.search(
+                        organization_id=request.context.organization_id,
+                        query=query,
+                        limit=self.settings.knowledge_retrieval_limit,
+                        include_global=self.settings.knowledge_include_global,
+                    ),
+                    self.settings.knowledge_max_context_chars,
+                )
+                if reference_knowledge:
+                    tool_events.append({
+                        "tool":"knowledge.search",
+                        "available":True,
+                        "enabled":True,
+                        "external":False,
+                        "results":len(reference_knowledge),
+                        "sources":[item.source_id for item in reference_knowledge],
+                    })
 
         # External retrieval is deliberately policy-gated. The interface is live now so
         # web/search/document tools can be added later without changing the response engine.
@@ -127,7 +170,7 @@ class ResponseIntelligenceEngine:
         if use_provider:
             system, prompt = build_generation_prompt(
                 request,evidence,plan,reasoning=reasoning,
-                learned_examples=learned_examples,style_profile=style_profile,
+                learned_examples=learned_examples,style_profile=style_profile,reference_knowledge=reference_knowledge,
             )
             last_error: Exception | None = None
             generated = False
@@ -164,6 +207,7 @@ class ResponseIntelligenceEngine:
                 provider=active_provider,
                 learned_examples=learned_examples,
                 style_profile=style_profile,
+                reference_knowledge=reference_knowledge,
             )
 
         # If provider output still contains unsupported factual claims, deterministic output
@@ -238,6 +282,18 @@ class ResponseIntelligenceEngine:
                 "learnedExamplesUsed": [item.example_id for item in learned_examples],
                 "styleProfileExamples": style_profile.approved_examples if style_profile else 0,
                 "trainingExampleId": training_example_id,
+                "knowledgeRetrievalEnabled": self.knowledge_retriever is not None,
+                "knowledgeSourcesUsed": [
+                    {
+                        "sourceId":item.source_id,
+                        "title":item.title,
+                        "sourceType":item.source_type,
+                        "url":item.url,
+                        "scope":item.organization_scope,
+                        "score":item.score,
+                    }
+                    for item in reference_knowledge
+                ],
             },
         )
 
@@ -266,6 +322,7 @@ class ResponseIntelligenceEngine:
         provider: GenerationProvider | None,
         learned_examples: list[RetrievalExample],
         style_profile: StyleProfile | None,
+        reference_knowledge: list[KnowledgeSearchHit],
     ) -> tuple[str, QualityReport, int]:
         if provider is None:
             return draft, quality, 0
@@ -320,6 +377,22 @@ class ResponseIntelligenceEngine:
                 }
             )
         return events
+
+    @staticmethod
+    def _trim_knowledge(items:list[KnowledgeSearchHit],max_chars:int)->list[KnowledgeSearchHit]:
+        kept:list[KnowledgeSearchHit]=[]
+        used=0
+        for item in items:
+            if used>=max_chars:
+                break
+            remaining=max_chars-used
+            if len(item.content)>remaining:
+                if remaining<300:
+                    break
+                item=item.model_copy(update={"content":item.content[:remaining].rstrip()+"…"})
+            kept.append(item)
+            used+=len(item.content)
+        return kept
 
     @staticmethod
     def _token_budget(max_words: int) -> int:
