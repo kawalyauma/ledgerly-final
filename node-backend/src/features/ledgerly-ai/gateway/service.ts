@@ -7,7 +7,13 @@ import type { LedgerlyAiEmployee } from "../employees/types.js";
 import { createLedgerlyAiCorrelationId, type LedgerlyAiLogger } from "../logger.js";
 import type { LedgerlyAiMemoryService } from "../memory/service.js";
 import type { LedgerlyAiProviderRuntime } from "../providers/runtime.js";
-import type { LedgerlyAiTaskKind } from "../providers/types.js";
+import type { LedgerlyAiTaskKind, ProviderResult } from "../providers/types.js";
+import {
+  containsLedgerlyAiToolCallMarker,
+  ledgerlyAiToolProtocolInstructions,
+  parseLedgerlyAiToolCall,
+} from "../tools/protocol.js";
+import type { LedgerlyAiToolService } from "../tools/service.js";
 import { LedgerlyAiContextBuilder } from "./context.js";
 import { LedgerlyAiIdempotency } from "./idempotency.js";
 import { normalizeLedgerlyAiResponse } from "./normalize.js";
@@ -16,7 +22,7 @@ import { redactLedgerlyAiText, redactLedgerlyAiValue } from "./redaction.js";
 import type { LedgerlyAiGatewayRepository } from "./repository.js";
 
 export type LedgerlyAiGatewayProgress = (event: {
-  type: "accepted" | "queued" | "running" | "completed";
+  type: "accepted" | "queued" | "running" | "waiting_approval" | "completed";
   at: string;
   data?: Record<string, unknown>;
 }) => void | Promise<void>;
@@ -44,6 +50,13 @@ export type LedgerlyAiGatewayResponse = {
   jobId: string;
   correlationId: string;
   durationMs: number;
+  approval?: {
+    id: string;
+    toolCallId: string;
+    toolName: string;
+    riskLevel: "low" | "medium" | "high" | "critical";
+    status: "pending";
+  };
 };
 
 function titleFromMessage(message: string) {
@@ -72,6 +85,7 @@ export class LedgerlyAiGatewayService {
     private readonly providers: LedgerlyAiProviderRuntime,
     private readonly memory: LedgerlyAiMemoryService,
     private readonly employees: LedgerlyAiEmployeeRegistry,
+    private readonly tools: LedgerlyAiToolService,
     private readonly config: LedgerlyAiConfig,
     db: Pool,
     private readonly logger: LedgerlyAiLogger,
@@ -180,11 +194,14 @@ export class LedgerlyAiGatewayService {
       await progress?.({ type: "queued", at: new Date().toISOString(), data: { chatId: chat.id, jobId, correlationId } });
       await this.repository.startJob(input.principal.organizationId, jobId);
 
-      const providerPrompt = await this.context.build({
+      const catalog = this.tools.catalog(input.principal, employee);
+      const toolInstructions = ledgerlyAiToolProtocolInstructions(JSON.stringify(catalog));
+      let providerPrompt = await this.context.build({
         principal: input.principal,
         chatId: chat.id,
         query: input.message,
         identityPrompt: this.employees.identityPrompt(employee),
+        toolInstructions,
         activeModule: input.activeModule,
         agentId,
         projectId,
@@ -197,22 +214,107 @@ export class LedgerlyAiGatewayService {
         );
       } else {
         this.logger.info(
-          { correlationId, chatId: chat.id, jobId, promptChars: providerPrompt.length, employeeKey: employee?.key ?? null },
+          { correlationId, chatId: chat.id, jobId, promptChars: providerPrompt.length, employeeKey: employee?.key ?? null, toolCount: catalog.length },
           "Ledgerly AI request started",
         );
       }
 
       await progress?.({ type: "running", at: new Date().toISOString(), data: { chatId: chat.id, jobId, correlationId } });
-      const providerResult = await this.providers.execute({
-        id: jobId,
-        organizationId: input.principal.organizationId,
-        userId: input.principal.userId,
-        correlationId,
-        prompt: providerPrompt,
-        taskKind: input.taskKind,
-        sandbox: "read-only",
-      });
-      const normalized = normalizeLedgerlyAiResponse(providerResult);
+      let providerResult: ProviderResult | null = null;
+      let pendingApproval: {
+        id: string;
+        toolCallId: string;
+        toolName: string;
+        riskLevel: "low" | "medium" | "high" | "critical";
+        status: "pending";
+      } | null = null;
+      const toolTrace: Array<Record<string, unknown>> = [];
+
+      for (let step = 0; step <= this.config.LEDGERLY_AI_MAX_TOOL_STEPS; step += 1) {
+        providerResult = await this.providers.execute({
+          id: jobId,
+          organizationId: input.principal.organizationId,
+          userId: input.principal.userId,
+          correlationId,
+          prompt: providerPrompt,
+          taskKind: input.taskKind,
+          sandbox: "read-only",
+        });
+        const requestedTool = parseLedgerlyAiToolCall(providerResult.text);
+        if (!requestedTool) {
+          if (containsLedgerlyAiToolCallMarker(providerResult.text)) {
+            throw new Error("Ledgerly AI returned a malformed tool request.");
+          }
+          break;
+        }
+        if (step >= this.config.LEDGERLY_AI_MAX_TOOL_STEPS) {
+          throw new Error("Ledgerly AI exceeded the allowed tool steps for one request.");
+        }
+
+        const invocation = await this.tools.invoke({
+          principal: input.principal,
+          employee,
+          toolName: requestedTool.name,
+          arguments: requestedTool.arguments,
+          correlationId,
+          chatId: chat.id,
+          jobId,
+        });
+        if (invocation.status === "waiting_approval") {
+          pendingApproval = {
+            id: invocation.approvalId,
+            toolCallId: invocation.toolCallId,
+            toolName: invocation.toolName,
+            riskLevel: invocation.riskLevel,
+            status: "pending",
+          };
+          toolTrace.push({
+            toolName: invocation.toolName,
+            toolCallId: invocation.toolCallId,
+            status: invocation.status,
+            approvalId: invocation.approvalId,
+          });
+          break;
+        }
+
+        const verifiedResult = redactLedgerlyAiValue(invocation.result);
+        toolTrace.push({
+          toolName: invocation.toolName,
+          toolCallId: invocation.toolCallId,
+          status: invocation.status,
+          durationMs: invocation.durationMs,
+        });
+        await this.repository.appendMessage({
+          principal: input.principal,
+          chatId: chat.id,
+          role: "tool",
+          content: JSON.stringify(verifiedResult),
+          correlationId,
+          agentId,
+          metadata: {
+            toolName: invocation.toolName,
+            toolCallId: invocation.toolCallId,
+            verified: true,
+          },
+        });
+        providerPrompt += [
+          "",
+          "<verified_tool_result>",
+          "tool_name: " + invocation.toolName,
+          "tool_call_id: " + invocation.toolCallId,
+          JSON.stringify(verifiedResult),
+          "</verified_tool_result>",
+          "Use this verified Ledgerly result to continue. Call another listed tool only if still necessary.",
+        ].join("\n");
+      }
+
+      if (!providerResult) throw new Error("Ledgerly AI provider did not return a result.");
+      const normalized = pendingApproval
+        ? {
+            content: (employee?.name ?? "Ledgerly AI") + " prepared an action that requires human approval before Ledgerly can execute it.",
+            durationMs: providerResult.durationMs,
+          }
+        : normalizeLedgerlyAiResponse(providerResult);
       if (!normalized.content) throw new Error("Ledgerly AI returned an empty response.");
 
       const assistantMessage = await this.repository.appendMessage({
@@ -226,6 +328,8 @@ export class LedgerlyAiGatewayService {
           durationMs: normalized.durationMs,
           employeeKey: employee?.key ?? null,
           usage: redactLedgerlyAiValue(providerResult.usage ?? {}),
+          toolTrace,
+          approval: pendingApproval,
         },
       });
 
@@ -263,14 +367,30 @@ export class LedgerlyAiGatewayService {
         jobId,
         correlationId,
         durationMs: normalized.durationMs,
+        ...(pendingApproval ? { approval: pendingApproval } : {}),
       };
 
-      await this.repository.completeJob(input.principal.organizationId, jobId, {
-        messageId: assistantMessage.id,
-        responseChars: normalized.content.length,
-        durationMs: normalized.durationMs,
-        employeeKey: employee?.key ?? null,
-      });
+      if (pendingApproval) {
+        await this.repository.waitingJob(input.principal.organizationId, jobId, {
+          messageId: assistantMessage.id,
+          approvalId: pendingApproval.id,
+          toolCallId: pendingApproval.toolCallId,
+          toolName: pendingApproval.toolName,
+        });
+        await progress?.({
+          type: "waiting_approval",
+          at: new Date().toISOString(),
+          data: { chatId: chat.id, jobId, correlationId, approvalId: pendingApproval.id, toolName: pendingApproval.toolName },
+        });
+      } else {
+        await this.repository.completeJob(input.principal.organizationId, jobId, {
+          messageId: assistantMessage.id,
+          responseChars: normalized.content.length,
+          durationMs: normalized.durationMs,
+          employeeKey: employee?.key ?? null,
+          toolTrace,
+        });
+      }
       await this.repository.audit({
         principal: input.principal,
         action: "ledgerly_ai.response.completed",

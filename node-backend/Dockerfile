@@ -11,7 +11,7 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json ./
 RUN apt-get update \
- && apt-get install -y --no-install-recommends docker.io ca-certificates \
+ && apt-get install -y --no-install-recommends docker.io ca-certificates git ripgrep \
  && rm -rf /var/lib/apt/lists/* \
  && npm install --omit=dev \
  && npm cache clean --force

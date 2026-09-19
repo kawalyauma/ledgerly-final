@@ -20,6 +20,8 @@ export class LedgerlyAiContextBuilder {
     chatId: string;
     query: string;
     identityPrompt: string;
+    toolInstructions?: string;
+    toolTranscript?: string;
     activeModule?: string | null;
     agentId?: string | null;
     projectId?: string | null;
@@ -67,6 +69,14 @@ export class LedgerlyAiContextBuilder {
       "<memory_context>",
       memoryContext || "No relevant saved memory.",
       "</memory_context>",
+      "",
+      "<tool_protocol>",
+      input.toolInstructions || "No Ledgerly tools are available for this request.",
+      "</tool_protocol>",
+      "",
+      "<verified_tool_results>",
+      input.toolTranscript || "No tool results yet.",
+      "</verified_tool_results>",
       "",
       "<conversation>",
       conversation || "No previous messages.",

@@ -11,6 +11,10 @@ import {
   createLedgerlyAiMemoryRoutes,
 } from "./memory/routes.js";
 import type { LedgerlyAiFoundationService } from "./service.js";
+import {
+  createLedgerlyAiApprovalRoutes,
+  createLedgerlyAiToolRoutes,
+} from "./tools/routes.js";
 
 export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   const routes = new Hono<AppEnv>();
@@ -32,11 +36,13 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.5.0",
+        featureVersion: "0.6.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
         namedEmployees: true,
+        tools: true,
+        approvals: true,
       },
     }),
   );
@@ -56,6 +62,8 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   routes.route("/internal/memories", createLedgerlyAiMemoryAdminRoutes(service.memory));
   routes.route("/employees", createLedgerlyAiEmployeeRoutes(service.employees));
   routes.route("/memories", createLedgerlyAiMemoryRoutes(service.memory));
+  routes.route("/tools", createLedgerlyAiToolRoutes(service.tools, service.employees));
+  routes.route("/approvals", createLedgerlyAiApprovalRoutes(service.tools));
   routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway));
   return routes;
 }

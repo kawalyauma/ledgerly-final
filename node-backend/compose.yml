@@ -70,6 +70,10 @@ services:
       LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS: ${LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS:-7}
       LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT: ${LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT:-12}
       LEDGERLY_AI_MEMORY_CONTEXT_CHARS: ${LEDGERLY_AI_MEMORY_CONTEXT_CHARS:-12000}
+      LEDGERLY_AI_MAX_TOOL_STEPS: ${LEDGERLY_AI_MAX_TOOL_STEPS:-6}
+      LEDGERLY_AI_TOOL_TIMEOUT_MS: ${LEDGERLY_AI_TOOL_TIMEOUT_MS:-120000}
+      LEDGERLY_AI_TOOL_MAX_RESULT_BYTES: ${LEDGERLY_AI_TOOL_MAX_RESULT_BYTES:-524288}
+      LEDGERLY_AI_REPO_ROOT: /opt/ledgerly/source
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -90,6 +94,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/ledgerly-ai/sessions:/var/lib/ledgerly-ai/sessions
       - /var/lib/ledgerly-ai/workspaces:/var/lib/ledgerly-ai/workspaces
+      - ${LEDGERLY_SOURCE_ROOT:-/opt/ledgerly/source}:/opt/ledgerly/source
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }

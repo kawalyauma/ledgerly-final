@@ -192,6 +192,13 @@ export class LedgerlyAiGatewayRepository {
     await this.db.query("UPDATE lai_jobs SET status='running',started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2", [id, organizationId]);
   }
 
+  async waitingJob(organizationId: string, id: string, result: Record<string, unknown>) {
+    await this.db.query(
+      "UPDATE lai_jobs SET status='waiting_approval',result_json=$1::jsonb,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3",
+      [JSON.stringify(result), id, organizationId],
+    );
+  }
+
   async completeJob(organizationId: string, id: string, result: Record<string, unknown>) {
     await this.db.query(
       "UPDATE lai_jobs SET status='completed',result_json=$1::jsonb,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3",

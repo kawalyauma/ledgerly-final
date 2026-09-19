@@ -39,6 +39,10 @@ const schema = z.object({
   LEDGERLY_AI_SHORT_TERM_MEMORY_DAYS: z.coerce.number().int().min(1).max(365).default(7),
   LEDGERLY_AI_MEMORY_RETRIEVAL_LIMIT: z.coerce.number().int().min(1).max(30).default(12),
   LEDGERLY_AI_MEMORY_CONTEXT_CHARS: z.coerce.number().int().min(1000).max(100_000).default(12_000),
+  LEDGERLY_AI_MAX_TOOL_STEPS: z.coerce.number().int().min(1).max(12).default(6),
+  LEDGERLY_AI_TOOL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(900_000).default(120_000),
+  LEDGERLY_AI_TOOL_MAX_RESULT_BYTES: z.coerce.number().int().min(16_384).max(8 * 1024 * 1024).default(512 * 1024),
+  LEDGERLY_AI_REPO_ROOT: z.string().min(1).default("/opt/ledgerly/source"),
   LEDGERLY_AI_LOG_PROMPTS: envBoolean(false),
   LEDGERLY_AI_STARTUP_HEALTHCHECK: envBoolean(true),
 }).superRefine((value, ctx) => {
