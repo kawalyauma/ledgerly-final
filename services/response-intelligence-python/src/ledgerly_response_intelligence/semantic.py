@@ -12,6 +12,10 @@ from .models import Confidence, EvidenceBundle, EvidenceSource, Fact, Limitation
 _ID_KEYS = ("studentId", "staffId", "guardianId", "accountId", "classId", "subjectId", "id")
 _NAME_KEYS = ("studentName", "staffName", "guardianName", "accountName", "name", "label", "title")
 _PERIOD_KEYS = ("term", "period", "academicYear", "date", "asOf", "from", "to")
+_META_KEYS = {
+    "tool", "module", "kind", "source", "sourceType", "purpose", "readOnly",
+    "method", "path", "pathTemplate", "statusCode", "httpStatus",
+}
 
 
 def _fingerprint(value: Any) -> str:
@@ -24,15 +28,32 @@ def _human_key(key: str) -> str:
     return key.replace("_", " ").replace("-", " ").strip()
 
 
+def _find_nested_key(value: Any, keys: tuple[str, ...], depth: int = 0) -> str:
+    if depth > 4 or not isinstance(value, dict):
+        return ""
+    for key in keys:
+        if value.get(key) not in (None, ""):
+            return str(value[key]).strip()
+    for child in value.values():
+        if isinstance(child, dict):
+            found = _find_nested_key(child, keys, depth + 1)
+            if found:
+                return found
+    return ""
+
+
 def _subject_for(row: dict[str, Any]) -> str:
-    name = next((str(row[k]).strip() for k in _NAME_KEYS if row.get(k) not in (None, "")), "")
-    identifier = next((str(row[k]).strip() for k in _ID_KEYS if row.get(k) not in (None, "")), "")
+    name = _find_nested_key(row, _NAME_KEYS)
+    identifier = _find_nested_key(row, _ID_KEYS)
     return name or identifier or "record"
 
 
 def _period_for(row: dict[str, Any]) -> str | None:
     parts = [str(row[k]).strip() for k in _PERIOD_KEYS if row.get(k) not in (None, "")]
-    return " · ".join(parts[:3]) or None
+    if not parts:
+        nested = [_find_nested_key(row, (key,)) for key in _PERIOD_KEYS]
+        parts = [item for item in nested if item]
+    return " · ".join(dict.fromkeys(parts[:3])) or None
 
 
 def _scalar(value: Any) -> bool:
@@ -164,8 +185,15 @@ def normalize_semantic_payload(payload: dict[str, Any]) -> EvidenceBundle:
             metadata={key: row.get(key) for key in _ID_KEYS if row.get(key) is not None},
         )
         for key, value in scalar_fields(row):
-            root_key = key.split(" ", 1)[0]
-            if root_key in _ID_KEYS or root_key in _NAME_KEYS:
+            path_parts = key.split()
+            root_key = path_parts[0] if path_parts else key
+            leaf_key = path_parts[-1] if path_parts else key
+            if (
+                root_key in _META_KEYS
+                or leaf_key in _META_KEYS
+                or leaf_key in _ID_KEYS
+                or leaf_key in _NAME_KEYS
+            ):
                 continue
             fact_id = f"f_{_fingerprint([row_index, key, value, period])}"
             readable_key = _human_key(key)
