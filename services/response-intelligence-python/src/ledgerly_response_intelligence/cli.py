@@ -70,6 +70,7 @@ def _train(args: argparse.Namespace) -> None:
         learning_rate=args.learning_rate if args.learning_rate is not None else (1e-5 if args.objective=="dpo" else 1e-4),batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation,max_length=args.max_length,
         lora_r=args.lora_r,lora_alpha=args.lora_alpha,lora_dropout=args.lora_dropout,dpo_beta=args.dpo_beta,
+        eval_ratio=args.eval_ratio,
     )
     run=store.create_training_run(config)
     try:
@@ -127,6 +128,7 @@ def main() -> None:
     train.add_argument("--lora-alpha",type=int,default=32)
     train.add_argument("--lora-dropout",type=float,default=0.05)
     train.add_argument("--dpo-beta",type=float,default=0.1)
+    train.add_argument("--eval-ratio",type=float,default=0.1)
 
     args = parser.parse_args()
     settings = get_settings()
