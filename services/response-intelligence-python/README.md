@@ -93,6 +93,17 @@ Keep the Node ↔ Python service connection private because delegated requests c
 
 The service is provider-agnostic.
 
+### Responses API
+
+For providers using an OpenAI-style Responses endpoint:
+
+```bash
+RIE_PROVIDER=responses
+RIE_BASE_URL=https://api.openai.com/v1
+RIE_MODEL=<available-model-id>
+RIE_API_KEY=...
+```
+
 ### OpenAI-compatible
 
 Use this for OpenAI, OpenRouter, Groq, Ollama, LM Studio, vLLM or another compatible endpoint.
