@@ -140,3 +140,26 @@ def test_redacts_multiple_semantic_identities_from_training_text(tmp_path) -> No
     assert "parent@example.com" not in combined
     assert "std_1" not in json.dumps(item.semantic_payload)
     assert "std_2" not in json.dumps(item.semantic_payload)
+
+
+def test_training_mutations_enforce_organization_ownership(tmp_path) -> None:
+    import pytest
+
+    store=TrainingStore(str(tmp_path/"learning.sqlite3"))
+    example=store.add_example(TrainingExampleCreate(
+        organization_id="org_a",purpose=Purpose.analysis,request="Analyse attendance.",
+        semantic_payload={"attendancePercent":80},response_text="Attendance is 80%.",
+        quality_overall=0.95,status="candidate",
+    ))
+    with pytest.raises(PermissionError):
+        store.set_status(example.example_id,"approved","org_b")
+
+    adapter_dir=tmp_path/"adapter"
+    adapter_dir.mkdir()
+    from ledgerly_response_intelligence.training.models import AdapterRegister
+    adapter=store.register_adapter(AdapterRegister(
+        organization_id="org_a",name="adapter-a",base_model="example/base",
+        path=str(adapter_dir),activate=False,
+    ))
+    with pytest.raises(PermissionError):
+        store.activate_adapter(adapter.adapter_id,"org_b")
