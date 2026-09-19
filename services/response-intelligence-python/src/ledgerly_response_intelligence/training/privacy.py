@@ -13,6 +13,34 @@ EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
 PHONE_RE = re.compile(r"(?<!\d)(?:\+?256|0)?7\d{8}(?!\d)")
 
 
+def collect_sensitive_literals(value: Any, *, key: str = "", depth: int = 0) -> set[str]:
+    if depth > 8:
+        return set()
+    found: set[str] = set()
+    sensitive_key = bool(SECRET_KEYS.search(key) or PERSON_KEYS.search(key) or CONTACT_KEYS.search(key) or ID_KEYS.search(key))
+    if isinstance(value, dict):
+        for child_key, child in value.items():
+            found.update(collect_sensitive_literals(child, key=str(child_key), depth=depth + 1))
+    elif isinstance(value, list):
+        for item in value[:500]:
+            found.update(collect_sensitive_literals(item, key=key, depth=depth + 1))
+    elif sensitive_key and value not in (None, ""):
+        literal=str(value).strip()
+        if len(literal) >= 2:
+            found.add(literal)
+    return found
+
+
+def redact_literals(text: str, literals: set[str]) -> str:
+    value=text
+    for literal in sorted(literals,key=len,reverse=True):
+        replacement="<SENSITIVE>"
+        if EMAIL_RE.fullmatch(literal):replacement="<EMAIL>"
+        elif PHONE_RE.fullmatch(literal):replacement="<PHONE>"
+        value=re.sub(re.escape(literal),replacement,value,flags=re.I)
+    return value
+
+
 def redact_text(text: str, entity_label: str = "") -> str:
     value = text
     if entity_label.strip():
@@ -55,8 +83,11 @@ def sanitize_training_example(
 ) -> tuple[str, dict[str, Any], str]:
     if mode == "full":
         return request, semantic_payload, response_text
-    redacted_request = redact_text(request, entity_label)
-    redacted_response = redact_text(response_text, entity_label)
+    sensitive_literals=collect_sensitive_literals(semantic_payload)
+    if entity_label.strip():
+        sensitive_literals.add(entity_label.strip())
+    redacted_request = redact_literals(redact_text(request, entity_label),sensitive_literals)
+    redacted_response = redact_literals(redact_text(response_text, entity_label),sensitive_literals)
     if mode == "structure-only":
         payload = {
             "keys": sorted(str(key) for key in semantic_payload.keys()),
