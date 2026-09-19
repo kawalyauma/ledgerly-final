@@ -6,7 +6,7 @@ import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ..memory import fingerprint
 from ..models import Purpose, Register
@@ -320,7 +320,7 @@ class TrainingStore:
         counts={str(row["status"]):int(row["n"]) for row in status_rows}
         approved=counts.get("approved",0)
         corrections=int(fb["corrections"] or 0) if fb else 0
-        readiness="empty"
+        readiness: Literal["empty","collecting","sft-ready","preference-ready"]="empty"
         if approved or counts.get("candidate",0): readiness="collecting"
         if approved>=self.min_sft_examples: readiness="sft-ready"
         if corrections>=self.min_preference_examples and approved>=self.min_sft_examples: readiness="preference-ready"
@@ -339,9 +339,9 @@ class TrainingStore:
         import re
         from collections import Counter
         words=[len(ex.response_text.split()) for ex in examples]
-        sentence_lengths=[]
+        sentence_lengths: list[int]=[]
         heading=bullet=concise=0
-        registers=Counter();strategies=Counter()
+        registers: Counter[str]=Counter();strategies: Counter[str]=Counter()
         for ex in examples:
             sentences=[s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+",ex.response_text) if s.strip()]
             sentence_lengths.extend(len(s.split()) for s in sentences)
