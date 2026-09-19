@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Activity, BookOpen, Check, CheckCircle2, Database, FilePlus2, Globe2,
   RefreshCcw, Search, ShieldCheck, Sparkles, Trash2, XCircle,
@@ -182,4 +182,4 @@ export function ResponseKnowledgeCenterPage(){
   </main>;
 }
 
-function Metric({icon,label,value,detail}:{icon:React.ReactNode;label:string;value:string|number;detail:string}){return <div className="rkc-metric"><span>{icon}</span><div><small>{label}</small><b>{value}</b><p>{detail}</p></div></div>;}
+function Metric({icon,label,value,detail}:{icon:ReactNode;label:string;value:string|number;detail:string}){return <div className="rkc-metric"><span>{icon}</span><div><small>{label}</small><b>{value}</b><p>{detail}</p></div></div>;}
