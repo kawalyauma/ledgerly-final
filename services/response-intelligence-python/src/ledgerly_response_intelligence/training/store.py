@@ -87,6 +87,7 @@ class TrainingStore:
                   comment TEXT NOT NULL DEFAULT '',
                   correction_text TEXT NOT NULL DEFAULT '',
                   example_id TEXT NOT NULL DEFAULT '',
+                  trusted_reviewer INTEGER NOT NULL DEFAULT 0,
                   created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_response_feedback_fingerprint
@@ -120,6 +121,11 @@ class TrainingStore:
                   ON model_adapters(organization_id,active);
                 """
             )
+            feedback_columns={str(row["name"]) for row in db.execute("PRAGMA table_info(response_feedback)").fetchall()}
+            if "trusted_reviewer" not in feedback_columns:
+                db.execute("ALTER TABLE response_feedback ADD COLUMN trusted_reviewer INTEGER NOT NULL DEFAULT 0")
+
+
 
     def add_example(self, item: TrainingExampleCreate) -> TrainingExample:
         request, semantic, response = sanitize_training_example(
@@ -267,27 +273,28 @@ class TrainingStore:
                     strategy_id=existing.strategy_id,
                     quality_overall=max(existing.quality_overall,0.9),
                     source="correction",
-                    status="approved",
-                    tags=[*existing.tags,"human-correction"],
+                    status="approved" if item.trusted_reviewer else "candidate",
+                    tags=[*existing.tags,"human-correction","trusted-review" if item.trusted_reviewer else "needs-review"],
                 )
             )
             example_id = corrected.example_id
-            self.set_status(existing.example_id,"rejected")
-        elif item.approve_original and existing:
+            if item.trusted_reviewer:
+                self.set_status(existing.example_id,"rejected")
+        elif item.approve_original and existing and item.trusted_reviewer:
             self.set_status(existing.example_id,"approved")
-        elif item.rating < 0 and existing:
+        elif item.rating < 0 and existing and item.trusted_reviewer:
             self.set_status(existing.example_id,"rejected")
         with self._lock, self._connect() as db:
             db.execute(
                 """
                 INSERT INTO response_feedback(
                   feedback_id,organization_id,response_fingerprint,rating,comment,
-                  correction_text,example_id,created_at
-                ) VALUES(?,?,?,?,?,?,?,?)
+                  correction_text,example_id,trusted_reviewer,created_at
+                ) VALUES(?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     feedback_id,item.organization_id,item.response_fingerprint,item.rating,comment,
-                    correction,example_id,_now(),
+                    correction,example_id,1 if item.trusted_reviewer else 0,_now(),
                 ),
             )
         return FeedbackRecord(
@@ -298,6 +305,7 @@ class TrainingStore:
             comment=comment,
             correction_text=correction,
             example_id=example_id,
+            trusted_reviewer=item.trusted_reviewer,
             created_at=_now(),
         )
 
