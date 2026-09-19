@@ -4,6 +4,7 @@ from ..config import Settings
 from ..models import GenerationConfig
 from .anthropic import AnthropicProvider
 from .base import GenerationProvider
+from .local_peft import LocalPeftProvider
 from .openai_compatible import OpenAICompatibleProvider
 from .responses import ResponsesProvider
 
@@ -61,3 +62,24 @@ def build_delegated_provider(config: GenerationConfig | None) -> GenerationProvi
         model=config.model,
         timeout_seconds=config.timeout_seconds,
     )
+
+
+_LOCAL_ADAPTER_CACHE: dict[tuple[str,str,str,float],LocalPeftProvider]={}
+
+
+def build_local_adapter_provider(
+    *,
+    base_model:str,
+    adapter_path:str,
+    device_map:str="auto",
+    temperature:float=0.55,
+)->LocalPeftProvider:
+    key=(base_model,adapter_path,device_map,temperature)
+    provider=_LOCAL_ADAPTER_CACHE.get(key)
+    if provider is None:
+        provider=LocalPeftProvider(
+            base_model=base_model,adapter_path=adapter_path,
+            device_map=device_map,temperature=temperature,
+        )
+        _LOCAL_ADAPTER_CACHE[key]=provider
+    return provider
