@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     allow_external_tools: bool = False
     allow_web_search: bool = False
 
+    knowledge_enabled: bool = True
+    knowledge_retrieval_enabled: bool = True
+    knowledge_db_path: str = "data/response-intelligence-knowledge.sqlite3"
+    knowledge_retrieval_limit: int = Field(default=6, ge=0, le=30)
+    knowledge_include_global: bool = True
+    knowledge_max_context_chars: int = Field(default=18000, ge=1000, le=100000)
+
     learning_enabled: bool = True
     learning_retrieval_enabled: bool = True
     training_db_path: str = "data/response-intelligence-training.sqlite3"
