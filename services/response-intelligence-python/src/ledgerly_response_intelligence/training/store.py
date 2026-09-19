@@ -22,7 +22,7 @@ from .models import (
     TrainingExampleCreate,
     TrainingStats,
 )
-from .privacy import sanitize_training_example, stable_json
+from .privacy import redact_text, sanitize_training_example, stable_json
 
 
 def _now() -> str:
@@ -122,7 +122,7 @@ class TrainingStore:
         )
         now = _now()
         example_id = "tex_" + uuid.uuid4().hex
-        response_fp = fingerprint(response)
+        response_fp = item.response_fingerprint.strip() or fingerprint(response)
         with self._lock, self._connect() as db:
             existing = db.execute(
                 "SELECT example_id FROM training_examples WHERE organization_id=? AND response_fingerprint=? LIMIT 1",
@@ -159,6 +159,7 @@ class TrainingStore:
         quality_overall: float,
         tags: list[str],
         entity_label: str = "",
+        response_fingerprint: str = "",
     ) -> TrainingExample:
         return self.add_example(
             TrainingExampleCreate(
@@ -174,6 +175,7 @@ class TrainingStore:
                 status="candidate",
                 tags=tags,
                 entity_label=entity_label,
+                response_fingerprint=response_fingerprint,
             )
         )
 
@@ -242,7 +244,8 @@ class TrainingStore:
         feedback_id = "fb_" + uuid.uuid4().hex
         existing = self.find_by_fingerprint(item.response_fingerprint,item.organization_id)
         example_id = existing.example_id if existing else ""
-        correction = item.correction_text
+        correction = redact_text(item.correction_text,item.entity_label)
+        comment = redact_text(item.comment,item.entity_label)
         if correction and existing:
             corrected = self.add_example(
                 TrainingExampleCreate(
@@ -274,7 +277,7 @@ class TrainingStore:
                 ) VALUES(?,?,?,?,?,?,?,?)
                 """,
                 (
-                    feedback_id,item.organization_id,item.response_fingerprint,item.rating,item.comment,
+                    feedback_id,item.organization_id,item.response_fingerprint,item.rating,comment,
                     correction,example_id,_now(),
                 ),
             )
@@ -283,7 +286,7 @@ class TrainingStore:
             organization_id=item.organization_id,
             response_fingerprint=item.response_fingerprint,
             rating=item.rating,
-            comment=item.comment,
+            comment=comment,
             correction_text=correction,
             example_id=example_id,
             created_at=_now(),
