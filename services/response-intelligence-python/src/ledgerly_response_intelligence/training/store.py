@@ -256,6 +256,11 @@ class TrainingStore:
                 "UPDATE training_examples SET status=?,updated_at=? WHERE example_id=?",
                 (status,_now(),example_id),
             )
+            if status=="approved" and current.source=="correction":
+                db.execute(
+                    "UPDATE response_feedback SET trusted_reviewer=1 WHERE example_id=?",
+                    (example_id,),
+                )
         return self.get_example(example_id)
 
     def add_feedback(self, item: FeedbackCreate) -> FeedbackRecord:
