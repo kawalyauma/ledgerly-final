@@ -9,7 +9,7 @@ import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOption
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
 import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
-import { activatePythonAdapter,checkPythonResponseIntelligence,exportPythonTrainingDataset,getPythonAdapters,getPythonLearningStatus,getPythonStyleProfile,getPythonTrainingExamples,getPythonTrainingRuns,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
+import { activatePythonAdapter,checkPythonResponseIntelligence,deactivatePythonAdapters,exportPythonTrainingDataset,getPythonAdapters,getPythonLearningStatus,getPythonStyleProfile,getPythonTrainingExamples,getPythonTrainingRuns,setPythonTrainingExampleStatus,submitPythonResponseFeedback } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -84,6 +84,13 @@ agenticLightRoutes.post("/chat-studio/training-export",requireScope("school:read
  const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can export training data");
  const raw=await c.req.json().catch(()=>({})) as Record<string,unknown>,format=raw.format==="dpo"?"dpo":"sft";
  const data=await exportPythonTrainingDataset(c.env,p.organizationId,format);
+ if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
+ return c.json({data});
+});
+
+agenticLightRoutes.post("/chat-studio/training-adapters/deactivate",requireScope("school:read"),async c=>{
+ const p=c.get("principal");if(p.role!=="owner"&&p.role!=="admin")throw new AppError(403,"FORBIDDEN","Only an owner or administrator can deactivate a trained adapter");
+ const data=await deactivatePythonAdapters(c.env,p.organizationId);
  if(!data)throw new AppError(503,"RESPONSE_LEARNING_UNAVAILABLE","Response learning service is unavailable");
  return c.json({data});
 });
