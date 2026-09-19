@@ -26,6 +26,17 @@ class Settings(BaseSettings):
     allow_external_tools: bool = False
     allow_web_search: bool = False
 
+    learning_enabled: bool = True
+    learning_retrieval_enabled: bool = True
+    training_db_path: str = "data/response-intelligence-training.sqlite3"
+    training_dataset_dir: str = "data/training-datasets"
+    training_adapter_dir: str = "data/model-adapters"
+    training_privacy_mode: Literal["redacted", "structure-only", "full"] = "redacted"
+    training_auto_candidate_quality: float = Field(default=0.88, ge=0, le=1)
+    training_retrieval_limit: int = Field(default=4, ge=0, le=12)
+    training_min_sft_examples: int = Field(default=25, ge=2, le=100000)
+    training_min_preference_examples: int = Field(default=20, ge=2, le=100000)
+
     @property
     def provider_enabled(self) -> bool:
         if self.provider == "none":
