@@ -96,7 +96,8 @@ class DeterministicRealizer:
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
             insight_sentences = [item.statement for item in (reasoning.insights[:2] if reasoning else []) if item.kind.value in {"change", "comparison", "outlier", "observation"}]
-            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:4]]
+            fact_sentences = [_fact_sentence(fact, request) for fact in facts[:4]]
+            sentences = list(dict.fromkeys([*insight_sentences, *fact_sentences]))[:6]
             return (opening + ". " if opening else "") + " ".join(sentences)
 
         if section_id == "comparison":
@@ -104,8 +105,9 @@ class DeterministicRealizer:
                 family="comparison", purpose=request.purpose, register=plan.register,
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
-            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"change", "comparison"}][:5]
-            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:6]]
+            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"change", "comparison"}][:4]
+            fact_sentences = [_fact_sentence(fact, request) for fact in facts[:4]]
+            sentences = list(dict.fromkeys([*insight_sentences, *fact_sentences]))[:7]
             return (lead + ", " if lead else "") + " ".join(sentences)
 
         if section_id == "explanation":
@@ -113,8 +115,9 @@ class DeterministicRealizer:
                 family="interpretation", purpose=request.purpose, register=plan.register,
                 query=query, seed=plan.style_seed + section_id, recent_text=recent,
             )
-            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"relationship", "change", "comparison"}][:4]
-            sentences = insight_sentences or [_fact_sentence(fact, request) for fact in facts[:5]]
+            insight_sentences = [item.statement for item in (reasoning.insights if reasoning else []) if item.kind.value in {"relationship", "change", "comparison"}][:3]
+            fact_sentences = [_fact_sentence(fact, request) for fact in facts[:3]]
+            sentences = list(dict.fromkeys([*insight_sentences, *fact_sentences]))[:6]
             guard = ""
             if plan.causal_guard_required:
                 guard = self.retriever.choose(
