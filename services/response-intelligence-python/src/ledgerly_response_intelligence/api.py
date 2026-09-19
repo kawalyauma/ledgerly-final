@@ -206,27 +206,33 @@ async def training_feedback(
 @app.post("/v1/training/examples/{example_id}/approve", response_model=TrainingExample, dependencies=[Depends(authorize)])
 async def approve_training_example(
     example_id: str,
+    organization_id: str = "",
     engine: ResponseIntelligenceEngine = Depends(get_engine),
 ) -> TrainingExample:
     require_training(engine)
     assert engine.training_store is not None
     try:
-        return engine.training_store.set_status(example_id, "approved")
+        return engine.training_store.set_status(example_id, "approved", organization_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Training example not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.post("/v1/training/examples/{example_id}/reject", response_model=TrainingExample, dependencies=[Depends(authorize)])
 async def reject_training_example(
     example_id: str,
+    organization_id: str = "",
     engine: ResponseIntelligenceEngine = Depends(get_engine),
 ) -> TrainingExample:
     require_training(engine)
     assert engine.training_store is not None
     try:
-        return engine.training_store.set_status(example_id, "rejected")
+        return engine.training_store.set_status(example_id, "rejected", organization_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Training example not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @app.get("/v1/training/style-profile", response_model=StyleProfile, dependencies=[Depends(authorize)])
@@ -291,13 +297,16 @@ async def register_training_adapter(
 @app.post("/v1/training/adapters/{adapter_id}/activate", response_model=AdapterRecord, dependencies=[Depends(authorize)])
 async def activate_training_adapter(
     adapter_id: str,
+    organization_id: str = "",
     engine: ResponseIntelligenceEngine = Depends(get_engine),
 ) -> AdapterRecord:
     require_training(engine)
     assert engine.training_store is not None
     try:
-        return engine.training_store.activate_adapter(adapter_id)
+        return engine.training_store.activate_adapter(adapter_id, organization_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Adapter not found.") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
