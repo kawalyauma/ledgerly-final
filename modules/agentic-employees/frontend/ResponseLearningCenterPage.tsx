@@ -122,6 +122,16 @@ export function ResponseLearningCenterPage(){
     }catch(err){setError(errorText(err));}
     finally{setBusyId("");}
   }
+  async function deactivateAdapter(){
+    setBusyId("deactivate-adapter");setError("");setNotice("");
+    try{
+      await post<Record<string,unknown>>("/agentic-employees/chat-studio/training-adapters/deactivate",{});
+      setNotice("Active trained adapter disabled. Ledgerly will use the normal provider chain.");
+      await load();
+    }catch(err){setError(errorText(err));}
+    finally{setBusyId("");}
+  }
+
 
   const activeAdapter=data.adapters.find(item=>item.active);
 
@@ -173,7 +183,7 @@ export function ResponseLearningCenterPage(){
 
         <section className="rlc-card">
           <div className="rlc-section-head compact"><div><small>TRAINED MODELS</small><h2>Adapters</h2></div></div>
-          {activeAdapter&&<div className="rlc-active-adapter"><ShieldCheck size={17}/><div><small>ACTIVE ADAPTER</small><b>{activeAdapter.name}</b><span>{activeAdapter.base_model}</span><em>{data.service?.preferActiveAdapter?"Local adapter inference enabled":"Registered active; local adapter preference is currently disabled"}</em></div></div>}
+          {activeAdapter&&<div className="rlc-active-adapter"><ShieldCheck size={17}/><div><small>ACTIVE ADAPTER</small><b>{activeAdapter.name}</b><span>{activeAdapter.base_model}</span><em>{data.service?.preferActiveAdapter?"Local adapter inference enabled":"Registered active; local adapter preference is currently disabled"}</em></div><button disabled={busyId==="deactivate-adapter"} onClick={()=>void deactivateAdapter()}>{busyId==="deactivate-adapter"?<Activity className="spin" size={11}/>:<X size={11}/>}Use provider only</button></div>}
           {!data.adapters.length?<Empty title="No adapters registered" text="The response engine will continue using retrieval learning and the school's configured AI provider."/>:<div className="rlc-adapters">{data.adapters.map(adapter=><div key={adapter.adapter_id} className={adapter.active?"active":""}><Database size={14}/><div className="rlc-adapter-copy"><b>{adapter.name}</b><span>{adapter.base_model}</span><small>{adapter.active?"Active":"Available"} · {when(adapter.created_at)}</small></div>{!adapter.active&&<button disabled={busyId===adapter.adapter_id} onClick={()=>void activateAdapter(adapter)}>{busyId===adapter.adapter_id?<Activity className="spin" size={11}/>:<Check size={11}/>}Activate</button>}</div>)}</div>}
         </section>
 
