@@ -6,11 +6,17 @@ on:
     paths:
       - "ledgerly-ai/**"
       - "node-backend/**"
+      - "modules/ledgerly-ai/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/ledgerly-ai-ci.yml"
   pull_request:
     paths:
       - "ledgerly-ai/**"
       - "node-backend/**"
+      - "modules/ledgerly-ai/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/ledgerly-ai-ci.yml"
 
 jobs:
@@ -58,12 +64,40 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: node-backend/package-lock.json
-      - run: npm ci
+          cache-dependency-path: package-lock.json
+      - name: Install frontend dependencies
+        working-directory: .
+        run: npm ci
+      - name: Frontend typecheck
+        working-directory: .
+        run: npm run typecheck
+      - name: Frontend build
+        working-directory: .
+        run: npm run build:web
+      - name: Install backend dependencies
+        run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run db:migrate
       - run: npm test
       - run: npm run build:strict
+      - name: Build Ledgerly AI worker images
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -t ledgerly-ai-codex:ci ../ledgerly-ai/workers/codex
+          docker build -t ledgerly-ai-claude-code:ci ../ledgerly-ai/workers/claude-code
+      - name: Verify isolated worker CLIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=512m --cpus=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            ledgerly-ai-codex:ci --version
+          docker run --rm --network none --read-only --cap-drop=ALL \
+            --security-opt=no-new-privileges --pids-limit=64 --memory=512m --cpus=1 \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+            ledgerly-ai-claude-code:ci --version
       - name: Ledgerly AI smoke test
         shell: bash
         run: |
@@ -81,3 +115,4 @@ jobs:
           grep -q '"key":"ledgerly-ai"' /tmp/root.json
           unauth_status=$(curl -sS -o /tmp/lai-unauth.json -w '%{http_code}' http://127.0.0.1:8080/api/v1/ledgerly-ai/health)
           test "$unauth_status" = "401"
+          npm run smoke:ledgerly-ai

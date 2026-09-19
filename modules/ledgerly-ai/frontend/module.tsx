@@ -8,7 +8,7 @@ import "./ledgerly-ai-workspace.css";
 const moduleDefinition:FrontendModuleDefinition={
   key:"ledgerly-ai",
   name:"Ledgerly AI",
-  version:"0.16.0",
+  version:"0.17.0",
   order:74,
   routes:{
     "ledgerly-ai-ask":{view:LedgerlyAiWorkspacePage},

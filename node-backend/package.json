@@ -3,7 +3,9 @@
   "version": "0.3.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.0.0" },
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:queue": "tsx watch src/queue/worker.ts",
@@ -17,7 +19,8 @@
     "start": "node dist/server.js",
     "start:queue": "node dist/queue/worker.js",
     "start:scheduler": "node dist/scheduler/scheduler.js",
-    "check": "npm run typecheck && npm test && npm run build:strict"
+    "check": "npm run typecheck && npm test && npm run build:strict",
+    "smoke:ledgerly-ai": "node scripts/ledgerly-ai-smoke.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.888.0",
