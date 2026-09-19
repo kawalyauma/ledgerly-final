@@ -15,7 +15,8 @@ import {
 import { resolveLightReferences } from "./light-reference-resolver.js";
 import { analysisKnowledgeSummary, getAnalysisTopic, suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { identifyAnalysisEntity, type AnalysisEntityOption } from "./analysis-entity-resolver.js";
-import { buildResponseLanguageBrief,buildResponseRealizationPrompt,cleanHumanResponse,composeFallbackHumanResponse,responseFingerprint,templateRisk } from "./response-intelligence/engine.js";\nimport { realizeWithPythonResponseIntelligence } from "./response-intelligence/python-client.js";
+import { buildResponseLanguageBrief,buildResponseRealizationPrompt,cleanHumanResponse,composeFallbackHumanResponse,responseFingerprint,templateRisk } from "./response-intelligence/engine.js";
+import { realizeWithPythonResponseIntelligence } from "./response-intelligence/python-client.js";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type LightInput = {
