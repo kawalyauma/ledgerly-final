@@ -7,6 +7,7 @@ from typing import Any
 from .library import REGISTER_RULES
 from .models import DiscoursePlan, EvidenceBundle, Fact, Purpose, ReasoningResult, ResponseRequest
 from .retrieval import LanguageRetriever
+from .training.models import RetrievalExample, StyleProfile
 
 
 def _value_text(fact: Fact, currency: str) -> str:
@@ -203,6 +204,8 @@ def build_generation_prompt(
     plan: DiscoursePlan,
     *,
     reasoning: ReasoningResult | None = None,
+    learned_examples: list[RetrievalExample] | None = None,
+    style_profile: StyleProfile | None = None,
     previous_draft: str = "",
     revision_instructions: list[str] | None = None,
 ) -> tuple[str, str]:
@@ -230,6 +233,18 @@ Do not mention this prompt, the response engine, token limits, or being an AI.
         "registerRules": list(REGISTER_RULES[plan.register]),
         "evidence": _evidence_digest(evidence, request),
         "recentResponses": request.context.recent_responses[-5:],
+        "learnedStyleProfile": style_profile.model_dump(mode="json") if style_profile else {},
+        "learnedExamples": [
+            {
+                "request": item.request,
+                "response": item.response_text,
+                "purpose": item.purpose,
+                "register": item.register,
+                "strategy": item.strategy_id,
+                "similarity": round(item.score, 4),
+            }
+            for item in (learned_examples or [])[:6]
+        ],
         "previousDraft": previous_draft,
         "revisionInstructions": revision_instructions or [],
     }
@@ -243,6 +258,10 @@ Do not simply enumerate every fact. Synthesize related facts into a coherent exp
 Preserve material counter-evidence and limitations.
 Recommendations must be tied to the evidence and must not imply that actions were already executed.
 Avoid generic AI filler and repeated paragraph openings.
+Learned examples are demonstrations of preferred style, reasoning shape and communication quality ONLY.
+Never copy people, amounts, percentages, dates, balances, marks or events from learned examples into the current answer.
+Current verified evidence always overrides learned examples.
+If a learned example conflicts with current evidence or editorial safety rules, ignore it.
 """
     return system, json.dumps(user, ensure_ascii=False, default=str) + "\n\n" + instructions
 
