@@ -201,24 +201,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
   const r = new Hono<AppEnv>();
   r.use("*", requireScope("school:read"));
 
-  r.get("/setup", async c => {
-    const p = c.get("principal"), orgId = p.organizationId;
-    const [years, terms, classes, streams, subjects, teachers, teacherAllocations] = await Promise.all([
-      runtime.db.query(`SELECT * FROM school_academic_years WHERE organization_id=$1 ORDER BY is_current DESC,starts_on DESC`, [orgId]),
-      runtime.db.query(`SELECT * FROM school_terms WHERE organization_id=$1 ORDER BY is_current DESC,starts_on DESC,sequence_no`, [orgId]),
-      runtime.db.query(`SELECT * FROM school_classes WHERE organization_id=$1 AND active=true ORDER BY name`, [orgId]),
-      runtime.db.query(`SELECT * FROM school_streams WHERE organization_id=$1 AND active=true ORDER BY name`, [orgId]),
-      runtime.db.query(`SELECT * FROM school_subjects WHERE organization_id=$1 AND active=true ORDER BY name`, [orgId]),
-      runtime.db.query(`SELECT id,COALESCE(NULLIF(preferred_name,''),TRIM(CONCAT_WS(' ',first_name,middle_name,last_name))) AS name,staff_number FROM school_staff_profiles WHERE organization_id=$1 AND deleted_at IS NULL AND employment_status='active' AND is_teacher=true ORDER BY name`, [orgId]),
-      runtime.db.query(`SELECT id,staff_id AS teacher_staff_id,academic_year_id,term_id,class_id,stream_id,subject_id,periods_per_week FROM school_staff_teaching_assignments WHERE organization_id=$1 AND active=true ORDER BY created_at`, [orgId])
-    ]);
-    return c.json({ data: {
-      years: years.rows.map(camel), terms: terms.rows.map(camel), classes: classes.rows.map(camel), streams: streams.rows.map(camel),
-      subjects: subjects.rows.map(camel), teachers: teachers.rows.map(camel), teacherAllocations: teacherAllocations.rows.map(camel)
-    }});
-  });
-
-  r.get("/learning/schemes", async c => {
+  r.get("/schemes", async c => {
     const p = c.get("principal"), orgId = p.organizationId;
     const q = await runtime.db.query(`
       SELECT w.*,sub.name AS subject_name,cl.name AS class_name,st.name AS stream_name,tr.name AS term_name,ay.name AS academic_year_name,
@@ -240,7 +223,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: q.rows.map(camel) });
   });
 
-  r.post("/learning/schemes", requireScope("school:write"), async c => {
+  r.post("/schemes", requireScope("school:write"), async c => {
     const parsed = schemeCreateSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid scheme", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, v = parsed.data;
@@ -270,7 +253,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, academicYearId: v.academicYearId, termId: v.termId, classId: v.classId, streamId: v.streamId ?? null, subjectId: v.subjectId, teacherStaffId: v.teacherStaffId ?? null, curriculumId: v.curriculumId ?? null, title, status: "draft" } }, 201);
   });
 
-  r.get("/learning/schemes/:id", async c => {
+  r.get("/schemes/:id", async c => {
     const p = c.get("principal"), orgId = p.organizationId, schemeId = c.req.param("id");
     const q = await runtime.db.query(`
       SELECT w.*,sub.name AS subject_name,cl.name AS class_name,st.name AS stream_name,tr.name AS term_name,ay.name AS academic_year_name,
@@ -311,7 +294,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { ...camel(q.rows[0]), topics, summary } });
   });
 
-  r.post("/learning/schemes/:id/topics", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/topics", requireScope("school:write"), async c => {
     const parsed = topicSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid topic", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, schemeId = c.req.param("id"), v = parsed.data;
@@ -322,7 +305,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, schemeId, ...v, status: "planned" } }, 201);
   });
 
-  r.post("/learning/topics/:id/lessons", requireScope("school:write"), async c => {
+  r.post("/topics/:id/lessons", requireScope("school:write"), async c => {
     const parsed = lessonSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid lesson", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, topicId = c.req.param("id"), v = parsed.data;
@@ -335,7 +318,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, topicId, sequenceNo, ...v, status: "planned", competencies: [] } }, 201);
   });
 
-  r.put("/learning/lessons/:id/competencies", requireScope("school:write"), async c => {
+  r.put("/lessons/:id/competencies", requireScope("school:write"), async c => {
     const parsed = competenciesSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid competencies", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, lessonId = c.req.param("id"), items = parsed.data.competencies;
@@ -352,7 +335,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: q.rows.map(camel) });
   });
 
-  r.post("/learning/lessons/:id/lesson-plan", requireScope("school:write"), async c => {
+  r.post("/lessons/:id/lesson-plan", requireScope("school:write"), async c => {
     const parsed = planSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid lesson plan", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, lessonId = c.req.param("id"), v = parsed.data;
@@ -372,7 +355,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, lessonId, status: "draft", ...v } }, 201);
   });
 
-  r.get("/learning/lesson-plans/:id", async c => {
+  r.get("/lesson-plans/:id", async c => {
     const p = c.get("principal"), orgId = p.organizationId, planId = c.req.param("id"), row = await planContext(runtime, orgId, planId);
     const competencies = await runtime.db.query(`SELECT * FROM school_scheme_lesson_competencies WHERE organization_id=$1 AND lesson_id=$2 ORDER BY id`, [orgId, row.lesson_id]);
     const data = camel(row);
@@ -381,28 +364,28 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data });
   });
 
-  r.post("/learning/lesson-plans/:id/submit", requireScope("school:write"), async c => {
+  r.post("/lesson-plans/:id/submit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
     if (row.status !== "draft") throw new AppError(409, "INVALID_WORKFLOW", "Only a draft lesson plan can be submitted");
     await runtime.db.query(`UPDATE school_scheme_lesson_plans SET status='submitted',submitted_at=CURRENT_TIMESTAMP,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "submitted" } });
   });
 
-  r.post("/learning/lesson-plans/:id/resubmit", requireScope("school:write"), async c => {
+  r.post("/lesson-plans/:id/resubmit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
     if (row.status !== "rejected") throw new AppError(409, "INVALID_WORKFLOW", "Only a rejected lesson plan can be resubmitted");
     await runtime.db.query(`UPDATE school_scheme_lesson_plans SET status='submitted',submitted_at=CURRENT_TIMESTAMP,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "submitted" } });
   });
 
-  r.post("/learning/lesson-plans/:id/approve", requireScope("school:write"), async c => {
+  r.post("/lesson-plans/:id/approve", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
     if (row.status !== "submitted") throw new AppError(409, "INVALID_WORKFLOW", "Only a submitted lesson plan can be approved");
     await runtime.db.query(`UPDATE school_scheme_lesson_plans SET status='approved',reviewed_at=CURRENT_TIMESTAMP,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "approved" } });
   });
 
-  r.post("/learning/lesson-plans/:id/reject", requireScope("school:write"), async c => {
+  r.post("/lesson-plans/:id/reject", requireScope("school:write"), async c => {
     const parsed = optionalFeedbackSchema.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw validationError("Invalid lesson-plan feedback", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
@@ -411,7 +394,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, status: "rejected", reviewNotes: parsed.data.feedback ?? "Changes requested." } });
   });
 
-  r.post("/learning/lessons/:id/deliver", requireScope("school:write"), async c => {
+  r.post("/lessons/:id/deliver", requireScope("school:write"), async c => {
     const parsed = deliverySchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid lesson delivery", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, lessonId = c.req.param("id"), v = parsed.data;
@@ -436,7 +419,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, lessonId, ...v, coveragePercent: coverage.coveragePercent } }, 201);
   });
 
-  r.get("/learning/lesson-plans/:id/assessment", async c => {
+  r.get("/lesson-plans/:id/assessment", async c => {
     const p = c.get("principal"), orgId = p.organizationId, planId = c.req.param("id"), plan = await planContext(runtime, orgId, planId);
     const assessmentQ = await runtime.db.query(`SELECT * FROM school_scheme_lesson_assessments WHERE organization_id=$1 AND lesson_id=$2`, [orgId, plan.lesson_id]);
     const assessment = assessmentQ.rows[0] ?? null;
@@ -454,7 +437,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { assessment: assessment ? camel(assessment) : null, learners: rows, summary: { learners: rows.length, recorded, absent, average } } });
   });
 
-  r.put("/learning/lesson-plans/:id/assessment", requireScope("school:write"), async c => {
+  r.put("/lesson-plans/:id/assessment", requireScope("school:write"), async c => {
     const parsed = assessmentSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Invalid lesson assessment", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, planId = c.req.param("id"), v = parsed.data, plan = await planContext(runtime, orgId, planId);
@@ -486,7 +469,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id: assessmentId, lessonId: plan.lesson_id, title: v.title, assessmentType: v.assessmentType, maxScore: v.maxScore, status: "draft" } });
   });
 
-  r.post("/learning/lesson-plans/:id/assessment/submit", requireScope("school:write"), async c => {
+  r.post("/lesson-plans/:id/assessment/submit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, planId = c.req.param("id"), plan = await planContext(runtime, orgId, planId);
     const q = await runtime.db.query(`SELECT * FROM school_scheme_lesson_assessments WHERE organization_id=$1 AND lesson_id=$2`, [orgId, plan.lesson_id]);
     if (!q.rowCount) throw new AppError(409, "ASSESSMENT_NOT_FOUND", "Save the lesson mark sheet before submitting it");
@@ -503,7 +486,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id: q.rows[0].id, status: "submitted", lessonStatus: "assessed", coveragePercent: coverage.coveragePercent } });
   });
 
-  r.post("/learning/schemes/:id/submit", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/submit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), scheme = await requireScheme(runtime, orgId, id);
     if (!["draft", "rejected"].includes(String(scheme.status))) throw new AppError(409, "INVALID_WORKFLOW", "Only a draft or rejected scheme can be submitted to HOD");
     const readiness = await runtime.db.query(`
@@ -518,28 +501,28 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, status: "submitted_hod" } });
   });
 
-  r.post("/learning/schemes/:id/hod-approve", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/hod-approve", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), scheme = await requireScheme(runtime, orgId, id);
     if (scheme.status !== "submitted_hod") throw new AppError(409, "INVALID_WORKFLOW", "Only a scheme submitted to HOD can be HOD-approved");
     await runtime.db.query(`UPDATE school_schemes_of_work SET status='hod_approved',reviewed_at=CURRENT_TIMESTAMP,reviewed_by=$1,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`, [p.userId, id, orgId]);
     return c.json({ data: { id, status: "hod_approved" } });
   });
 
-  r.post("/learning/schemes/:id/submit-dos", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/submit-dos", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), scheme = await requireScheme(runtime, orgId, id);
     if (scheme.status !== "hod_approved") throw new AppError(409, "INVALID_WORKFLOW", "Only an HOD-approved scheme can be submitted to DOS");
     await runtime.db.query(`UPDATE school_schemes_of_work SET status='submitted_dos',updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "submitted_dos" } });
   });
 
-  r.post("/learning/schemes/:id/dos-approve", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/dos-approve", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), scheme = await requireScheme(runtime, orgId, id);
     if (scheme.status !== "submitted_dos") throw new AppError(409, "INVALID_WORKFLOW", "Only a scheme submitted to DOS can be approved");
     await runtime.db.query(`UPDATE school_schemes_of_work SET status='approved',reviewed_at=CURRENT_TIMESTAMP,reviewed_by=$1,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`, [p.userId, id, orgId]);
     return c.json({ data: { id, status: "approved" } });
   });
 
-  r.post("/learning/schemes/:id/reject", requireScope("school:write"), async c => {
+  r.post("/schemes/:id/reject", requireScope("school:write"), async c => {
     const parsed = feedbackSchema.safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw validationError("Feedback is required when returning a scheme", parsed.error.flatten());
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), scheme = await requireScheme(runtime, orgId, id);
@@ -548,7 +531,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: { id, status: "rejected", reviewNotes: parsed.data.feedback } });
   });
 
-  r.get("/learning/dashboard", async c => {
+  r.get("/dashboard", async c => {
     const p = c.get("principal"), orgId = p.organizationId;
     const [schemesQ, topicsQ, lessonsQ, plansQ, assessedQ, coverageQ] = await Promise.all([
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_schemes_of_work WHERE organization_id=$1 AND status<>'archived'`, [orgId]),
