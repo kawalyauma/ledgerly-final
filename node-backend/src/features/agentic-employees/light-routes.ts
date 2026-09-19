@@ -9,6 +9,7 @@ import { buildQuickCommandCatalog,executeQuickCommand,searchQuickReferenceOption
 import { suggestAnalysisTopics, type AnalysisMode } from "./analysis-knowledge.js";
 import { searchAnalysisEntities } from "./analysis-entity-resolver.js";
 import { responseLibraryStats,RESPONSE_LIBRARY } from "./response-intelligence/library.js";
+import { checkPythonResponseIntelligence } from "./response-intelligence/python-client.js";
 
 export const agenticLightRoutes=new Hono<{Bindings:Env;Variables:AppVariables}>();
 type OverrideRow={enabled:number|boolean;modelTier:ModelTier|null;systemPrompt:string|null;toolAllowlistJson:string|null};
@@ -33,6 +34,10 @@ agenticLightRoutes.get("/chat-studio/reference-options",requireScope("school:rea
 
 
 agenticLightRoutes.get("/chat-studio/response-intelligence",requireScope("school:read"),async c=>c.json({data:{stats:responseLibraryStats(),registers:Object.keys(RESPONSE_LIBRARY.registers),paragraphPatterns:RESPONSE_LIBRARY.paragraphPatterns.length,bannedBoilerplate:RESPONSE_LIBRARY.bannedBoilerplate.length}}));
+
+agenticLightRoutes.get("/chat-studio/response-intelligence-python",requireScope("school:read"),async c=>{
+ return c.json({data:await checkPythonResponseIntelligence(c.env)});
+});
 
 agenticLightRoutes.get("/chat-studio/analysis-guidance",requireScope("school:read"),async c=>{
  const p=c.get("principal"),key=c.req.query("agentKey")||"headteacher",mode=(c.req.query("mode")==="account-for"?"account-for":"analyse") as AnalysisMode,q=String(c.req.query("q")||"");
