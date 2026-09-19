@@ -49,6 +49,7 @@ class FeedbackCreate(BaseModel):
     correction_text: str = Field(default="", max_length=50000)
     entity_label: str = ""
     approve_original: bool = False
+    trusted_reviewer: bool = False
 
 
 class FeedbackRecord(BaseModel):
@@ -59,6 +60,7 @@ class FeedbackRecord(BaseModel):
     comment: str = ""
     correction_text: str = ""
     example_id: str = ""
+    trusted_reviewer: bool = False
     created_at: str
 
 
