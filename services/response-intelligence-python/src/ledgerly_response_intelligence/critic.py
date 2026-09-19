@@ -12,6 +12,7 @@ from .models import (
     Purpose,
     QualityDimension,
     QualityReport,
+    ReasoningResult,
     ResponseRequest,
 )
 
@@ -38,12 +39,18 @@ def _normalize_number(value: Any) -> set[str]:
     return values
 
 
-def evidence_numbers(evidence: EvidenceBundle) -> set[str]:
+def evidence_numbers(evidence: EvidenceBundle, reasoning: ReasoningResult | None = None) -> set[str]:
     numbers: set[str] = set()
     for fact in evidence.facts:
         numbers.update(_normalize_number(fact.value))
         if fact.unit == "%" and isinstance(fact.value, (int, float)):
             numbers.add(f"{fact.value:g}%")
+    if reasoning:
+        for insight in reasoning.insights:
+            if insight.magnitude is not None:
+                numbers.update(_normalize_number(abs(insight.magnitude)))
+            for number in NUMBER_RE.findall(insight.statement):
+                numbers.add(number.upper().replace("UGX", "").replace(",", "").strip())
     return {item.replace(",", "").replace("UGX", "").strip() for item in numbers if item}
 
 
@@ -90,8 +97,8 @@ def _readability(text: str) -> QualityDimension:
     return _dimension(score, *notes)
 
 
-def _grounding(text: str, evidence: EvidenceBundle) -> QualityDimension:
-    allowed = evidence_numbers(evidence)
+def _grounding(text: str, evidence: EvidenceBundle, reasoning: ReasoningResult | None = None) -> QualityDimension:
+    allowed = evidence_numbers(evidence, reasoning)
     used = text_numbers(text)
     unsupported = sorted(number for number in used if number not in allowed and not number.startswith("0."))
     # Harmless numbered headings such as "1." are not usually factual claims.
@@ -182,9 +189,15 @@ def _professionalism(text: str) -> QualityDimension:
 
 
 class ResponseCritic:
-    def evaluate(self, text: str, request: ResponseRequest, evidence: EvidenceBundle) -> QualityReport:
+    def evaluate(
+        self,
+        text: str,
+        request: ResponseRequest,
+        evidence: EvidenceBundle,
+        reasoning: ReasoningResult | None = None,
+    ) -> QualityReport:
         dimensions = {
-            "grounding": _grounding(text, evidence),
+            "grounding": _grounding(text, evidence, reasoning),
             "completeness": _completeness(text, evidence, request),
             "readability": _readability(text),
             "naturalness": _naturalness(text),
