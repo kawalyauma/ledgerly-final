@@ -71,6 +71,14 @@ const schema = z.object({
   LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT: z.coerce.number().min(1).max(100).default(97),
   LEDGERLY_AI_LOG_PROMPTS: envBoolean(false),
   LEDGERLY_AI_STARTUP_HEALTHCHECK: envBoolean(true),
+  // When true, non-critical (single-approval) incident fixes are reviewed and
+  // deployed by the Tuma release employee without a human clicking approve.
+  // Critical (two-owner) changes always still require real human reviewers —
+  // this flag cannot and does not weaken that check.
+  LEDGERLY_AI_AUTONOMOUS_RELEASE_ENABLED: envBoolean(false),
+  LEDGERLY_AI_DEPLOY_COMPOSE_DIR: z.string().min(1).default("/opt/ledgerly/source/node-backend"),
+  LEDGERLY_AI_DEPLOY_SERVICES: z.string().min(1).default("api,queue"),
+  LEDGERLY_AI_DEPLOY_TIMEOUT_MS: z.coerce.number().int().min(30_000).max(1_800_000).default(600_000),
 }).superRefine((value, ctx) => {
   if (value.LEDGERLY_AI_DEFAULT_PROVIDER === value.LEDGERLY_AI_FALLBACK_PROVIDER) {
     ctx.addIssue({ code: "custom", path: ["LEDGERLY_AI_FALLBACK_PROVIDER"], message: "Fallback provider must differ from the default provider." });

@@ -43,12 +43,20 @@ export class ProviderCommandBuilder {
     const image = provider === "codex" ? this.config.LEDGERLY_AI_CODEX_IMAGE : this.config.LEDGERLY_AI_CLAUDE_IMAGE;
     const sessionHome = path.resolve(this.sessions.home(provider));
     const containerSessionTarget = provider === "codex" ? "/home/ledgerly-ai/.codex" : "/home/ledgerly-ai";
+    // workspace-write (engineering-incident) jobs run the CLI's own bubblewrap
+    // sandbox, which needs to create a nested mount/user namespace. Docker's
+    // default seccomp/AppArmor profile and a stripped capability set block
+    // that namespace creation outright, so those jobs get a narrower,
+    // deliberately relaxed profile instead of the standard hardened one.
+    // read-only (chat/named-employee) jobs never take this branch.
+    const isWorkspaceWrite = sandbox === "workspace-write";
     const containerArgs = [
       "run", "--rm",
       "--network", this.config.LEDGERLY_AI_DOCKER_NETWORK,
       "--read-only",
-      "--cap-drop=ALL",
-      "--security-opt=no-new-privileges",
+      ...(isWorkspaceWrite
+        ? ["--cap-drop=ALL", "--cap-add=SYS_ADMIN", "--security-opt=seccomp=unconfined", "--security-opt=apparmor=unconfined"]
+        : ["--cap-drop=ALL", "--security-opt=no-new-privileges"]),
       "--ipc=none",
       "--user", "1000:1000",
       "--pids-limit="+String(this.config.LEDGERLY_AI_WORKER_PIDS),

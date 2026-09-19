@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { AppError } from "../../../http/errors.js";
 import type { AuthPrincipal } from "../../../http/types.js";
@@ -18,6 +19,7 @@ import { IncidentStagingManager } from "./staging.js";
 import type { LedgerlyAiGitService } from "../git/service.js";
 import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import { IncidentWorkspaceManager, type IncidentCheckResult } from "./workspace.js";
+import { deployComposeServices } from "./deploy-runner.js";
 
 type IncidentStatus=
   |"open"|"investigating"|"fixing"|"testing"|"staging"|"awaiting_approval"
@@ -32,7 +34,7 @@ type IncidentRow={
   changeRisk:LedgerlyAiRiskLevel|null;productionApprovalId:string|null;
   detectedAt:string;lastSeenAt:string;verifiedAt:string|null;closedAt:string|null;
   lastTimelineEventAt:string|null;lastDispatchAt:string|null;suppressedSignalCount:number;
-  regressionOfIncidentId:string|null;
+  regressionOfIncidentId:string|null;teamChatId:string|null;
 };
 type QaResult={approved:boolean;summary:string;risks:string[];followUps:string[]};
 
@@ -106,6 +108,7 @@ export class LedgerlyAiIncidentService{
       lastTimelineEventAt:row.lastTimelineEventAt??null,lastDispatchAt:row.lastDispatchAt??null,
       suppressedSignalCount:Number(row.suppressedSignalCount??0),
       regressionOfIncidentId:row.regressionOfIncidentId??null,
+      teamChatId:typeof row.latestContext?.teamChatId==="string"?row.latestContext.teamChatId:null,
     };
   }
 
@@ -133,6 +136,104 @@ export class LedgerlyAiIncidentService{
     return this.mapIncident(result.rows[0]);
   }
 
+  private async teamChatOwner(incident:IncidentRow){
+    const requestedBy=incident.latestContext?.requestedBy??incident.context?.requestedBy;
+    if(typeof requestedBy==="string"&&requestedBy)return requestedBy;
+    if(!incident.organizationId)return null;
+    const owner=await this.runtime.db.query<{userId:string}>(
+      `SELECT user_id AS "userId" FROM memberships
+        WHERE organization_id=$1 AND role IN ('owner','admin')
+        ORDER BY CASE role WHEN 'owner' THEN 1 ELSE 2 END,created_at LIMIT 1`,
+      [incident.organizationId],
+    );
+    return owner.rows[0]?.userId??null;
+  }
+
+  private async ensureTeamChat(incident:IncidentRow){
+    if(!incident.organizationId)return null;
+    if(incident.teamChatId)return incident.teamChatId;
+    const ownerId=await this.teamChatOwner(incident);
+    if(!ownerId)return null;
+    await this.employees.ensureBuiltIns(incident.organizationId);
+    const key=incident.assignedAgentKey??"kato";
+    const agentId=builtInEmployeeId(incident.organizationId,key);
+    const chatId=createId("laic");
+    const inserted=await this.runtime.db.query<{id:string}>(
+      `INSERT INTO lai_chats(id,organization_id,created_by,agent_id,title,status,metadata_json,last_message_at)
+       VALUES($1,$2,$3,$4,$5,'active',$6::jsonb,CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO NOTHING RETURNING id`,
+      [
+        chatId,incident.organizationId,ownerId,agentId,
+        `Incident team · ${incident.title}`.slice(0,220),
+        JSON.stringify({
+          kind:"incident-team",incidentId:incident.id,
+          participantUserIds:[ownerId],participantAgentKeys:[key],activeAgentKey:key,
+        }),
+      ],
+    );
+    if(!inserted.rowCount)return null;
+    await this.runtime.db.query(
+      `UPDATE lai_incidents
+          SET latest_context_json=latest_context_json||$1::jsonb,updated_at=CURRENT_TIMESTAMP
+        WHERE id=$2 AND organization_id=$3`,
+      [JSON.stringify({teamChatId:chatId,teamParticipantKeys:[key]}),incident.id,incident.organizationId],
+    );
+    incident.teamChatId=chatId;
+    await this.runtime.db.query(
+      `INSERT INTO lai_messages(id,organization_id,chat_id,role,content,user_id,agent_id,correlation_id,metadata_json)
+       VALUES($1,$2,$3,'system',$4,NULL,NULL,$5,$6::jsonb),
+             ($7,$2,$3,'assistant',$8,NULL,$9,$5,$10::jsonb)`,
+      [
+        createId("laim"),incident.organizationId,chatId,
+        "Incident team chat opened. You remain included while specialists investigate, prepare Git changes, and deploy.",
+        `incident:${incident.id}:team`,JSON.stringify({incidentId:incident.id,eventType:"team_chat_opened"}),
+        createId("laim"),
+        `${BUILT_IN_EMPLOYEE_NAMES[key]??key} joined and accepted the incident assignment.`,agentId,
+        JSON.stringify({incidentId:incident.id,eventType:"engineer_joined",actorKey:key}),
+      ],
+    );
+    return chatId;
+  }
+
+  private async mirrorEventToTeamChat(incident:IncidentRow,input:{
+    eventType:string;status?:string|null;actorType:"system"|"user"|"agent";
+    actorId:string;summary:string;metadata?:Record<string,unknown>;
+  }){
+    const chatId=await this.ensureTeamChat(incident);
+    if(!chatId||!incident.organizationId)return;
+    const actorKey=input.actorType==="agent"?input.actorId:null;
+    let agentId:string|null=null;
+    if(actorKey){
+      await this.employees.ensureBuiltIns(incident.organizationId);
+      const agent=await this.runtime.db.query<{id:string}>(
+        "SELECT id FROM lai_agents WHERE organization_id=$1 AND agent_key=$2 LIMIT 1",
+        [incident.organizationId,actorKey],
+      );
+      agentId=agent.rows[0]?.id??null;
+      await this.runtime.db.query(
+        `UPDATE lai_chats SET metadata_json=jsonb_set(
+            metadata_json,'{participantAgentKeys}',
+            COALESCE(metadata_json->'participantAgentKeys','[]'::jsonb)||to_jsonb($1::text),true
+          ),updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3
+          AND NOT (COALESCE(metadata_json->'participantAgentKeys','[]'::jsonb) ? $1)`,
+        [actorKey,chatId,incident.organizationId],
+      );
+    }
+    await this.runtime.db.query(
+      `INSERT INTO lai_messages(id,organization_id,chat_id,role,content,user_id,agent_id,correlation_id,metadata_json)
+       VALUES($1,$2,$3,$4,$5,NULL,$6,$7,$8::jsonb)`,
+      [
+        createId("laim"),incident.organizationId,chatId,input.actorType==="agent"?"assistant":"system",
+        input.summary.slice(0,12000),agentId,`incident:${incident.id}:${input.eventType}`,
+        JSON.stringify({incidentId:incident.id,eventType:input.eventType,status:input.status??null,actorKey,details:safeJson(input.metadata??{})}),
+      ],
+    );
+    await this.runtime.db.query(
+      "UPDATE lai_chats SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2",
+      [chatId,incident.organizationId],
+    );
+  }
+
   private async appendEvent(input:{
     incidentId:string;organizationId?:string|null;eventType:string;status?:string|null;
     actorType:"system"|"user"|"agent";actorId:string;summary:string;metadata?:Record<string,unknown>;
@@ -147,6 +248,13 @@ export class LedgerlyAiIncidentService{
         JSON.stringify(safeJson(input.metadata??{})),
       ],
     );
+    try{
+      const incident=await this.incident(input.incidentId);
+      await this.mirrorEventToTeamChat(incident,input);
+    }catch(error){
+      this.logger.warn({incidentId:input.incidentId,err:error instanceof Error?error.message:String(error)},
+        "Unable to mirror incident event into team chat");
+    }
   }
 
   private async recentDeployment(organizationId:string|null|undefined){
@@ -315,6 +423,60 @@ export class LedgerlyAiIncidentService{
     }
     return incident;
   }
+
+  // Turns a feature/change request typed in chat into the same governed
+  // engineering pipeline real incidents use: workspace-write investigation,
+  // tests, independent QA, then (for non-critical changes) Tuma's autonomous
+  // review+deploy. Unlike signal(), this always dispatches immediately —
+  // there is no error-frequency threshold to wait for.
+  async requestFeatureTask(principal:AuthPrincipal,input:{
+    title:string;description:string;
+    employeeKey:"kato"|"maya"|"tendo"|"nia"|"jabali"|"safi";
+    chatId?:string|null;
+  }){
+    if(!isAdmin(principal)&&!principal.scopes.includes("admin:write")){
+      throw new AppError(403,"FORBIDDEN","Requesting an engineering task requires administrative permission.");
+    }
+    const title=boundedText(input.title,220)||"Chat-requested engineering task";
+    const message=boundedText(input.description,8000);
+    const fingerprintSource=JSON.stringify({
+      kind:"feature-request",organizationId:principal.organizationId,requestedBy:principal.userId,
+      employeeKey:input.employeeKey,message,ts:Date.now(),
+    });
+    const fingerprint=createId("laifr")+":"+createHash("sha256").update(fingerprintSource).digest("hex").slice(0,16);
+    const id=createId("laiinc");
+    const context=safeJson({
+      source:"chat",signalType:"manual",kind:"feature-request",
+      requestedBy:principal.userId,message,chatId:input.chatId??null,
+    });
+    await this.runtime.db.query(
+      `INSERT INTO lai_incidents(
+        id,organization_id,fingerprint,source,signal_type,title,severity,status,assigned_agent_id,
+        assigned_agent_key,correlation_id,context_json,latest_context_json,module_key,
+        occurrence_count,first_seen_at,last_seen_at,last_timeline_event_at,last_dispatch_at
+      ) VALUES($1,$2,$3,'chat','manual',$4,'low','open',$5,$6,$7,$8::jsonb,$8::jsonb,'feature-request',
+        1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      [
+        id,principal.organizationId,fingerprint,title,
+        builtInEmployeeId(principal.organizationId,input.employeeKey),input.employeeKey,
+        input.chatId??null,JSON.stringify(context),
+      ],
+    );
+    const incident=await this.incident(id);
+    await this.appendEvent({
+      incidentId:id,organizationId:principal.organizationId,eventType:"feature_request_received",
+      status:"open",actorType:"user",actorId:principal.userId,
+      summary:`${BUILT_IN_EMPLOYEE_NAMES[input.employeeKey]} was asked to build: ${title}`,
+      metadata:{message,chatId:input.chatId??null},
+    });
+    await this.runtime.queue.publish(
+      "ledgerly-ai.incident.process",
+      {incidentId:id},
+      {queue:"ledgerly-ai",maxAttempts:2},
+    );
+    return incident;
+  }
+
   private async incidentWithClient(client:PoolClient,id:string){
     const result=await client.query(this.selectIncident()+" WHERE id=$1 LIMIT 1",[id]);
     return this.mapIncident(result.rows[0]);
@@ -530,7 +692,104 @@ export class LedgerlyAiIncidentService{
       correlationId:"incident:"+incident.id+":production-approval",riskLevel:risk,
       metadata:{approvalId:id,fixSha,changedPaths:paths,approvalMode,requiredApprovals,reviewerRole},
     });
+    // Autonomous release only ever covers single-approval (non-critical) changes.
+    // Critical changes keep requiring two distinct human owners no matter what
+    // this flag is set to — that safeguard is not something a config value can waive.
+    if(this.config.LEDGERLY_AI_AUTONOMOUS_RELEASE_ENABLED&&approvalMode==="single"){
+      this.attemptAutonomousRelease(incident.id).catch((error)=>{
+        this.logger.error({incidentId:incident.id,err:error instanceof Error?error.message:String(error)},"Autonomous release by Tuma failed");
+      });
+    }
     return id;
+  }
+
+  private async systemOwnerPrincipal(organizationId:string):Promise<AuthPrincipal|null>{
+    const owner=await this.runtime.db.query<{userId:string}>(
+      `SELECT user_id AS "userId" FROM memberships WHERE organization_id=$1 AND role='owner' ORDER BY created_at LIMIT 1`,
+      [organizationId],
+    );
+    const userId=owner.rows[0]?.userId;
+    if(!userId)return null;
+    return{userId,organizationId,role:"owner",scopes:["admin:read","admin:write"]};
+  }
+
+  // Tuma owns the GitHub handoff after the implementation and QA specialists
+  // finish. Jabali then owns deployment and production verification. Both
+  // handoffs are mirrored into the incident team chat.
+  private async attemptAutonomousRelease(incidentId:string){
+    const incident=await this.incident(incidentId);
+    if(!incident.organizationId||!incident.productionApprovalId)return;
+    const principal=await this.systemOwnerPrincipal(incident.organizationId);
+    if(!principal){
+      this.logger.warn({incidentId},"Autonomous release skipped: no organization owner found to act as reviewer of record");
+      return;
+    }
+    await this.appendEvent({
+      incidentId:incident.id,organizationId:incident.organizationId,eventType:"autonomous_release_started",
+      status:"awaiting_approval",actorType:"agent",actorId:"tuma",
+      summary:"Tuma joined as GitHub specialist and is reviewing the governed change, CI, and merge readiness.",
+      metadata:{approvalId:incident.productionApprovalId},
+    });
+    await this.reviewProductionApproval(principal,incident.id,"approve","Autonomous review by Tuma: staging checks and independent QA passed for a non-critical change.");
+    const pullRequest=await this.runtime.db.query<{id:string}>(
+      "SELECT id FROM lai_git_pull_requests WHERE incident_id=$1 ORDER BY created_at DESC LIMIT 1",
+      [incident.id],
+    );
+    if(pullRequest.rows[0]){
+      await this.git.mergePullRequest(pullRequest.rows[0].id,principal);
+      await this.appendEvent({
+        incidentId:incident.id,organizationId:incident.organizationId,eventType:"github_change_merged",
+        status:"awaiting_approval",actorType:"agent",actorId:"tuma",
+        summary:"Tuma confirmed CI and merged the governed GitHub pull request. Handing deployment to Jabali.",
+        metadata:{pullRequestId:pullRequest.rows[0].id},
+      });
+    }else{
+      await this.appendEvent({
+        incidentId:incident.id,organizationId:incident.organizationId,eventType:"github_local_change_accepted",
+        status:"awaiting_approval",actorType:"agent",actorId:"tuma",
+        summary:"Tuma accepted the governed local Git commit. GitHub pull requests are not configured, so deployment is proceeding from the verified commit.",
+      });
+    }
+    await this.appendEvent({
+      incidentId:incident.id,organizationId:incident.organizationId,eventType:"devops_handoff_started",
+      status:"awaiting_approval",actorType:"agent",actorId:"jabali",
+      summary:"Jabali joined as DevOps engineer and started the production deployment and health-verification handoff.",
+      metadata:{fixSha:incident.fixSha},
+    });
+    const deployStarted=Date.now();
+    const deployResult=await deployComposeServices(this.config);
+    await this.persistCheck(incident,{
+      type:"health",commandKey:"jabali:production-deploy",status:deployResult.ok?"passed":"failed",
+      durationMs:Date.now()-deployStarted,output:boundedText(deployResult.output,60000),
+      metadata:{ok:deployResult.ok},
+    });
+    if(!deployResult.ok){
+      await this.appendEvent({
+        incidentId:incident.id,organizationId:incident.organizationId,eventType:"autonomous_release_failed",
+        status:"awaiting_approval",actorType:"agent",actorId:"jabali",
+        summary:"Jabali's deployment attempt failed. The failure details were posted here and the incident remains open for recovery.",
+        metadata:{output:boundedText(deployResult.output,4000)},
+      });
+      return;
+    }
+    const refreshed=await this.incident(incident.id);
+    await this.recordProductionDeployment(principal,incident.id,{deployedRef:refreshed.fixSha??"unknown",note:"Deployed autonomously by Jabali after Tuma's Git handoff."});
+    await this.appendEvent({
+      incidentId:incident.id,organizationId:incident.organizationId,eventType:"autonomous_release_deployed",
+      status:"deployed",actorType:"agent",actorId:"jabali",
+      summary:"Jabali rebuilt and restarted the live app with the fix.",
+      metadata:{deployedRef:refreshed.fixSha??"unknown"},
+    });
+    const verification=await this.verifyAndClose(principal,incident.id);
+    await this.appendEvent({
+      incidentId:incident.id,organizationId:incident.organizationId,
+      eventType:verification.verified?"autonomous_release_verified":"autonomous_release_verification_pending",
+      status:verification.verified?"closed":"deployed",actorType:"agent",actorId:"jabali",
+      summary:verification.verified
+        ?"Jabali verified the deployment is healthy and closed the incident."
+        :"Jabali deployed the fix; health/regression verification has not passed yet.",
+      metadata:{verified:verification.verified},
+    });
   }
 
   async processIncident(id:string){
@@ -625,6 +884,12 @@ export class LedgerlyAiIncidentService{
       }
 
       const agentKey=incident.assignedAgentKey??"kato";
+      await this.appendEvent({
+        incidentId:id,organizationId:incident.organizationId,eventType:"github_specialist_handoff",status:"testing",
+        actorType:"agent",actorId:"tuma",
+        summary:"Tuma joined as GitHub specialist to take over commit governance, pull-request creation, CI tracking, and merge readiness.",
+        metadata:{implementationAgent:agentKey,changedPaths:paths},
+      });
       const committed=await this.git.commitWorkspace({
         workspaceId:work.id,
         subject:`fix(incident): ${incident.title.slice(0,120)}`,
@@ -656,7 +921,7 @@ export class LedgerlyAiIncidentService{
           pullRequestId=pr.id;
           await this.appendEvent({
             incidentId:id,organizationId:incident.organizationId,eventType:"pull_request_created",status:"testing",
-            actorType:"system",actorId:"ledgerly-ai",summary:"Created governed pull request for the incident fix.",
+            actorType:"agent",actorId:"tuma",summary:"Tuma created the governed GitHub pull request and started tracking CI.",
             metadata:{pullRequestId:pr.id,url:pr.url,ciState:pr.ciState},
           });
         }catch(error){
@@ -696,7 +961,7 @@ export class LedgerlyAiIncidentService{
       });
       await this.appendEvent({
         incidentId:id,organizationId:incident.organizationId,eventType:"staging_verified",status:"staging",
-        actorType:"system",actorId:"ledgerly-ai",summary:"Incident fix passed isolated staging deployment and smoke checks.",
+        actorType:"agent",actorId:"jabali",summary:"Jabali verified the incident fix in isolated staging and completed smoke checks.",
         metadata:{deploymentId,projectKey:staging.projectKey,smoke:staging.smoke},
       });
       const approvalId=await this.requestProductionApproval(incident,committed.sha,committed.changedPaths,deploymentId);

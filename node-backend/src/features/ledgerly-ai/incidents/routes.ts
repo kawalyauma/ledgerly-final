@@ -42,6 +42,17 @@ export function createLedgerlyAiIncidentRoutes(service:LedgerlyAiIncidentService
     return c.json({data:await service.signal({...parsed.data,organizationId:principal.organizationId})},202);
   });
 
+  routes.post("/feature-requests",requireScope("admin:write"),async c=>{
+    const parsed=z.object({
+      title:z.string().trim().min(1).max(220),
+      description:z.string().trim().min(1).max(8000),
+      employeeKey:z.enum(["kato","maya","tendo","nia","jabali","safi"]),
+      chatId:z.string().trim().max(120).nullable().optional(),
+    }).safeParse(await c.req.json().catch(()=>null));
+    if(!parsed.success)throw new AppError(422,"VALIDATION_ERROR","Invalid engineering task request.",parsed.error.flatten());
+    return c.json({data:await service.requestFeatureTask(c.get("principal"),parsed.data)},202);
+  });
+
   routes.get("/:id",requireScope("admin:read"),async c=>
     c.json({data:await service.detail(c.get("principal"),c.req.param("id"))})
   );

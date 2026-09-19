@@ -278,7 +278,23 @@ export class LedgerlyAiGatewayService {
           break;
         }
         if (step >= this.config.LEDGERLY_AI_MAX_TOOL_STEPS) {
-          throw new Error("Ledgerly AI exceeded the allowed tool steps for one request.");
+          providerResult = await this.providers.execute({
+            id: jobId,
+            organizationId: input.principal.organizationId,
+            userId: input.principal.userId,
+            correlationId,
+            prompt: providerPrompt + [
+              "",
+              "<tool_budget_exhausted>",
+              "The governed tool budget is exhausted. Do not request another tool.",
+              "Use the verified results already supplied to provide the best complete response now.",
+              "State any remaining uncertainty or follow-up plainly instead of failing.",
+              "</tool_budget_exhausted>",
+            ].join("\n"),
+            taskKind: input.taskKind,
+            sandbox: "read-only",
+          });
+          break;
         }
 
         const invocation = await this.tools.invoke({

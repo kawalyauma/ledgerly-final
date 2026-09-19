@@ -284,7 +284,19 @@ export class AgenticLedgerlyAiBridge {
           if(hasToolMarker(providerResult.text)) throw new Error("Ledgerly AI returned a malformed legacy employee tool request.");
           break;
         }
-        if(step>=this.ledgerlyAi.config.LEDGERLY_AI_MAX_TOOL_STEPS) throw new Error("Legacy employee exceeded the allowed Ledgerly AI tool steps.");
+        if(step>=this.ledgerlyAi.config.LEDGERLY_AI_MAX_TOOL_STEPS){
+          providerResult=await this.ledgerlyAi.providers.execute({
+            id:jobId,organizationId:input.principal.organizationId,userId:input.principal.userId,
+            correlationId,prompt:prompt+[
+              "","<tool_budget_exhausted>",
+              "The governed tool budget is exhausted. Do not request another tool.",
+              "Using the verified results already supplied, give the user the best complete response now.",
+              "State any remaining uncertainty or follow-up plainly instead of failing.",
+              "</tool_budget_exhausted>",
+            ].join("\n"),taskKind:taskKind(input.modelTier),sandbox:"read-only",
+          });
+          break;
+        }
         if(!tools.some((tool)=>tool.name===call.name)) throw new Error("Legacy employee requested a tool outside its configured allowlist.");
         const execution=await this.logAndExecuteTool(input,call.name,call.arguments,jobId,chat.id);
         toolEvents.push(execution.event);

@@ -17,7 +17,7 @@ type Employee={
   kind?:string;tools?:string[];permissions?:string[];capabilities?:string[];
 };
 type Chat={id:string;title:string;agentId?:string|null;status:string;lastMessageAt?:string;createdAt?:string};
-type ChatMessage={id:string;role:string;content:string;createdAt?:string};
+type ChatMessage={id:string;role:string;content:string;agentId?:string|null;createdAt?:string};
 type Approval={
   id:string;actionType:string;riskLevel:string;status:string;toolName?:string;
   approvalMode?:string;requiredApprovals?:number;approvalCount?:number;createdAt?:string;
@@ -25,6 +25,7 @@ type Approval={
 type Incident={
   id:string;title:string;severity:string;status:string;assignedAgentKey?:string;
   occurrenceCount?:number;changeRisk?:string;detectedAt?:string;lastSeenAt?:string;
+  teamChatId?:string|null;
 };
 
 const NAV:Array<{key:Section;label:string;icon:typeof Activity}>=[
@@ -219,6 +220,20 @@ export function LedgerlyAiConsolePage(){
       await loadSection("incidents");
     }catch(err){setError(errorText(err));}
   }
+  async function openIncidentChat(incident:Incident){
+    setLoading(true);setError("");
+    try{
+      const detail=incident.teamChatId?null:await get<any>("/ledgerly-ai/incidents/"+incident.id);
+      const id=incident.teamChatId??detail?.incident?.teamChatId;
+      if(!id)throw new Error("The incident team chat has not been created yet. Retry the incident to start it.");
+      const [chatDetail,chatRows,employeeRows]=await Promise.all([
+        get<any>("/ledgerly-ai/chats/"+id),get<Chat[]>("/ledgerly-ai/chats"),get<Employee[]>("/ledgerly-ai/employees"),
+      ]);
+      setChats(chatRows);setEmployees(employeeRows);setChatId(id);
+      setChatMessages(chatDetail.messages??[]);setChatAgent(chatDetail.agentId??"");setSection("chat");
+    }catch(err){setError(errorText(err));}
+    finally{setLoading(false);}
+  }
 
   const title=useMemo(()=>NAV.find(x=>x.key===section)?.label??"Ledgerly AI",[section]);
 
@@ -265,7 +280,7 @@ export function LedgerlyAiConsolePage(){
           onAgent={setChatAgent} onText={setChatText} onSend={sendChat}/>}
         {section==="employees"&&<Employees rows={data.employees??[]} controls={data.controls??[]} onControl={setAgentControl}/>}
         {section==="custom"&&<CustomAgents rows={data.custom??[]} onAction={customAction}/>}
-        {section==="incidents"&&<Incidents rows={data.incidents??[]} onAction={incidentAction}/>}
+        {section==="incidents"&&<Incidents rows={data.incidents??[]} onAction={incidentAction} onChat={openIncidentChat}/>}
         {section==="jobs"&&<Jobs rows={data.jobs??[]}/>}
         {section==="activity"&&<ActivityRows rows={data.activity??[]}/>}
         {section==="approvals"&&<Approvals rows={data.approvals??[]} onReview={reviewApproval}/>}
@@ -347,7 +362,7 @@ function ChatPanel({chats,employees,selected,messages,agent,text,sending,onSelec
       <div className="lai-messages">
         {!messages.length&&<div className="lai-chat-welcome"><Brain size={34}/><h3>Ask Ledgerly AI</h3><p>Conversation memory is captured by the managed Ledgerly AI memory service. Provider identity stays hidden.</p></div>}
         {messages.map(m=><article key={m.id} className={"lai-message "+m.role}>
-          <small>{m.role==="assistant"?"Ledgerly AI":m.role}</small><p>{m.content}</p><time>{when(m.createdAt)}</time>
+          <small>{m.role==="assistant"?(employees.find(emp=>emp.id===m.agentId)?.name??"Ledgerly AI"):m.role}</small><p>{m.content}</p><time>{when(m.createdAt)}</time>
         </article>)}
       </div>
       <footer>
@@ -386,12 +401,13 @@ function CustomAgents({rows,onAction}:{rows:any[];onAction:(id:string,action:"en
       </div></td></tr>)}</tbody></table></div>}</>;
 }
 
-function Incidents({rows,onAction}:{rows:Incident[];onAction:(id:string,action:"retry"|"approve"|"reject"|"verify")=>void}){
+function Incidents({rows,onAction,onChat}:{rows:Incident[];onAction:(id:string,action:"retry"|"approve"|"reject"|"verify")=>void;onChat:(incident:Incident)=>void}){
   if(!rows.length)return <Empty>No engineering incidents for this organization.</Empty>;
   return <div className="lai-table-wrap"><table><thead><tr><th>Incident</th><th>Severity</th><th>Status</th><th>Engineer</th><th>Occurrences</th><th>Last seen</th><th>Actions</th></tr></thead>
     <tbody>{rows.map(x=><tr key={x.id}><td><b>{x.title}</b><small>{x.id}</small></td><td><Pill tone={x.severity}>{x.severity}</Pill></td><td><Pill tone={x.status}>{x.status}</Pill></td>
       <td>{x.assignedAgentKey??"—"}</td><td>{fmt(x.occurrenceCount)}</td><td>{when(x.lastSeenAt??x.detectedAt)}</td>
       <td><div className="lai-inline-actions">
+        {x.teamChatId&&<button className="secondary" onClick={()=>onChat(x)}><MessageSquare size={12}/> Team chat</button>}
         {(x.status==="failed"||x.status==="open")&&<button onClick={()=>onAction(x.id,"retry")}><RefreshCw size={12}/> Retry</button>}
         {x.status==="awaiting_approval"&&<><button onClick={()=>onAction(x.id,"approve")}><CheckCircle2 size={12}/> Approve</button><button className="danger ghost" onClick={()=>onAction(x.id,"reject")}>Reject</button></>}
         {x.status==="deployed"&&<button onClick={()=>onAction(x.id,"verify")}><HeartPulse size={12}/> Verify</button>}

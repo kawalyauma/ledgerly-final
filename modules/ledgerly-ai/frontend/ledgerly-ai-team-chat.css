@@ -1,0 +1,51 @@
+.laitc-page{--t-ink:#18241f;--t-muted:#6a7a72;--t-line:#dfe8e3;--t-soft:#f5f8f6;--t-green:#126348;--t-mint:#168c60;max-width:1520px;margin:0 auto;padding:24px;color:var(--t-ink)}
+.laitc-page *{box-sizing:border-box}
+.laitc-page button{border:0;border-radius:10px;background:var(--t-green);color:#fff;padding:9px 11px;font-weight:750;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.laitc-page button:disabled{opacity:.45;cursor:not-allowed}
+.laitc-page button.secondary{background:#e9f0ec;color:#3e544a}
+.laitc-page button.icon{background:transparent;color:inherit;padding:3px}
+.laitc-loading{display:flex;align-items:center;gap:8px;justify-content:center;min-height:300px;color:var(--t-muted)}
+.laitc-hero{display:flex;justify-content:space-between;gap:22px;align-items:center;padding:23px 25px;margin-bottom:14px;border:1px solid var(--t-line);border-radius:24px;background:linear-gradient(135deg,#f8fbf9 0%,#eaf5ef 62%,#f2f0ff 100%)}
+.laitc-kicker{display:inline-flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.14em;font-weight:900;color:var(--t-mint)}
+.laitc-hero h1{margin:5px 0;font-size:30px}
+.laitc-hero p{margin:0;color:var(--t-muted);max-width:760px}
+.laitc-error{display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:11px 13px;border:1px solid #f0cccc;background:#fff5f5;color:#a42e2e;border-radius:12px}
+.laitc-error>span{flex:1}
+.laitc-layout{display:grid;grid-template-columns:260px minmax(0,1fr);min-height:700px;border:1px solid var(--t-line);border-radius:22px;overflow:hidden;background:#fff}
+.laitc-roster{background:#f5f8f6;border-right:1px solid var(--t-line);padding:14px;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.laitc-roster-title{font-size:10px;text-transform:uppercase;letter-spacing:.08em;font-weight:900;color:#77877f;padding:0 2px 6px}
+.laitc-roster-item{display:flex;align-items:center;gap:9px;padding:9px;border-radius:12px;background:#fff;border:1px solid var(--t-line);cursor:pointer}
+.laitc-roster-item.active{background:#dfede6;border-color:#bcdbcb}
+.laitc-roster-item input{margin:0}
+.laitc-roster-item>span:nth-child(3){display:flex;flex-direction:column;min-width:0}
+.laitc-roster-item b{font-size:11px}
+.laitc-roster-item small{font-size:9px;color:#788980;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.laitc-mini-avatar{width:30px;height:30px;flex:0 0 auto;border-radius:10px;background:#e2eee8;color:#167752;display:grid;place-items:center;font-size:9px;font-weight:900}
+.laitc-roster-note{display:flex;gap:6px;align-items:flex-start;margin-top:auto;padding:10px 2px 2px;font-size:9px;color:#7a8982;border-top:1px solid #e6ede9}
+.laitc-empty-note{font-size:11px;color:var(--t-muted)}
+.laitc-conversation{display:flex;flex-direction:column;min-width:0}
+.laitc-messages{flex:1;min-height:470px;max-height:610px;overflow:auto;background:#f8faf9;padding:18px}
+.laitc-message{display:flex;gap:8px;max-width:78%;margin-bottom:13px}
+.laitc-message.user{margin-left:auto;flex-direction:row-reverse}
+.laitc-message>div{padding:11px 13px;border:1px solid var(--t-line);border-radius:14px;background:#fff;min-width:0}
+.laitc-message.user>div{background:#155f45;border-color:#155f45;color:#fff}
+.laitc-message.error>div{background:#fff5f5;border-color:#f0cccc;color:#a42e2e}
+.laitc-message-avatar{width:30px;height:30px;flex:0 0 auto;border-radius:10px;background:#e4f0ea;color:#147650;display:grid;place-items:center;font-size:9px;font-weight:900}
+.laitc-message.user .laitc-message-avatar{background:#d8e6df}
+.laitc-message.error .laitc-message-avatar{background:#f6d9d9;color:#a42e2e}
+.laitc-message small{font-size:9px;opacity:.7}
+.laitc-message time{margin-left:8px}
+.laitc-message p{white-space:pre-wrap;line-height:1.58;margin:5px 0}
+.laitc-message.working p{display:flex;align-items:center;gap:6px}
+.laitc-build-row{margin-top:8px}
+.laitc-build-btn{font-size:10px;padding:6px 9px}
+.laitc-build-queued{display:flex;align-items:center;gap:5px;font-size:9px;color:#16855c;font-weight:700}
+.laitc-welcome{height:100%;min-height:430px;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--t-muted);text-align:center}
+.laitc-welcome>svg{color:#167b55}
+.laitc-welcome h3{font-size:20px;color:var(--t-ink);margin:12px 0 4px}
+.laitc-welcome p{max-width:560px;margin:0}
+.laitc-composer{display:grid;grid-template-columns:1fr auto;gap:7px;padding:10px 11px;border-top:1px solid var(--t-line)}
+.laitc-composer textarea{min-height:54px;max-height:150px;resize:vertical;border:1px solid #ccd9d2;border-radius:11px;padding:10px;font:inherit}
+.laitc-send{align-self:end;height:42px}
+@media(max-width:900px){.laitc-layout{grid-template-columns:1fr}.laitc-roster{max-height:220px;border-right:0;border-bottom:1px solid var(--t-line)}}
+@media(max-width:760px){.laitc-page{padding:12px}.laitc-hero{align-items:flex-start;flex-direction:column}.laitc-message{max-width:96%}}
