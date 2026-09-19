@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
-from .base import ToolBroker, ToolCapability, ToolRequest, ToolResult
+from .base import ToolCapability, ToolRequest, ToolResult
 
 
 Handler = Callable[[ToolRequest], Awaitable[ToolResult]]
@@ -30,7 +30,7 @@ class ToolRegistry:
         return await handler(request)
 
 
-class DisabledToolBroker(ToolBroker):
+class DisabledToolBroker:
     async def capabilities(self) -> list[ToolCapability]:
         return [
             ToolCapability(
