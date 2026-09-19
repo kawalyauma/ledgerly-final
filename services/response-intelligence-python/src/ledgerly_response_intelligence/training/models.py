@@ -43,6 +43,7 @@ class TrainingExample(BaseModel):
 
 class FeedbackCreate(BaseModel):
     organization_id: str = ""
+    example_id: str = ""
     response_fingerprint: str
     rating: Literal[-1, 0, 1]
     comment: str = Field(default="", max_length=5000)
