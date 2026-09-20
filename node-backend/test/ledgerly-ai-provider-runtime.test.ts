@@ -5,6 +5,7 @@ import {
   LedgerlyAiQueueFullError,
 } from "../src/features/ledgerly-ai/providers/execution-queue.js";
 import { sanitizeLedgerlyAiPublicText } from "../src/features/ledgerly-ai/providers/public-output.js";
+import { humanizeLedgerlyAiProviderEvent } from "../src/features/ledgerly-ai/providers/readable-events.js";
 
 describe("Ledgerly AI provider runtime", () => {
   it("defaults to Docker-isolated CLI execution", () => {
@@ -19,6 +20,32 @@ describe("Ledgerly AI provider runtime", () => {
       .toBe("I am Ledgerly AI and this was reviewed by Ledgerly AI.");
     expect(sanitizeLedgerlyAiPublicText("Explain what Claude Code and Codex are."))
       .toBe("Explain what Claude Code and Codex are.");
+  });
+
+  it("turns provider streams into readable employee updates", () => {
+    const claude=humanizeLedgerlyAiProviderEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"assistant",
+      data:{type:"assistant",message:{content:[{type:"text",text:"I found the dashboard component. I’m updating it now."}]}},
+    });
+    expect(claude?.content).toContain("I found the dashboard component");
+
+    const tool=humanizeLedgerlyAiProviderEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"assistant",
+      data:{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:"git diff --check"}}]}},
+    });
+    expect(tool?.content).toBe("I’m checking the Git changes now.");
+
+    const codex=humanizeLedgerlyAiProviderEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"item.started",
+      data:{type:"item.started",item:{type:"command_execution",command:"npm test"}},
+    });
+    expect(codex?.content).toBe("I’m running the relevant tests now.");
+
+    const internal=humanizeLedgerlyAiProviderEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"assistant",
+      data:{type:"assistant",message:{content:[{type:"text",text:"[[LEDGERLY_TOOL_CALL]]{\"name\":\"school.search\",\"arguments\":{}}[[/LEDGERLY_TOOL_CALL]]"}]}},
+    });
+    expect(internal).toBeNull();
   });
 
   it("enforces queue backpressure", async () => {

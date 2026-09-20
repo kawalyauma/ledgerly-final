@@ -7,7 +7,8 @@ import type { LedgerlyAiEmployee } from "../employees/types.js";
 import { createLedgerlyAiCorrelationId, type LedgerlyAiLogger } from "../logger.js";
 import type { LedgerlyAiMemoryService } from "../memory/service.js";
 import type { LedgerlyAiProviderRuntime } from "../providers/runtime.js";
-import type { LedgerlyAiTaskKind, ProviderResult } from "../providers/types.js";
+import type { LedgerlyAiTaskKind, ProviderResult, ProviderStreamEvent } from "../providers/types.js";
+import { humanizeLedgerlyAiProviderEvent } from "../providers/readable-events.js";
 import {
   containsLedgerlyAiToolCallMarker,
   ledgerlyAiToolProtocolInstructions,
@@ -23,7 +24,7 @@ import { redactLedgerlyAiText, redactLedgerlyAiValue } from "./redaction.js";
 import type { LedgerlyAiGatewayRepository } from "./repository.js";
 
 export type LedgerlyAiGatewayProgress = (event: {
-  type: "accepted" | "queued" | "running" | "waiting_approval" | "completed";
+  type: "accepted" | "queued" | "running" | "message" | "waiting_approval" | "completed";
   at: string;
   data?: Record<string, unknown>;
 }) => void | Promise<void>;
@@ -248,6 +249,27 @@ export class LedgerlyAiGatewayService {
       }
 
       await progress?.({ type: "running", at: new Date().toISOString(), data: { chatId: chat.id, jobId, correlationId } });
+      const progressSeen=new Set<string>();
+      let progressSequence=0;
+      const onProviderEvent=async(event:ProviderStreamEvent)=>{
+        const readable=humanizeLedgerlyAiProviderEvent(event);
+        if(!readable||progressSeen.has(readable.key))return;
+        progressSeen.add(readable.key);
+        const content=redactLedgerlyAiText(readable.content).trim().slice(0,4000);
+        if(!content)return;
+        const message=await this.repository.appendMessage({
+          principal:input.principal,chatId:chat.id,role:"assistant",content,correlationId,agentId,
+          metadata:{
+            kind:"progress",jobId,sequence:++progressSequence,progressKind:readable.kind,
+            providerEventType:event.type,employeeKey:employee?.key??null,
+            employeeName:employee?.name??"Ledgerly AI",
+          },
+        });
+        await progress?.({
+          type:"message",at:new Date().toISOString(),
+          data:{chatId:chat.id,jobId,correlationId,message},
+        });
+      };
       let providerResult: ProviderResult | null = null;
       let pendingApproval: {
         id: string;
@@ -269,6 +291,7 @@ export class LedgerlyAiGatewayService {
           prompt: providerPrompt,
           taskKind: input.taskKind,
           sandbox: "read-only",
+          onEvent:onProviderEvent,
         });
         const requestedTool = parseLedgerlyAiToolCall(providerResult.text);
         if (!requestedTool) {
@@ -293,6 +316,7 @@ export class LedgerlyAiGatewayService {
             ].join("\n"),
             taskKind: input.taskKind,
             sandbox: "read-only",
+            onEvent:onProviderEvent,
           });
           break;
         }
@@ -377,6 +401,7 @@ export class LedgerlyAiGatewayService {
         metadata: {
           durationMs: normalized.durationMs,
           employeeKey: employee?.key ?? null,
+          employeeName: employee?.name ?? "Ledgerly AI",
           usage: redactLedgerlyAiValue(providerResult.usage ?? {}),
           toolTrace,
           approval: pendingApproval,

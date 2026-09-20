@@ -1,3 +1,7 @@
+// Parked: this AI rule-engine timetable UI has no backend on the Postgres/self-host
+// stack (no tables/routes exist for rules/drafts/matrix/occurrences/exceptions there —
+// it only ever worked against the Cloudflare D1/Workers backend). Not mounted from
+// module.tsx. Left here for a possible future "smart scheduling" phase.
 import {useEffect,useMemo,useState,type FormEvent} from "react";
 import {AlertTriangle,BrainCircuit,CalendarClock,CheckCircle2,Clock3,Plus,Printer,RefreshCw,ShieldAlert,Sparkles,Users} from "lucide-react";
 import {del,errorText,get,post} from "../../../web/api";

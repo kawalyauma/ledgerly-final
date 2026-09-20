@@ -11,7 +11,7 @@ export type ProcessRunOptions = {
   timeoutMs: number;
   maxOutputBytes: number;
   signal?: AbortSignal;
-  onEvent?: (event: ProviderStreamEvent) => void;
+  onEvent?: (event: ProviderStreamEvent) => void | Promise<void>;
 };
 
 export type ProcessRunResult = {
@@ -57,12 +57,17 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    let eventDelivery:Promise<void>=Promise.resolve();
     const nameIndex=options.args.indexOf("--name");
     const dockerContainerName=nameIndex>=0&&typeof options.args[nameIndex+1]==="string"?options.args[nameIndex+1]:null;
 
     const emit = (event: ProviderStreamEvent) => {
       events.push(event);
-      options.onEvent?.(event);
+      if(options.onEvent){
+        eventDelivery=eventDelivery
+          .then(async()=>{await options.onEvent?.(event);})
+          .catch(()=>{});
+      }
     };
 
     const capture = (stream: "stdout" | "stderr", line: string) => {
@@ -114,13 +119,14 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
       reject(error);
     });
 
-    child.once("close", (code) => {
+    child.once("close", async (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
       options.signal?.removeEventListener("abort", abort);
       stdout.close();
       stderr.close();
+      await eventDelivery;
       resolve({
         exitCode: code ?? 1,
         durationMs: Date.now() - started,

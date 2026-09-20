@@ -185,6 +185,7 @@ export class LedgerlyAiGatewayRepository {
          FROM (
            SELECT * FROM lai_messages
             WHERE organization_id=$1 AND chat_id=$2 AND role IN ('user','assistant')
+              AND COALESCE(metadata_json->>'kind','')<>'progress'
             ORDER BY created_at DESC,id DESC LIMIT $3
          ) m
         ORDER BY created_at,id`,

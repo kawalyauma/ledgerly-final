@@ -1,8 +1,8 @@
 import { useEffect,useMemo,useRef,useState } from "react";
 import {
-  CircleAlert,Hammer,RefreshCw,Send,ShieldCheck,Sparkles,Users,UserRound,X
+  CircleAlert,FileImage,Hammer,Paperclip,RefreshCw,Send,ShieldCheck,Sparkles,Users,UserRound,X
 } from "lucide-react";
-import { errorText,get,post } from "../../../web/api";
+import { errorText,get,post,uploadFile } from "../../../web/api";
 import "./ledgerly-ai-team-chat.css";
 
 type Employee={
@@ -13,7 +13,10 @@ type TurnMessage={
   role:"user"|"assistant"|"error";content:string;createdAt:string;
   requestText?:string;chatId?:string|null;
 };
+type PendingFile={id:string;name:string;mimeType:string};
+type StoredMessage={id:string;role:"system"|"user"|"assistant"|"tool";content:string;createdAt:string;metadata?:Record<string,any>};
 const ENGINEERING_KEYS=new Set(["kato","maya","tendo","nia","jabali","safi"]);
+const LEDGERLY_AI_ENTRY:Employee={id:"",key:"",name:"Ledgerly AI",role:"Automatic routing — can use every tool your account is allowed to use",description:"",status:"active"};
 type TaskStatus="idle"|"sending"|"queued"|"error";
 
 function initials(name:string){
@@ -39,10 +42,22 @@ export function LedgerlyAiTeamChatPage(){
   const[text,setText]=useState("");
   const[pending,setPending]=useState<Set<string>>(new Set());
   const[taskStatus,setTaskStatus]=useState<Record<string,TaskStatus>>({});
+  const[pendingFile,setPendingFile]=useState<PendingFile|null>(null);
+  const[uploadingFile,setUploadingFile]=useState(false);
   const scrollRef=useRef<HTMLDivElement|null>(null);
+  const fileInputRef=useRef<HTMLInputElement|null>(null);
 
-  const myEmployees=useMemo(()=>employees.filter(x=>x.status==="active"),[employees]);
+  const myEmployees=useMemo(()=>[LEDGERLY_AI_ENTRY,...employees.filter(x=>x.status==="active")],[employees]);
   const busy=pending.size>0;
+
+  async function attachFile(file:File){
+    setUploadingFile(true);setError("");
+    try{
+      const up=await uploadFile<{id:string;mimeType?:string}>("/school/files",file,"academics-import");
+      setPendingFile({id:up.id,name:file.name,mimeType:up.mimeType||file.type});
+    }catch(err){setError(errorText(err));}
+    finally{setUploadingFile(false);}
+  }
 
   useEffect(()=>{
     (async()=>{
@@ -59,6 +74,37 @@ export function LedgerlyAiTeamChatPage(){
     scrollRef.current?.scrollTo({top:scrollRef.current.scrollHeight,behavior:"smooth"});
   },[turns,pending]);
 
+  useEffect(()=>{
+    const chatEntries=Object.entries(roomChats);
+    if(!chatEntries.length)return;
+    const sync=async()=>{
+      const incoming:TurnMessage[]=[];
+      await Promise.all(chatEntries.map(async([employeeId,chatId])=>{
+        try{
+          const detail=await get<any>("/ledgerly-ai/my/chats/"+chatId);
+          const employee=myEmployees.find(x=>x.id===employeeId);
+          for(const message of (detail.messages??[]) as StoredMessage[]){
+            if(message.role!=="assistant")continue;
+            incoming.push({
+              id:message.id,employeeId,employeeKey:employee?.key??null,
+              employeeName:String(message.metadata?.employeeName??employee?.name??"Ledgerly AI"),
+              role:"assistant",content:message.content,createdAt:message.createdAt,chatId,
+            });
+          }
+        }catch{/* one employee refresh must not stop the room */}
+      }));
+      if(!incoming.length)return;
+      setTurns(current=>{
+        const known=new Set(current.map(x=>x.id));
+        const fresh=incoming.filter(x=>!known.has(x.id));
+        return fresh.length?[...current,...fresh].sort((a,b)=>new Date(a.createdAt).getTime()-new Date(b.createdAt).getTime()):current;
+      });
+    };
+    void sync();
+    const timer=window.setInterval(()=>void sync(),1200);
+    return()=>window.clearInterval(timer);
+  },[roomChats,myEmployees]);
+
   function toggle(id:string){
     setSelected(current=>{
       const next=new Set(current);
@@ -68,28 +114,40 @@ export function LedgerlyAiTeamChatPage(){
   }
 
   function resetRoom(){
-    setSelected(new Set());setRoomChats({});setTurns([]);setText("");setError("");
+    setSelected(new Set());setRoomChats({});setTurns([]);setText("");setError("");setPendingFile(null);
   }
 
-  async function sendToEmployee(employee:Employee,message:string,requestKey:string){
-    const existingChatId=roomChats[employee.id];
+  async function sendToEmployee(employee:Employee,message:string,requestKey:string,file:PendingFile|null){
+    let chatId=roomChats[employee.id];
     const body={
-      message,agentId:employee.id,taskKind:"chat",
-      ...(existingChatId?{}:{title:"Team room: "+message.slice(0,60)}),
+      message,agentId:employee.id||null,taskKind:"chat",
+      ...(file?{attachments:[{
+        name:file.name,mimeType:"text/plain",kind:"context",
+        content:`Uploaded file reference for tool use.\nfileId: ${file.id}\noriginalName: ${file.name}\nmimeType: ${file.mimeType}\nIf asked to create a scheme from this file, call the academics.scheme.import_from_document tool with this exact fileId — do not guess a different one.`,
+      }]}:{}),
     };
     const headers={"Idempotency-Key":requestKey+"-"+employee.id};
     try{
-      const response=existingChatId
-        ? await post<any>("/ledgerly-ai/my/chats/"+existingChatId+"/messages",body,headers)
-        : await post<any>("/ledgerly-ai/chat",body,headers);
-      const chatId=response.chat?.id;
-      if(chatId&&chatId!==existingChatId)setRoomChats(current=>({...current,[employee.id]:chatId}));
-      setTurns(current=>[...current,{
-        id:requestKey+"-"+employee.id,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
+      if(!chatId){
+        const created=await post<{id:string}>("/ledgerly-ai/chats",{
+          title:"Team room: "+message.slice(0,60),agentId:employee.id||null,
+        });
+        chatId=created.id;
+        setRoomChats(current=>({...current,[employee.id]:created.id}));
+      }
+      const response=await post<any>("/ledgerly-ai/my/chats/"+chatId+"/messages",body,headers);
+      const turnId=String(response.message?.id??requestKey+"-"+employee.id);
+      const completed:TurnMessage={
+        id:turnId,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
         role:"assistant",content:response.message?.content??"(No reply.)",
         createdAt:response.message?.createdAt??new Date().toISOString(),
-        requestText:message,chatId:chatId??existingChatId??null,
-      }]);
+        requestText:message,chatId,
+      };
+      setTurns(current=>{
+        const index=current.findIndex(x=>x.id===turnId);
+        if(index<0)return[...current,completed];
+        return current.map((turn,i)=>i===index?{...turn,...completed}:turn);
+      });
     }catch(err){
       setTurns(current=>[...current,{
         id:requestKey+"-"+employee.id,employeeId:employee.id,employeeKey:employee.key,employeeName:employee.name,
@@ -104,11 +162,15 @@ export function LedgerlyAiTeamChatPage(){
     const message=text.trim();
     const targets=myEmployees.filter(x=>selected.has(x.id));
     if(!message||!targets.length||busy)return;
-    setText("");setError("");
+    const file=pendingFile;
+    setText("");setError("");setPendingFile(null);
     const requestKey="lai-team-"+Date.now()+"-"+Math.random().toString(36).slice(2);
-    setTurns(current=>[...current,{id:requestKey,employeeId:null,employeeKey:null,employeeName:"You",role:"user",content:message,createdAt:new Date().toISOString()}]);
+    setTurns(current=>[...current,{
+      id:requestKey,employeeId:null,employeeKey:null,employeeName:"You",role:"user",
+      content:message+(file?`\n📎 ${file.name}`:""),createdAt:new Date().toISOString(),
+    }]);
     setPending(new Set(targets.map(x=>x.id)));
-    await Promise.all(targets.map(employee=>sendToEmployee(employee,message,requestKey)));
+    await Promise.all(targets.map(employee=>sendToEmployee(employee,message,requestKey,file)));
   }
 
   async function requestBuild(turn:TurnMessage){
@@ -170,7 +232,18 @@ export function LedgerlyAiTeamChatPage(){
             </div>;
           })}
         </div>
+        {pendingFile&&<div className="laitc-attachment-chip">
+          <FileImage size={13}/><b>{pendingFile.name}</b>
+          <span>Ask Ledgerly AI to "create a scheme from this" and it will use the academics.scheme.import_from_document tool.</span>
+          <button className="icon" onClick={()=>setPendingFile(null)}><X size={12}/></button>
+        </div>}
         <footer className="laitc-composer">
+          <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden
+            onChange={e=>{const f=e.target.files?.[0];if(f)void attachFile(f);e.target.value="";}}/>
+          <button type="button" className="secondary laitc-attach" title="Attach a scheme/lesson plan photo for the AI to read"
+            disabled={uploadingFile} onClick={()=>fileInputRef.current?.click()}>
+            {uploadingFile?<RefreshCw size={16}/>:<Paperclip size={16}/>}
+          </button>
           <textarea value={text} onChange={e=>setText(e.target.value)}
             placeholder={selected.size?"Message the "+selected.size+" selected employee"+(selected.size===1?"":"s")+"…":"Select at least one employee above first…"}
             disabled={!selected.size}
@@ -205,7 +278,7 @@ function TurnView({turn,taskStatus,onRequestBuild}:{
       <p>{turn.content}</p>
       {canBuild&&<div className="laitc-build-row">
         {taskStatus==="queued"
-          ? <span className="laitc-build-queued"><ShieldCheck size={12}/> Sent to {turn.employeeName} as a real engineering task — check the Admin Console incident queue for progress.</span>
+          ? <span className="laitc-build-queued"><ShieldCheck size={12}/> {turn.employeeName} is working on it. Real progress messages will appear here in this chat.</span>
           : <button className="secondary laitc-build-btn" disabled={taskStatus==="sending"} onClick={()=>onRequestBuild(turn)}>
               <Hammer size={12}/> {taskStatus==="sending"?"Queuing…":taskStatus==="error"?"Try again":"Build this for real"}
             </button>}

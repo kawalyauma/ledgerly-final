@@ -84,6 +84,7 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
       timeoutMs: request.timeoutMs ?? this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,
       maxOutputBytes: this.config.LEDGERLY_AI_MAX_OUTPUT_BYTES,
       signal,
+      onEvent:request.onEvent,
     });
     if (result.timedOut) throw new Error("Ledgerly AI provider execution timed out.");
     if (result.aborted) throw new Error("Ledgerly AI provider execution was cancelled.");

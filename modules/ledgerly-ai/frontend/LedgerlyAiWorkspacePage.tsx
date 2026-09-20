@@ -159,6 +159,14 @@ export function LedgerlyAiWorkspacePage(){
     setChats(rows);
   }
 
+  async function refreshOpenChat(id:string){
+    try{
+      const detail=await get<any>("/ledgerly-ai/my/chats/"+id);
+      setMessages(detail.messages??[]);
+      setEmployeeId(detail.agentId??"");
+    }catch{/* live chat refresh should not interrupt typing */}
+  }
+
   async function pollJobs(){
     try{
       const rows=await get<Job[]>("/ledgerly-ai/my/jobs?limit=60");
@@ -188,6 +196,11 @@ export function LedgerlyAiWorkspacePage(){
     const timer=window.setInterval(()=>void pollJobs(),12000);
     return()=>window.clearInterval(timer);
   },[]);
+  useEffect(()=>{
+    if(!chatId)return;
+    const timer=window.setInterval(()=>void refreshOpenChat(chatId),1200);
+    return()=>window.clearInterval(timer);
+  },[chatId]);
 
   async function enableNotifications(){
     if(!("Notification"in window)){toast({tone:"info",title:"Browser notifications unavailable",detail:"This browser does not support desktop notifications."});return;}
@@ -252,28 +265,33 @@ export function LedgerlyAiWorkspacePage(){
 
   async function send(override?:typeof lastFailed){
     const message=(override?.message??text).trim();
-    const sendChatId=override?.chatId??chatId;
+    let sendChatId=override?.chatId??chatId;
     const sendEmployee=override?.employeeId??employeeId;
     const sendAttachments=override?.attachments??attachments;
     const requestKey=override?.requestKey??("lai-ui-"+Date.now()+"-"+Math.random().toString(36).slice(2));
     if(!message||busy)return;
     setBusy(true);setError("");setPendingApproval(null);
     if(!override)setText("");
-    const failed={message,chatId:sendChatId,employeeId:sendEmployee,attachments:sendAttachments,requestKey};
+    let failed={message,chatId:sendChatId,employeeId:sendEmployee,attachments:sendAttachments,requestKey};
     try{
+      if(!sendChatId){
+        const created=await post<Chat>("/ledgerly-ai/chats",{
+          title:short(message,70),agentId:sendEmployee||null,
+        });
+        sendChatId=created.id;failed={...failed,chatId:created.id};
+        setChatId(created.id);setEmployeeId(created.agentId??sendEmployee);
+        await refreshChats();
+      }
       const body={
         message,agentId:sendEmployee||null,taskKind:"chat",
         attachments:sendAttachments.map(({name,mimeType,content,kind})=>({name,mimeType,content,kind})),
       };
       const headers={"Idempotency-Key":requestKey};
-      const response=sendChatId
-        ? await post<any>("/ledgerly-ai/my/chats/"+sendChatId+"/messages",body,headers)
-        : await post<any>("/ledgerly-ai/chat",{...body,title:short(message,70)},headers);
-      const id=response.chat?.id??sendChatId;
+      const response=await post<any>("/ledgerly-ai/my/chats/"+sendChatId+"/messages",body,headers);
       if(response.approval)setPendingApproval(response.approval);
       setLastFailed(null);setAttachments([]);setContextText("");setShowContext(false);
       await refreshChats();
-      if(id)await loadChat(id);
+      await loadChat(sendChatId);
       void pollJobs();
     }catch(err){
       const msg=errorText(err);setError(msg);setLastFailed(failed);
@@ -367,7 +385,6 @@ export function LedgerlyAiWorkspacePage(){
           {loading&&messages.length===0?<div className="laiu-working"><RefreshCw size={18}/> Loading Ledgerly AI…</div>:
           messages.length===0?<Welcome employee={currentEmployee} onStarter={setText}/>:
           messages.map(message=><MessageView key={message.id} message={message}/>)}
-          {busy&&<div className="laiu-message assistant working"><span className="laiu-message-avatar"><Sparkles size={15}/></span><div><small>Ledgerly AI</small><p><RefreshCw size={14}/> Working on your request…</p></div></div>}
         </div>
 
         {pendingApproval&&<ApprovalCard approval={pendingApproval} onDecision={reviewApproval}/>}
@@ -428,10 +445,12 @@ function MessageView({message}:{message:Message}){
   if(message.role==="tool"){
     return <div className="laiu-tool-card"><CheckCircle2 size={16}/><div><small>VERIFIED LEDGERLY DATA</small><b>{message.metadata?.toolName??"Ledgerly tool result"}</b><p>{short(message.content,240)}</p></div></div>;
   }
-  return <article className={"laiu-message "+message.role}>
+  const employeeName=String(message.metadata?.employeeName??"Ledgerly AI");
+  const progress=message.metadata?.kind==="progress";
+  return <article className={"laiu-message "+message.role+(progress?" progress":"")}>
     <span className="laiu-message-avatar">{message.role==="user"?<UserRound size={15}/>:<Sparkles size={15}/>}</span>
     <div>
-      <small>{message.role==="user"?"You":"Ledgerly AI"} <time>{when(message.createdAt)}</time></small>
+      <small>{message.role==="user"?"You":employeeName} <time>{when(message.createdAt)}</time></small>
       <p>{message.content}</p>
       {!!attached.length&&<div className="laiu-message-meta">{attached.map((x:any,i:number)=><span key={i}><Paperclip size={11}/>{x.name}</span>)}</div>}
       {!!toolTrace.length&&<div className="laiu-tool-trace">{toolTrace.map((x:any,i:number)=><span key={i}>

@@ -44,7 +44,11 @@
 .laitc-welcome>svg{color:#167b55}
 .laitc-welcome h3{font-size:20px;color:var(--t-ink);margin:12px 0 4px}
 .laitc-welcome p{max-width:560px;margin:0}
-.laitc-composer{display:grid;grid-template-columns:1fr auto;gap:7px;padding:10px 11px;border-top:1px solid var(--t-line)}
+.laitc-attachment-chip{display:flex;align-items:center;gap:7px;margin:0 11px;padding:8px 10px;border:1px solid #bcdbcb;border-radius:10px;background:#f6fbf8;font-size:11px;color:#2c5445}
+.laitc-attachment-chip span{color:#5a7a6c;flex:1}
+.laitc-attachment-chip button{background:transparent;color:#5a7a6c;padding:2px}
+.laitc-composer{display:grid;grid-template-columns:auto 1fr auto;gap:7px;padding:10px 11px;border-top:1px solid var(--t-line)}
+.laitc-attach{align-self:end;height:42px;width:42px;padding:0}
 .laitc-composer textarea{min-height:54px;max-height:150px;resize:vertical;border:1px solid #ccd9d2;border-radius:11px;padding:10px;font:inherit}
 .laitc-send{align-self:end;height:42px}
 @media(max-width:900px){.laitc-layout{grid-template-columns:1fr}.laitc-roster{max-height:220px;border-right:0;border-bottom:1px solid var(--t-line)}}

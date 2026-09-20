@@ -12,6 +12,8 @@ import { redactLedgerlyAiText, redactLedgerlyAiValue } from "../gateway/redactio
 import type { LedgerlyAiLogger } from "../logger.js";
 import type { LedgerlyAiProviderRuntime } from "../providers/runtime.js";
 import { sanitizeLedgerlyAiPublicText } from "../providers/public-output.js";
+import { humanizeLedgerlyAiProviderEvent } from "../providers/readable-events.js";
+import type { ProviderStreamEvent } from "../providers/types.js";
 import type { LedgerlyAiRiskLevel } from "../types.js";
 import { classifyIncident, riskForChangedPaths, type IncidentSignalInput } from "./classifier.js";
 import { runIncidentCommand } from "./command.js";
@@ -163,6 +165,29 @@ export class LedgerlyAiIncidentService{
     if(!ownerId)return null;
     await this.employees.ensureBuiltIns(incident.organizationId);
     const key=incident.assignedAgentKey??"kato";
+    const requestedChatId=incident.latestContext?.chatId??incident.context?.chatId;
+    if(typeof requestedChatId==="string"&&requestedChatId){
+      const existing=await this.runtime.db.query<{id:string}>(
+        `SELECT id FROM lai_chats
+          WHERE id=$1 AND organization_id=$2 AND created_by=$3 AND status='active' LIMIT 1`,
+        [requestedChatId,incident.organizationId,ownerId],
+      );
+      if(existing.rows[0]){
+        await this.runtime.db.query(
+          `UPDATE lai_chats SET metadata_json=metadata_json||$1::jsonb,updated_at=CURRENT_TIMESTAMP
+            WHERE id=$2 AND organization_id=$3`,
+          [JSON.stringify({linkedIncidentId:incident.id,activeAgentKey:key}),requestedChatId,incident.organizationId],
+        );
+        await this.runtime.db.query(
+          `UPDATE lai_incidents
+              SET latest_context_json=latest_context_json||$1::jsonb,updated_at=CURRENT_TIMESTAMP
+            WHERE id=$2 AND organization_id=$3`,
+          [JSON.stringify({teamChatId:requestedChatId,teamParticipantKeys:[key]}),incident.id,incident.organizationId],
+        );
+        incident.teamChatId=requestedChatId;
+        return requestedChatId;
+      }
+    }
     const agentId=builtInEmployeeId(incident.organizationId,key);
     const chatId=createId("laic");
     const inserted=await this.runtime.db.query<{id:string}>(
@@ -232,13 +257,45 @@ export class LedgerlyAiIncidentService{
       [
         createId("laim"),incident.organizationId,chatId,input.actorType==="agent"?"assistant":"system",
         input.summary.slice(0,12000),agentId,`incident:${incident.id}:${input.eventType}`,
-        JSON.stringify({incidentId:incident.id,eventType:input.eventType,status:input.status??null,actorKey,details:safeJson(input.metadata??{})}),
+        JSON.stringify({
+          incidentId:incident.id,eventType:input.eventType,status:input.status??null,actorKey,
+          employeeName:actorKey
+            ? (actorKey in BUILT_IN_EMPLOYEE_NAMES
+              ? BUILT_IN_EMPLOYEE_NAMES[actorKey as keyof typeof BUILT_IN_EMPLOYEE_NAMES]
+              : actorKey)
+            : null,
+          kind:input.eventType.endsWith("_progress")?"progress":"incident-event",
+          details:safeJson(input.metadata??{}),
+        }),
       ],
     );
     await this.runtime.db.query(
       "UPDATE lai_chats SET last_message_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2",
       [chatId,incident.organizationId],
     );
+  }
+
+  private providerProgress(
+    incident:IncidentRow,
+    actorKey:"kato"|"maya"|"tendo"|"nia"|"jabali"|"safi",
+    status:IncidentStatus,
+    eventType:string,
+  ){
+    const seen=new Set<string>();
+    let sequence=0;
+    return async(event:ProviderStreamEvent)=>{
+      const readable=humanizeLedgerlyAiProviderEvent(event);
+      if(!readable||seen.has(readable.key))return;
+      seen.add(readable.key);
+      await this.appendEvent({
+        incidentId:incident.id,organizationId:incident.organizationId,eventType,status,
+        actorType:"agent",actorId:actorKey,summary:readable.content,
+        metadata:{
+          kind:"progress",progressKind:readable.kind,providerEventType:event.type,
+          sequence:++sequence,
+        },
+      });
+    };
   }
 
   private async appendEvent(input:{
@@ -727,6 +784,7 @@ export class LedgerlyAiIncidentService{
       id:createId("laiqa"),organizationId:incident.organizationId??"platform",userId:"ledgerly-ai:nia",
       correlationId:"incident:"+incident.id+":qa",prompt,taskKind:"testing",workspacePath:workspace,
       sandbox:"read-only",timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,600_000),
+      onEvent:this.providerProgress(incident,"nia","testing","qa_progress"),
     });
     const parsed=parseQa(result.text);
     await this.persistCheck(incident,{
@@ -947,6 +1005,9 @@ export class LedgerlyAiIncidentService{
         correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.workspacePath,logs),
         taskKind:"engineering",workspacePath:work.workspacePath,sandbox:"workspace-write",
         timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,IMPLEMENTATION_TIMEOUT_MS),
+        onEvent:this.providerProgress(
+          incident,incident.assignedAgentKey??"kato","fixing","implementation_progress",
+        ),
       }));
       const paths=await this.git.changedPaths(work.workspacePath);
       this.git.validateChangedPaths(paths);

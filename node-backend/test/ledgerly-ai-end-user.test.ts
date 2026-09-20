@@ -53,6 +53,18 @@ describe("Ledgerly AI end-user gateway",()=>{
     expect(params[1]).toBe("usr_1");
   });
 
+  it("keeps live progress messages out of future model context",async()=>{
+    let sql="";
+    const db={
+      query:async(nextSql:string)=>{sql=nextSql;return{rows:[]};},
+    };
+    const repository=new LedgerlyAiGatewayRepository(db as never);
+    repository.getChat=async()=>({} as never);
+    await repository.recentMessages(principal,"laic_1",12);
+    expect(sql).toContain("metadata_json->>'kind'");
+    expect(sql).toContain("<>'progress'");
+  });
+
   it("lists My Jobs using the requesting user identity",async()=>{
     let sql="";
     let params:unknown[]=[];

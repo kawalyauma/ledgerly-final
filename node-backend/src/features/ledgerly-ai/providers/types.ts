@@ -19,6 +19,7 @@ export type ProviderRequest = {
   sandbox?: LedgerlyAiSandbox;
   maxTurns?: number;
   timeoutMs?: number;
+  onEvent?: (event: ProviderStreamEvent) => void | Promise<void>;
 };
 
 export type ProviderStreamEvent = {

@@ -13,3 +13,4 @@ attendance-mobile/android/app/src/main/assets/facenet.tflite
 
 # Local Response Intelligence learning datasets, SQLite state and trained adapters
 services/response-intelligence-python/data/
+data/

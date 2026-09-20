@@ -9,6 +9,7 @@ import { redactLedgerlyAiValue } from "../gateway/redaction.js";
 import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import type { LedgerlyAiSecurityService } from "../security/service.js";
 import { actionTools } from "./action-tools.js";
+import { academicsTools } from "./academics-tools.js";
 import { databaseTools } from "./database-tools.js";
 import { engineeringTools } from "./engineering-tools.js";
 import { financeTools } from "./finance-tools.js";
@@ -101,6 +102,7 @@ export class LedgerlyAiToolService {
       ...financeTools,
       ...databaseTools,
       ...actionTools,
+      ...academicsTools,
       ...engineeringTools,
     ]);
   }
