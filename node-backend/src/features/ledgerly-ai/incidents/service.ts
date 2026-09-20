@@ -669,7 +669,7 @@ export class LedgerlyAiIncidentService{
       "<runtime_logs>",
       JSON.stringify(logs),
       "</runtime_logs>",
-      `Workspace: ${workspace}`,
+      `Workspace: ${this.config.LEDGERLY_AI_EXECUTION_MODE==="docker"?"/workspace":workspace}`,
       "Finish with a concise summary of root cause, files changed, and verification you attempted.",
     ].join("\n");
   }
