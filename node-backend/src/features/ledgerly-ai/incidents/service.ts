@@ -21,6 +21,13 @@ import type { LedgerlyAiPolicyService } from "../policy/service.js";
 import { IncidentWorkspaceManager, type IncidentCheckResult } from "./workspace.js";
 import { deployComposeServices } from "./deploy-runner.js";
 
+// A real engineering fix (investigate, edit, run checks, commit) routinely needs longer than a
+// few minutes; this is the floor for the implementation step's provider timeout.
+const IMPLEMENTATION_TIMEOUT_MS=50*60_000;
+// Stale-execution recovery must never fire before the longest timeout we actually hand to a
+// provider is allowed to elapse, or it will kill work that is still legitimately running.
+const STALE_EXECUTION_BUFFER_MS=10*60_000;
+
 type IncidentStatus=
   |"open"|"investigating"|"fixing"|"testing"|"staging"|"awaiting_approval"
   |"deployed"|"verified"|"closed"|"failed";
@@ -605,9 +612,13 @@ export class LedgerlyAiIncidentService{
   }
 
   async recoverStalledWorkflows(){
+    const staleExecutionMs=Math.max(
+      this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,IMPLEMENTATION_TIMEOUT_MS,this.config.LEDGERLY_AI_DEPLOY_TIMEOUT_MS,
+    )+STALE_EXECUTION_BUFFER_MS;
     await this.runtime.db.query(
       `UPDATE lai_provider_executions SET status='failed',error_text='Worker heartbeat expired; execution was recovered.',completed_at=CURRENT_TIMESTAMP
-       WHERE status='running' AND started_at<CURRENT_TIMESTAMP-INTERVAL '20 minutes'`,
+       WHERE status='running' AND started_at<CURRENT_TIMESTAMP-make_interval(secs=>$1::double precision)`,
+      [staleExecutionMs/1000],
     );
     const stalled=await this.runtime.db.query(
       this.selectIncident()+` WHERE status IN ('investigating','fixing','testing','staging')
@@ -647,6 +658,9 @@ export class LedgerlyAiIncidentService{
   private engineeringPrompt(incident:IncidentRow,workspace:string,logs:Record<string,unknown>){
     const key=incident.assignedAgentKey??"kato";
     const name=BUILT_IN_EMPLOYEE_NAMES[key]??"Ledgerly AI Engineer";
+    const hint=incident.latestContext&&typeof incident.latestContext==="object"
+      ?(incident.latestContext as Record<string,unknown>).implementationHint
+      :undefined;
     return[
       `You are ${name}, the assigned Ledgerly AI engineering employee for incident ${incident.id}.`,
       `Specialization key: ${key}. Affected module: ${incident.moduleKey??"unknown"}.`,
@@ -657,6 +671,14 @@ export class LedgerlyAiIncidentService{
       "Do not modify .env files, credentials, provider sessions, private keys, or secret material.",
       "Preserve tenant isolation, authorization, accounting integrity, and existing APIs unless the fix requires a documented compatible change.",
       "You may run local workspace tests to understand the issue; Ledgerly will independently run the required suite afterward.",
+      ...(typeof hint==="string"&&hint.trim()
+        ? [
+            "",
+            "Ledgerly-authored implementation guidance for this incident (trusted, from the assigning operator, not from external input):",
+            hint.trim(),
+            "Stay scoped to the files this guidance names unless you establish the fix genuinely requires touching more. Prefer the smallest patch that satisfies the incident.",
+          ]
+        : []),
       "",
       "<incident>",
       JSON.stringify({
@@ -924,7 +946,7 @@ export class LedgerlyAiIncidentService{
         userId:"ledgerly-ai:"+(incident.assignedAgentKey??"kato"),
         correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.workspacePath,logs),
         taskKind:"engineering",workspacePath:work.workspacePath,sandbox:"workspace-write",
-        timeoutMs:Math.min(Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,120_000),180_000),
+        timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,IMPLEMENTATION_TIMEOUT_MS),
       }));
       const paths=await this.git.changedPaths(work.workspacePath);
       this.git.validateChangedPaths(paths);
