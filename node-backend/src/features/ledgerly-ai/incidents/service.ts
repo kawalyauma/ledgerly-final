@@ -29,6 +29,11 @@ const IMPLEMENTATION_TIMEOUT_MS=50*60_000;
 // Stale-execution recovery must never fire before the longest timeout we actually hand to a
 // provider is allowed to elapse, or it will kill work that is still legitimately running.
 const STALE_EXECUTION_BUFFER_MS=10*60_000;
+// One turn is one provider round trip, so reading a handful of files, editing, and running
+// checks burns turns quickly. The chat-sized default (12) cut implementation off mid-edit with
+// error_max_turns, so engineering steps get their own, much higher floor.
+const IMPLEMENTATION_MAX_TURNS=80;
+const QA_MAX_TURNS=40;
 
 type IncidentStatus=
   |"open"|"investigating"|"fixing"|"testing"|"staging"|"awaiting_approval"
@@ -784,6 +789,7 @@ export class LedgerlyAiIncidentService{
       id:createId("laiqa"),organizationId:incident.organizationId??"platform",userId:"ledgerly-ai:nia",
       correlationId:"incident:"+incident.id+":qa",prompt,taskKind:"testing",workspacePath:workspace,
       sandbox:"read-only",timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,600_000),
+      maxTurns:Math.max(this.config.LEDGERLY_AI_WORKER_MAX_TURNS,QA_MAX_TURNS),
       onEvent:this.providerProgress(incident,"nia","testing","qa_progress"),
     });
     const parsed=parseQa(result.text);
@@ -1005,6 +1011,7 @@ export class LedgerlyAiIncidentService{
         correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.workspacePath,logs),
         taskKind:"engineering",workspacePath:work.workspacePath,sandbox:"workspace-write",
         timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,IMPLEMENTATION_TIMEOUT_MS),
+        maxTurns:Math.max(this.config.LEDGERLY_AI_WORKER_MAX_TURNS,IMPLEMENTATION_MAX_TURNS),
         onEvent:this.providerProgress(
           incident,incident.assignedAgentKey??"kato","fixing","implementation_progress",
         ),
