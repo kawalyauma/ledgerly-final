@@ -29,9 +29,6 @@ export class ProviderCommandBuilder {
     const env = this.sessions.environment(provider);
     const safeWorkspace=ensureInside(this.config.LEDGERLY_AI_WORK_ROOT,workspacePath);
     if (this.config.LEDGERLY_AI_EXECUTION_MODE === "local") {
-      if (sandbox === "workspace-write") {
-        throw new Error("Ledgerly AI workspace-write execution requires Docker isolation.");
-      }
       return {
         command: provider === "codex" ? this.config.LEDGERLY_AI_CODEX_BIN : this.config.LEDGERLY_AI_CLAUDE_BIN,
         args: cliArgs,

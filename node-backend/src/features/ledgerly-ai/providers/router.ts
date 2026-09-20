@@ -70,10 +70,18 @@ export class LedgerlyAiProviderRouter {
     return values;
   }
 
+  private disabledProviders(): Set<string> {
+    return new Set(
+      this.config.LEDGERLY_AI_DISABLED_PROVIDERS.split(",").map((value) => value.trim()).filter(Boolean),
+    );
+  }
+
   async rank(taskKind: LedgerlyAiTaskKind): Promise<LedgerlyAiProviderId[]> {
     const diagnostics = await this.diagnostics();
+    const disabled = this.disabledProviders();
     const scored = diagnostics
       .filter((item) => {
+        if (disabled.has(item.provider)) return false;
         const provider = this.providers.get(item.provider);
         if (!provider?.capabilities.has(taskKind) || !item.executable || !item.sessionConfigured) return false;
         return item.softJobsPerHour === 0 || item.jobsLastHour < item.softJobsPerHour;
@@ -91,8 +99,11 @@ export class LedgerlyAiProviderRouter {
       .sort((a, b) => b.score - a.score);
 
     if (!scored.length) {
-      return [this.config.LEDGERLY_AI_DEFAULT_PROVIDER, this.config.LEDGERLY_AI_FALLBACK_PROVIDER]
-        .filter((value, index, all) => all.indexOf(value) === index);
+      const fallbacks = [this.config.LEDGERLY_AI_DEFAULT_PROVIDER, this.config.LEDGERLY_AI_FALLBACK_PROVIDER]
+        .filter((value, index, all) => all.indexOf(value) === index)
+        .filter((value) => !disabled.has(value));
+      // Only fall back to a disabled provider if disabling left nothing at all to run on.
+      return fallbacks.length ? fallbacks : [this.config.LEDGERLY_AI_DEFAULT_PROVIDER];
     }
     return scored.map((item) => item.provider);
   }

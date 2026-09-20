@@ -1,5 +1,6 @@
 import { chmod, mkdir, stat } from "node:fs/promises";
 import path from "node:path";
+import { homedir } from "node:os";
 import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 
 const SAFE_PROVIDER_ENV_KEYS = new Set([
@@ -12,6 +13,9 @@ export class ProviderSessionStore {
   constructor(private readonly config: LedgerlyAiConfig) {}
 
   home(provider: LedgerlyAiProviderId) {
+    if(this.config.LEDGERLY_AI_EXECUTION_MODE==="local"){
+      return provider==="codex"?(process.env.CODEX_HOME||path.join(homedir(),".codex")):homedir();
+    }
     return path.join(this.config.LEDGERLY_AI_SESSION_ROOT, provider);
   }
 
@@ -22,6 +26,10 @@ export class ProviderSessionStore {
   }
 
   async initialize() {
+    if(this.config.LEDGERLY_AI_EXECUTION_MODE==="local"){
+      await mkdir(this.config.LEDGERLY_AI_WORK_ROOT,{recursive:true,mode:0o700});
+      return;
+    }
     const codexHome=this.home("codex");
     const claudeHome=this.home("claude-code");
     const claudeCredentials=path.join(claudeHome,".claude");

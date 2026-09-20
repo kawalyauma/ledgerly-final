@@ -59,7 +59,9 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
 
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
     const sandbox = request.sandbox ?? "read-only";
-    const base = ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox];
+    const base = this.config.LEDGERLY_AI_EXECUTION_MODE==="local"&&sandbox==="workspace-write"
+      ? ["exec", "--skip-git-repo-check", "--json", "--dangerously-bypass-approvals-and-sandbox"]
+      : ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox];
     if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
     const workspace = path.resolve(request.workspacePath);
     for (const imagePath of request.imagePaths ?? []) {

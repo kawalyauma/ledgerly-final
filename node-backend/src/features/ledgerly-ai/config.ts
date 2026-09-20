@@ -37,6 +37,10 @@ const schema = z.object({
   LEDGERLY_AI_MAX_OUTPUT_BYTES: z.coerce.number().int().min(65_536).max(64 * 1024 * 1024).default(4 * 1024 * 1024),
   LEDGERLY_AI_RETRY_ATTEMPTS: z.coerce.number().int().min(0).max(5).default(1),
   LEDGERLY_AI_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).max(60_000).default(1_000),
+  // Comma-separated provider ids to keep out of routing entirely, e.g. while a subscription is
+  // exhausted. Unlike a soft jobs-per-hour cap, this does not lapse when the rolling hour
+  // window empties, so an unusable provider cannot quietly re-enter the failover list.
+  LEDGERLY_AI_DISABLED_PROVIDERS: z.string().default(""),
   LEDGERLY_AI_CODEX_SOFT_JOBS_PER_HOUR: z.coerce.number().int().min(0).max(10_000).default(0),
   LEDGERLY_AI_CLAUDE_SOFT_JOBS_PER_HOUR: z.coerce.number().int().min(0).max(10_000).default(0),
   LEDGERLY_AI_USER_REQUESTS_PER_MINUTE: z.coerce.number().int().min(1).max(10_000).default(20),
