@@ -57,6 +57,9 @@ export class ClaudeCodeCliProvider implements LedgerlyAiProviderAdapter {
   }
 
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
+    if (request.imagePaths?.length) {
+      throw new Error("Claude Code CLI does not support native local image attachments; use an image-capable provider.");
+    }
     const sandbox = request.sandbox ?? "read-only";
     const args = [
       "-p", request.prompt,

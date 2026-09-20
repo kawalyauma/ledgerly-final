@@ -14,6 +14,7 @@ export type ProviderRequest = {
   prompt: string;
   taskKind: LedgerlyAiTaskKind;
   workspacePath?: string;
+  imagePaths?: string[];
   sessionId?: string;
   sandbox?: LedgerlyAiSandbox;
   maxTurns?: number;

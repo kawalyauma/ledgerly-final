@@ -31,6 +31,16 @@ function parseExtraction(text: string): LessonPlanExtraction | null {
   } catch { return null; }
 }
 
+const lessonPlanContentFields: Array<keyof LessonPlanExtraction> = [
+  "priorKnowledge", "introductionText", "lessonDevelopment", "teacherActivities",
+  "learnerActivities", "differentiatedInstruction", "specialNeedsAccommodations",
+  "lessonConclusion", "homework",
+];
+
+function hasExtractedLessonPlanContent(value: LessonPlanExtraction) {
+  return lessonPlanContentFields.some((field) => typeof value[field] === "string" && value[field]!.trim().length > 0);
+}
+
 // A lightweight, single-shot, read-only provider call — not the incident/
 // engineering-QA pipeline (no git worktree, no verification checks, no
 // staging). It writes the uploaded image into a scratch directory the
@@ -51,7 +61,8 @@ export async function extractLessonPlanFromImage(input: {
   const scratchDir = path.join(service.config.LEDGERLY_AI_WORK_ROOT, "academics-ocr", jobId);
   await mkdir(scratchDir, { recursive: true });
   const safeName = input.fileName.replace(/[^A-Za-z0-9._-]/g, "_").slice(-120) || "scan.png";
-  await writeFile(path.join(scratchDir, safeName), input.fileBytes);
+  const imagePath = path.join(scratchDir, safeName);
+  await writeFile(imagePath, input.fileBytes);
   try {
     const prompt = [
       "You are Ledgerly Academics' handwriting/print transcription assistant.",
@@ -68,11 +79,19 @@ export async function extractLessonPlanFromImage(input: {
       prompt,
       taskKind: "analysis",
       workspacePath: scratchDir,
+      imagePaths: [imagePath],
       sandbox: "read-only",
       timeoutMs: Math.min(service.config.LEDGERLY_AI_JOB_TIMEOUT_MS, 180_000),
     });
     const parsed = parseExtraction(result.text);
-    if (!parsed) throw new AppError(502, "OCR_EXTRACTION_FAILED", "Could not read structured content from this image. Try a clearer photo or enter the lesson plan manually.");
+    if (!parsed || !hasExtractedLessonPlanContent(parsed)) {
+      const detail = parsed?.notes?.trim();
+      throw new AppError(
+        502,
+        "OCR_EXTRACTION_FAILED",
+        detail || "Could not read structured content from this image. Try a clearer photo or enter the lesson plan manually.",
+      );
+    }
     return parsed;
   } finally {
     await rm(scratchDir, { recursive: true, force: true }).catch(() => undefined);

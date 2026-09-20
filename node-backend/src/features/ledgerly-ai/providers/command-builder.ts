@@ -50,11 +50,17 @@ export class ProviderCommandBuilder {
     // deliberately relaxed profile instead of the standard hardened one.
     // read-only (chat/named-employee) jobs never take this branch.
     const isWorkspaceWrite = sandbox === "workspace-write";
+    // Codex enforces both read-only and workspace-write modes with its own
+    // Linux sandbox. That sandbox needs a nested mount/user namespace even
+    // when it is only reading files (for example an uploaded OCR image).
+    // Keep the host bind explicitly read-only for read-only requests while
+    // allowing the namespace setup inside this already-isolated container.
+    const needsNestedSandbox = provider === "codex" || isWorkspaceWrite;
     const containerArgs = [
       "run", "--rm",
       "--network", this.config.LEDGERLY_AI_DOCKER_NETWORK,
       "--read-only",
-      ...(isWorkspaceWrite
+      ...(needsNestedSandbox
         ? ["--cap-drop=ALL", "--cap-add=SYS_ADMIN", "--security-opt=seccomp=unconfined", "--security-opt=apparmor=unconfined"]
         : ["--cap-drop=ALL", "--security-opt=no-new-privileges"]),
       "--ipc=none",
@@ -67,7 +73,7 @@ export class ProviderCommandBuilder {
       "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size="+String(this.config.LEDGERLY_AI_WORKER_TMPFS_MB)+"m",
       "-e", "HOME=/home/ledgerly-ai",
       ...(provider === "codex" ? ["-e", "CODEX_HOME=/home/ledgerly-ai/.codex"] : []),
-      "--mount", `type=bind,src=${safeWorkspace},dst=/workspace`,
+      "--mount", `type=bind,src=${safeWorkspace},dst=/workspace${isWorkspaceWrite ? "" : ",readonly"}`,
       "--mount", `type=bind,src=${sessionHome},dst=${containerSessionTarget}`,
       "-w", "/workspace",
       image,

@@ -1,4 +1,5 @@
 import type { LedgerlyAiConfig } from "../config.js";
+import path from "node:path";
 import { ProviderCommandBuilder } from "./command-builder.js";
 import { runProviderProcess } from "./process-runner.js";
 import { ProviderSessionStore } from "./session.js";
@@ -59,10 +60,24 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
     const sandbox = request.sandbox ?? "read-only";
     const base = ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox];
+    if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
+    const workspace = path.resolve(request.workspacePath);
+    for (const imagePath of request.imagePaths ?? []) {
+      const resolved = path.resolve(imagePath);
+      const relative = path.relative(workspace, resolved);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("Ledgerly AI image escaped the configured workspace.");
+      }
+      const providerImagePath = this.config.LEDGERLY_AI_EXECUTION_MODE === "docker"
+        ? path.posix.join("/workspace", relative.split(path.sep).join(path.posix.sep))
+        : resolved;
+      // Use the equals form because Codex's variadic --image option otherwise
+      // consumes the positional prompt as an additional image path.
+      base.push(`--image=${providerImagePath}`);
+    }
     const args = request.sessionId
       ? [...base, "resume", request.sessionId, request.prompt]
       : [...base, request.prompt];
-    if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
     const command = this.commands.build(this.id, args, request.workspacePath, sandbox);
     const result = await runProviderProcess({
       ...command,
