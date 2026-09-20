@@ -25,6 +25,7 @@ const schemeCreateSchema = z.object({
 });
 const topicSchema = z.object({
   title: z.string().trim().min(1).max(300),
+  theme: nullableText(300),
   description: nullableText(5000),
   weekFrom: z.number().int().positive().nullable().optional(),
   weekTo: z.number().int().positive().nullable().optional(),
@@ -57,6 +58,7 @@ const competencySchema = z.object({
 const competenciesSchema = z.object({ competencies: z.array(competencySchema).max(100) });
 const planSchema = z.object({
   lessonDate: date,
+  sourceFileId: nullableId,
   priorKnowledge: nullableText(),
   introductionText: nullableText(),
   lessonDevelopment: nullableText(),
@@ -223,10 +225,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     return c.json({ data: q.rows.map(camel) });
   });
 
-  r.post("/schemes", requireScope("school:write"), async c => {
-    const parsed = schemeCreateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) throw validationError("Invalid scheme", parsed.error.flatten());
-    const p = c.get("principal"), orgId = p.organizationId, v = parsed.data;
+  async function insertScheme(orgId: string, userId: string, v: z.infer<typeof schemeCreateSchema>) {
     for (const [table, id] of [
       ["school_academic_years", v.academicYearId], ["school_terms", v.termId], ["school_classes", v.classId],
       ["school_streams", v.streamId], ["school_subjects", v.subjectId], ["school_staff_profiles", v.teacherStaffId], ["school_curricula", v.curriculumId]
@@ -249,8 +248,86 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     const title = v.title || `${ref.subject_name} · ${ref.class_name}${ref.stream_name ? ` · ${ref.stream_name}` : ""} · ${ref.term_name}`;
     const id = createId("sch");
     await runtime.db.query(`INSERT INTO school_schemes_of_work(id,organization_id,academic_year_id,term_id,class_id,stream_id,subject_id,teacher_staff_id,curriculum_id,title,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [id, orgId, v.academicYearId, v.termId, v.classId, v.streamId ?? null, v.subjectId, v.teacherStaffId ?? null, v.curriculumId ?? null, title, p.userId]);
-    return c.json({ data: { id, academicYearId: v.academicYearId, termId: v.termId, classId: v.classId, streamId: v.streamId ?? null, subjectId: v.subjectId, teacherStaffId: v.teacherStaffId ?? null, curriculumId: v.curriculumId ?? null, title, status: "draft" } }, 201);
+      [id, orgId, v.academicYearId, v.termId, v.classId, v.streamId ?? null, v.subjectId, v.teacherStaffId ?? null, v.curriculumId ?? null, title, userId]);
+    return { id, academicYearId: v.academicYearId, termId: v.termId, classId: v.classId, streamId: v.streamId ?? null, subjectId: v.subjectId, teacherStaffId: v.teacherStaffId ?? null, curriculumId: v.curriculumId ?? null, title, status: "draft" as const };
+  }
+
+  r.post("/schemes", requireScope("school:write"), async c => {
+    const parsed = schemeCreateSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) throw validationError("Invalid scheme", parsed.error.flatten());
+    const p = c.get("principal");
+    const created = await insertScheme(p.organizationId, p.userId, parsed.data);
+    return c.json({ data: created }, 201);
+  });
+
+  r.post("/schemes/bulk-import", requireScope("school:write"), async c => {
+    const p = c.get("principal"), orgId = p.organizationId;
+    const body = await c.req.json().catch(() => ({})) as { rows?: unknown[] };
+    const rawRows = Array.isArray(body.rows) ? body.rows.slice(0, 200) : [];
+    if (!rawRows.length) throw validationError("rows must be a non-empty array");
+    const created: Array<{ id: string; title: string }> = [];
+    const errors: Array<{ row: number; message: string }> = [];
+    for (let i = 0; i < rawRows.length; i++) {
+      const parsed = schemeCreateSchema.safeParse(rawRows[i]);
+      if (!parsed.success) { errors.push({ row: i, message: parsed.error.issues[0]?.message || "Invalid scheme" }); continue; }
+      try {
+        const scheme = await insertScheme(orgId, p.userId, parsed.data);
+        created.push({ id: scheme.id, title: scheme.title });
+      } catch (e) {
+        errors.push({ row: i, message: e instanceof AppError ? e.message : "Could not create this scheme" });
+      }
+    }
+    return c.json({ data: { created: created.length, schemes: created, errors } }, 201);
+  });
+
+  r.post("/schemes/:id/lesson-plans/bulk-import", requireScope("school:write"), async c => {
+    const p = c.get("principal"), orgId = p.organizationId, schemeId = c.req.param("id");
+    await owned(runtime, orgId, "school_schemes_of_work", schemeId);
+    const body = await c.req.json().catch(() => ({})) as { rows?: unknown[] };
+    const rawRows = Array.isArray(body.rows) ? body.rows.slice(0, 300) : [];
+    if (!rawRows.length) throw validationError("rows must be a non-empty array");
+
+    const lessonsQ = await runtime.db.query<{ id: string; topicTitle: string; lessonTitle: string; lessonPlanId: string | null; competencyCount: number }>(
+      `SELECT l.id, t.title AS "topicTitle", l.title AS "lessonTitle", l.lesson_plan_id AS "lessonPlanId",
+              (SELECT COUNT(*)::int FROM school_scheme_lesson_competencies WHERE organization_id=$1 AND lesson_id=l.id) AS "competencyCount"
+         FROM school_scheme_lessons l JOIN school_scheme_topics t ON t.id=l.topic_id
+        WHERE l.organization_id=$1 AND t.scheme_id=$2`,
+      [orgId, schemeId],
+    );
+    const byKey = new Map(lessonsQ.rows.map(row => [`${row.topicTitle.toLowerCase()}|${row.lessonTitle.toLowerCase()}`, row]));
+
+    let created = 0;
+    const errors: Array<{ row: number; message: string }> = [];
+    const client = await runtime.db.connect();
+    try {
+      await client.query("BEGIN");
+      for (let i = 0; i < rawRows.length; i++) {
+        const raw = (rawRows[i] && typeof rawRows[i] === "object" ? rawRows[i] : {}) as Record<string, unknown>;
+        const topicTitle = String(raw.topicTitle || "").trim(), lessonTitle = String(raw.lessonTitle || "").trim();
+        if (!topicTitle || !lessonTitle) { errors.push({ row: i, message: "topicTitle and lessonTitle are required" }); continue; }
+        const match = byKey.get(`${topicTitle.toLowerCase()}|${lessonTitle.toLowerCase()}`);
+        if (!match) { errors.push({ row: i, message: `No lesson "${lessonTitle}" under topic "${topicTitle}" was found in this scheme` }); continue; }
+        if (match.lessonPlanId) { errors.push({ row: i, message: "This lesson already has a lesson plan" }); continue; }
+        if (!match.competencyCount) { errors.push({ row: i, message: "This lesson has no competencies yet — add at least one before importing its plan" }); continue; }
+        const parsed = planSchema.safeParse({
+          lessonDate: raw.lessonDate, priorKnowledge: raw.priorKnowledge ?? null, introductionText: raw.introductionText ?? null,
+          lessonDevelopment: raw.lessonDevelopment ?? null, teacherActivities: raw.teacherActivities ?? null, learnerActivities: raw.learnerActivities ?? null,
+          differentiatedInstruction: raw.differentiatedInstruction ?? null, specialNeedsAccommodations: raw.specialNeedsAccommodations ?? null,
+          lessonConclusion: raw.lessonConclusion ?? null, homework: raw.homework ?? null,
+        });
+        if (!parsed.success) { errors.push({ row: i, message: parsed.error.issues[0]?.message || "Invalid lesson plan" }); continue; }
+        const v = parsed.data, planId = createId("slp");
+        await client.query(
+          `INSERT INTO school_scheme_lesson_plans(id,organization_id,lesson_id,lesson_date,prior_knowledge,introduction_text,lesson_development,teacher_activities,learner_activities,differentiated_instruction,special_needs_accommodations,lesson_conclusion,homework) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [planId, orgId, match.id, v.lessonDate, v.priorKnowledge ?? null, v.introductionText ?? null, v.lessonDevelopment ?? null, v.teacherActivities ?? null, v.learnerActivities ?? null, v.differentiatedInstruction ?? null, v.specialNeedsAccommodations ?? null, v.lessonConclusion ?? null, v.homework ?? null],
+        );
+        await client.query(`UPDATE school_scheme_lessons SET lesson_plan_id=$1,status='plan_drafted',updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`, [planId, match.id, orgId]);
+        match.lessonPlanId = planId;
+        created += 1;
+      }
+      await client.query("COMMIT");
+    } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
+    return c.json({ data: { created, errors } }, 201);
   });
 
   r.get("/schemes/:id", async c => {
@@ -300,8 +377,8 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     const p = c.get("principal"), orgId = p.organizationId, schemeId = c.req.param("id"), v = parsed.data;
     await owned(runtime, orgId, "school_schemes_of_work", schemeId);
     const id = createId("sct");
-    await runtime.db.query(`INSERT INTO school_scheme_topics(id,organization_id,scheme_id,title,description,week_from,week_to,planned_start_on,planned_end_on) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [id, orgId, schemeId, v.title, v.description ?? null, v.weekFrom ?? null, v.weekTo ?? null, v.plannedStartOn ?? null, v.plannedEndOn ?? null]);
+    await runtime.db.query(`INSERT INTO school_scheme_topics(id,organization_id,scheme_id,title,theme,description,week_from,week_to,planned_start_on,planned_end_on) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [id, orgId, schemeId, v.title, v.theme ?? null, v.description ?? null, v.weekFrom ?? null, v.weekTo ?? null, v.plannedStartOn ?? null, v.plannedEndOn ?? null]);
     return c.json({ data: { id, schemeId, ...v, status: "planned" } }, 201);
   });
 
@@ -316,6 +393,64 @@ export function createLearningCycleRoutes(runtime: Runtime) {
       [id, orgId, topicId, sequenceNo, v.title, v.subtopic ?? null, v.plannedDate ?? null, v.durationMinutes, v.learningOutcomes ?? null, v.teachingMethods ?? null, v.learningResources ?? null, v.learnerActivities ?? null, v.assessmentStrategy ?? null, v.valuesAndCrossCutting ?? null]);
     await refreshTopicStatus(runtime, orgId, topicId);
     return c.json({ data: { id, topicId, sequenceNo, ...v, status: "planned", competencies: [] } }, 201);
+  });
+
+  r.post("/schemes/:id/topics/bulk-import", requireScope("school:write"), async c => {
+    const p = c.get("principal"), orgId = p.organizationId, schemeId = c.req.param("id");
+    await owned(runtime, orgId, "school_schemes_of_work", schemeId);
+    const body = await c.req.json().catch(() => ({})) as { rows?: unknown[] };
+    const rawRows = Array.isArray(body.rows) ? body.rows.slice(0, 500) : [];
+    if (!rawRows.length) throw validationError("rows must be a non-empty array");
+
+    const errors: Array<{ row: number; message: string }> = [];
+    const validRows: Array<{ row: number; topicTitle: string; topic: z.infer<typeof topicSchema>; lesson: z.infer<typeof lessonSchema> }> = [];
+    rawRows.forEach((raw, index) => {
+      const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+      const topicTitle = String(r.topicTitle || "").trim();
+      if (!topicTitle) { errors.push({ row: index, message: "topicTitle is required" }); return; }
+      const topicParsed = topicSchema.safeParse({ title: topicTitle, theme: r.theme ?? null, weekFrom: r.weekFrom ?? null, weekTo: r.weekTo ?? null });
+      if (!topicParsed.success) { errors.push({ row: index, message: topicParsed.error.issues[0]?.message || "Invalid topic" }); return; }
+      const lessonParsed = lessonSchema.safeParse({
+        title: r.lessonTitle, subtopic: r.subtopic ?? null, plannedDate: r.plannedDate ?? null,
+        durationMinutes: r.durationMinutes ?? 40, learningOutcomes: r.learningOutcomes ?? null,
+        teachingMethods: r.teachingMethods ?? null, learningResources: r.learningResources ?? null,
+        assessmentStrategy: r.assessmentStrategy ?? null,
+      });
+      if (!lessonParsed.success) { errors.push({ row: index, message: lessonParsed.error.issues[0]?.message || "Invalid lesson" }); return; }
+      validRows.push({ row: index, topicTitle, topic: topicParsed.data, lesson: lessonParsed.data });
+    });
+
+    let topicsCreated = 0, lessonsCreated = 0;
+    const topicIds = new Map<string, string>();
+    const touchedTopics = new Set<string>();
+    const client = await runtime.db.connect();
+    try {
+      await client.query("BEGIN");
+      for (const entry of validRows) {
+        const key = entry.topicTitle.toLowerCase();
+        let topicId = topicIds.get(key);
+        if (!topicId) {
+          topicId = createId("sct");
+          await client.query(
+            `INSERT INTO school_scheme_topics(id,organization_id,scheme_id,title,theme,description,week_from,week_to,planned_start_on,planned_end_on) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [topicId, orgId, schemeId, entry.topic.title, entry.topic.theme ?? null, entry.topic.description ?? null, entry.topic.weekFrom ?? null, entry.topic.weekTo ?? null, entry.topic.plannedStartOn ?? null, entry.topic.plannedEndOn ?? null],
+          );
+          topicIds.set(key, topicId);
+          topicsCreated += 1;
+        }
+        const nextQ = await client.query(`SELECT COALESCE(MAX(sequence_no),0)+1 AS next FROM school_scheme_lessons WHERE organization_id=$1 AND topic_id=$2`, [orgId, topicId]);
+        const sequenceNo = Number(nextQ.rows[0]?.next ?? 1), lessonId = createId("scl"), v = entry.lesson;
+        await client.query(
+          `INSERT INTO school_scheme_lessons(id,organization_id,topic_id,sequence_no,title,subtopic,planned_date,duration_minutes,learning_outcomes,teaching_methods,learning_resources,assessment_strategy) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+          [lessonId, orgId, topicId, sequenceNo, v.title, v.subtopic ?? null, v.plannedDate ?? null, v.durationMinutes, v.learningOutcomes ?? null, v.teachingMethods ?? null, v.learningResources ?? null, v.assessmentStrategy ?? null],
+        );
+        touchedTopics.add(topicId);
+        lessonsCreated += 1;
+      }
+      await client.query("COMMIT");
+    } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
+    for (const topicId of touchedTopics) await refreshTopicStatus(runtime, orgId, topicId);
+    return c.json({ data: { topicsCreated, lessonsCreated, errors } }, 201);
   });
 
   r.put("/lessons/:id/competencies", requireScope("school:write"), async c => {
@@ -344,15 +479,80 @@ export function createLearningCycleRoutes(runtime: Runtime) {
     if (lesson.lesson_plan_id) throw new AppError(409, "LESSON_PLAN_EXISTS", "This lesson already has a lesson plan");
     const competencyCount = await runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_lesson_competencies WHERE organization_id=$1 AND lesson_id=$2`, [orgId, lessonId]);
     if (!Number(competencyCount.rows[0]?.count ?? 0)) throw validationError("Add at least one competency before drafting the lesson plan");
-    const id = createId("slp"), client = await runtime.db.connect();
+    let sourceFile:{id:string;mimeType:string}|null=null;
+    if(v.sourceFileId){
+      const file=await runtime.db.query<{id:string;mimeType:string}>(
+        `SELECT id,mime_type AS "mimeType" FROM school_files
+          WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL`,[v.sourceFileId,orgId],
+      );
+      sourceFile=file.rows[0]??null;
+      if(!sourceFile)throw new AppError(422,"INVALID_REFERENCE","Uploaded lesson-plan image does not belong to this school");
+      if(!["image/jpeg","image/png","image/webp"].includes(sourceFile.mimeType)){
+        throw new AppError(422,"UNSUPPORTED_FILE_TYPE","Upload a JPEG, PNG or WebP photo/scan of the lesson plan.");
+      }
+    }
+    const id = createId("slp"),jobId=sourceFile?createId("aocr"):null, client = await runtime.db.connect();
     try {
       await client.query("BEGIN");
-      await client.query(`INSERT INTO school_scheme_lesson_plans(id,organization_id,lesson_id,lesson_date,prior_knowledge,introduction_text,lesson_development,teacher_activities,learner_activities,differentiated_instruction,special_needs_accommodations,lesson_conclusion,homework) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-        [id, orgId, lessonId, v.lessonDate, v.priorKnowledge ?? null, v.introductionText ?? null, v.lessonDevelopment ?? null, v.teacherActivities ?? null, v.learnerActivities ?? null, v.differentiatedInstruction ?? null, v.specialNeedsAccommodations ?? null, v.lessonConclusion ?? null, v.homework ?? null]);
+      await client.query(`INSERT INTO school_scheme_lesson_plans(id,organization_id,lesson_id,lesson_date,prior_knowledge,introduction_text,lesson_development,teacher_activities,learner_activities,differentiated_instruction,special_needs_accommodations,lesson_conclusion,homework,source_file_id,ai_fill_status) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [id, orgId, lessonId, v.lessonDate, v.priorKnowledge ?? null, v.introductionText ?? null, v.lessonDevelopment ?? null, v.teacherActivities ?? null, v.learnerActivities ?? null, v.differentiatedInstruction ?? null, v.specialNeedsAccommodations ?? null, v.lessonConclusion ?? null, v.homework ?? null,sourceFile?.id??null,sourceFile?"processing":null]);
       await client.query(`UPDATE school_scheme_lessons SET lesson_plan_id=$1,status='plan_drafted',updated_at=CURRENT_TIMESTAMP WHERE id=$2 AND organization_id=$3`, [id, lessonId, orgId]);
+      if(sourceFile&&jobId)await client.query(
+        `INSERT INTO school_academic_ocr_jobs(id,organization_id,lesson_id,plan_id,file_id,status,created_by)
+         VALUES($1,$2,$3,$4,$5,'processing',$6)`,[jobId,orgId,lessonId,id,sourceFile.id,p.userId],
+      );
       await client.query("COMMIT");
     } catch (e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
-    return c.json({ data: { id, lessonId, status: "draft", ...v } }, 201);
+    if(jobId){
+      try{await runtime.queue.publish("academics.ocr.lesson_plan",{jobId},{queue:"academics",maxAttempts:2});}
+      catch(error){
+        const message=error instanceof Error?error.message:String(error);
+        await runtime.db.query(
+          `UPDATE school_academic_ocr_jobs SET status='failed',error_text=$1,completed_at=CURRENT_TIMESTAMP WHERE id=$2`,
+          [message.slice(0,2000),jobId],
+        );
+        await runtime.db.query(
+          `UPDATE school_scheme_lesson_plans SET ai_fill_status='failed',ai_fill_error=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
+          [message.slice(0,2000),id],
+        );
+      }
+    }
+    return c.json({ data: { id, lessonId, status: "draft", aiFillStatus:sourceFile?"processing":null,ocrJobId:jobId,...v } }, 201);
+  });
+
+  r.post("/lessons/:id/lesson-plan/extract", requireScope("school:write"), async c => {
+    const p = c.get("principal"), orgId = p.organizationId, lessonId = c.req.param("id");
+    await owned(runtime, orgId, "school_scheme_lessons", lessonId);
+    const body = await c.req.json().catch(() => ({})) as { fileId?: string };
+    const fileId = String(body.fileId || "").trim();
+    if (!fileId) throw validationError("fileId is required");
+    const file = await runtime.db.query<{ objectKey: string; mimeType: string; originalName: string }>(
+      `SELECT object_key AS "objectKey", mime_type AS "mimeType", original_name AS "originalName" FROM school_files WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL`,
+      [fileId, orgId],
+    );
+    const row = file.rows[0];
+    if (!row) throw new AppError(422, "INVALID_REFERENCE", "File does not belong to this school");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(row.mimeType)) {
+      throw new AppError(422, "UNSUPPORTED_FILE_TYPE", "Upload a JPEG, PNG or WebP photo/scan of the lesson plan.");
+    }
+    const jobId = createId("aocr");
+    await runtime.db.query(
+      `INSERT INTO school_academic_ocr_jobs(id,organization_id,lesson_id,file_id,status,created_by) VALUES($1,$2,$3,$4,'processing',$5)`,
+      [jobId, orgId, lessonId, fileId, p.userId],
+    );
+    await runtime.queue.publish("academics.ocr.lesson_plan", { jobId }, { queue: "academics", maxAttempts: 1 });
+    return c.json({ data: { jobId, status: "processing" } }, 202);
+  });
+
+  r.get("/lessons/:id/lesson-plan/extract/:jobId", async c => {
+    const p = c.get("principal"), orgId = p.organizationId, lessonId = c.req.param("id"), jobId = c.req.param("jobId");
+    const q = await runtime.db.query<{ status: string; resultJson: unknown; errorText: string | null }>(
+      `SELECT status, result_json AS "resultJson", error_text AS "errorText" FROM school_academic_ocr_jobs WHERE id=$1 AND organization_id=$2 AND lesson_id=$3`,
+      [jobId, orgId, lessonId],
+    );
+    const job = q.rows[0];
+    if (!job) throw new AppError(404, "NOT_FOUND", "OCR job not found");
+    return c.json({ data: { jobId, status: job.status, result: job.resultJson ?? null, error: job.errorText ?? null } });
   });
 
   r.get("/lesson-plans/:id", async c => {
@@ -367,6 +567,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
   r.post("/lesson-plans/:id/submit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
     if (row.status !== "draft") throw new AppError(409, "INVALID_WORKFLOW", "Only a draft lesson plan can be submitted");
+    if(row.ai_fill_status==="processing")throw new AppError(409,"LESSON_PLAN_AI_FILLING","AI is still filling this lesson plan from the uploaded image. Review it when processing finishes, then submit.");
     await runtime.db.query(`UPDATE school_scheme_lesson_plans SET status='submitted',submitted_at=CURRENT_TIMESTAMP,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "submitted" } });
   });
@@ -374,6 +575,7 @@ export function createLearningCycleRoutes(runtime: Runtime) {
   r.post("/lesson-plans/:id/resubmit", requireScope("school:write"), async c => {
     const p = c.get("principal"), orgId = p.organizationId, id = c.req.param("id"), row = await planContext(runtime, orgId, id);
     if (row.status !== "rejected") throw new AppError(409, "INVALID_WORKFLOW", "Only a rejected lesson plan can be resubmitted");
+    if(row.ai_fill_status==="processing")throw new AppError(409,"LESSON_PLAN_AI_FILLING","AI is still filling this lesson plan from the uploaded image. Review it when processing finishes, then resubmit.");
     await runtime.db.query(`UPDATE school_scheme_lesson_plans SET status='submitted',submitted_at=CURRENT_TIMESTAMP,review_notes=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2`, [id, orgId]);
     return c.json({ data: { id, status: "submitted" } });
   });
@@ -533,18 +735,33 @@ export function createLearningCycleRoutes(runtime: Runtime) {
 
   r.get("/dashboard", async c => {
     const p = c.get("principal"), orgId = p.organizationId;
-    const [schemesQ, topicsQ, lessonsQ, plansQ, assessedQ, coverageQ] = await Promise.all([
+    const [
+      schemesQ, topicsQ, lessonsQ, plansQ, assessedQ, coverageQ,
+      timetablesQ, roomsQ, todaysLessonsQ, openObservationsQ, openInspectionsQ,
+      pendingSchemeApprovalsQ, pendingPlanApprovalsQ,
+    ] = await Promise.all([
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_schemes_of_work WHERE organization_id=$1 AND status<>'archived'`, [orgId]),
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_topics WHERE organization_id=$1`, [orgId]),
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_lessons WHERE organization_id=$1`, [orgId]),
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_lesson_plans WHERE organization_id=$1`, [orgId]),
       runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_lessons WHERE organization_id=$1 AND status='assessed'`, [orgId]),
-      runtime.db.query(`SELECT COUNT(*)::int AS lessons,COUNT(*) FILTER (WHERE status IN ('delivered','assessed'))::int AS delivered FROM school_scheme_lessons WHERE organization_id=$1`, [orgId])
+      runtime.db.query(`SELECT COUNT(*)::int AS lessons,COUNT(*) FILTER (WHERE status IN ('delivered','assessed'))::int AS delivered FROM school_scheme_lessons WHERE organization_id=$1`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_academic_timetables WHERE organization_id=$1 AND status<>'archived'`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_academic_rooms WHERE organization_id=$1 AND active=true`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_academic_timetable_entries e JOIN school_academic_timetables t ON t.id=e.timetable_id WHERE e.organization_id=$1 AND t.status='published' AND e.weekday=EXTRACT(ISODOW FROM CURRENT_DATE)::int`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_academic_observations WHERE organization_id=$1 AND status IN ('open','follow_up_due')`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_academic_record_inspections WHERE organization_id=$1 AND status IN ('open','acknowledged')`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_schemes_of_work WHERE organization_id=$1 AND status IN ('submitted_hod','submitted_dos')`, [orgId]),
+      runtime.db.query(`SELECT COUNT(*)::int AS count FROM school_scheme_lesson_plans WHERE organization_id=$1 AND status='submitted'`, [orgId]),
     ]);
     const lessons = Number(coverageQ.rows[0]?.lessons ?? 0), delivered = Number(coverageQ.rows[0]?.delivered ?? 0);
     return c.json({ data: {
       schemes: Number(schemesQ.rows[0]?.count ?? 0), topics: Number(topicsQ.rows[0]?.count ?? 0), lessons: Number(lessonsQ.rows[0]?.count ?? 0),
-      plans: Number(plansQ.rows[0]?.count ?? 0), assessed: Number(assessedQ.rows[0]?.count ?? 0), coveragePercent: lessons ? Math.round((delivered / lessons) * 100) : 0
+      plans: Number(plansQ.rows[0]?.count ?? 0), assessed: Number(assessedQ.rows[0]?.count ?? 0), coveragePercent: lessons ? Math.round((delivered / lessons) * 100) : 0,
+      timetables: Number(timetablesQ.rows[0]?.count ?? 0), rooms: Number(roomsQ.rows[0]?.count ?? 0),
+      todaysLessons: Number(todaysLessonsQ.rows[0]?.count ?? 0),
+      openObservations: Number(openObservationsQ.rows[0]?.count ?? 0), openInspections: Number(openInspectionsQ.rows[0]?.count ?? 0),
+      pendingSchemeApprovals: Number(pendingSchemeApprovalsQ.rows[0]?.count ?? 0), pendingPlanApprovals: Number(pendingPlanApprovalsQ.rows[0]?.count ?? 0),
     }});
   });
 

@@ -1,24 +1,24 @@
 import type { BackendFeature } from "../types.js";
 import { createAcademicsRoutes } from "./routes.js";
-import { createLessonPlanRoutes } from "./lesson-plans.js";
 import { createLearningCycleRoutes } from "./learning-cycle.js";
 import { createAcademicSupervisionRoutes } from "./supervision.js";
 import { createAcademicTimetableRoutes } from "./timetables.js";
 import { createAcademicDeliveryRoutes } from "./delivery.js";
-import { createAcademicIntegrityRoutes } from "./integrity.js";
-import { createAcademicReferenceIntegrityRoutes } from "./reference-integrity.js";
+import { createAcademicAttachmentRoutes } from "./attachments.js";
+import { processLessonPlanOcrJob } from "./ocr-jobs.js";
 
 export const academicsFeature: BackendFeature = {
   key: "academics",
-  version: "1.6.0",
+  version: "2.1.0",
   mount(app,runtime){
-    app.route("/api/v1/academics",createAcademicIntegrityRoutes(runtime));
-    app.route("/api/v1/academics",createAcademicReferenceIntegrityRoutes(runtime));
     app.route("/api/v1/academics",createAcademicsRoutes(runtime));
     app.route("/api/v1/academics",createLearningCycleRoutes(runtime));
-    app.route("/api/v1/academics",createLessonPlanRoutes(runtime));
     app.route("/api/v1/academics",createAcademicSupervisionRoutes(runtime));
     app.route("/api/v1/academics",createAcademicTimetableRoutes(runtime));
     app.route("/api/v1/academics",createAcademicDeliveryRoutes(runtime));
+    app.route("/api/v1/academics",createAcademicAttachmentRoutes(runtime));
+  },
+  registerJobs(registry){
+    registry.register("academics.ocr.lesson_plan", processLessonPlanOcrJob);
   },
 };
