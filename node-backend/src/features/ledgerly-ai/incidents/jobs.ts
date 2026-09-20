@@ -12,3 +12,9 @@ export async function processLedgerlyAiIncident(job:ClaimedJob,runtime:Runtime){
   await service.start();
   return service.incidents.processIncident(incidentId);
 }
+
+export async function recoverLedgerlyAiIncidents(_job:ClaimedJob,runtime:Runtime){
+  const service=getLedgerlyAiFoundationService(runtime);
+  await service.start();
+  return service.incidents.recoverStalledWorkflows();
+}

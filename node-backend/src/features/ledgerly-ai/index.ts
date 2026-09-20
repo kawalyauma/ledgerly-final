@@ -5,7 +5,7 @@ import {
   executeCustomAgentRun,
   scanCustomAgentTriggers,
 } from "./custom-runtime/jobs.js";
-import { processLedgerlyAiIncident } from "./incidents/jobs.js";
+import { processLedgerlyAiIncident, recoverLedgerlyAiIncidents } from "./incidents/jobs.js";
 import { syncLedgerlyAiGitCi } from "./git/jobs.js";
 import {
   scanLedgerlyAiMonitoring,
@@ -25,12 +25,20 @@ export const ledgerlyAiFeature: BackendFeature = {
     registry.register("ledgerly-ai.custom-agent.scan", scanCustomAgentTriggers);
     registry.register("ledgerly-ai.custom-agent.run", executeCustomAgentRun);
     registry.register("ledgerly-ai.incident.process", processLedgerlyAiIncident);
+    registry.register("ledgerly-ai.incident.recover", recoverLedgerlyAiIncidents);
     registry.register("ledgerly-ai.git.ci-sync", syncLedgerlyAiGitCi);
     registry.register("ledgerly-ai.monitor.scan", scanLedgerlyAiMonitoring);
     registry.register("ledgerly-ai.monitor.daily", generateLedgerlyAiDailyHealth);
     registry.register("ledgerly-ai.monitor.weekly", generateLedgerlyAiWeeklyHealth);
   },
   schedules: [
+    {
+      name: "ledgerly-ai-incident-recovery",
+      cron: "* * * * *",
+      kind: "ledgerly-ai.incident.recover",
+      queue: "ledgerly-ai",
+      maxAttempts: 3,
+    },
     {
       name: "ledgerly-ai-custom-agent-scan",
       cron: "* * * * *",

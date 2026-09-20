@@ -542,6 +542,11 @@ export class LedgerlyAiIncidentService{
   private async fail(incident:IncidentRow,message:string,metadata?:Record<string,unknown>){
     const safe=boundedText(message,4000);
     await this.runtime.db.query(
+      `UPDATE lai_incident_workflow_steps SET status='failed',error_text=$1,heartbeat_at=CURRENT_TIMESTAMP,
+       completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE incident_id=$2 AND status='running'`,
+      [safe,incident.id],
+    );
+    await this.runtime.db.query(
       `UPDATE lai_incidents SET status='failed',
           resolution_json=COALESCE(resolution_json,'{}'::jsonb)||$1::jsonb,updated_at=CURRENT_TIMESTAMP
         WHERE id=$2`,
@@ -551,6 +556,72 @@ export class LedgerlyAiIncidentService{
       incidentId:incident.id,organizationId:incident.organizationId,eventType:"failed",status:"failed",
       actorType:"system",actorId:"ledgerly-ai",summary:safe,metadata,
     });
+  }
+
+  private async startStep(incident:IncidentRow,stepKey:string,agentKey:string,input:Record<string,unknown>={}){
+    const previous=await this.runtime.db.query<{attempt:number}>(
+      "SELECT COALESCE(MAX(attempt),0)::int AS attempt FROM lai_incident_workflow_steps WHERE incident_id=$1 AND step_key=$2",
+      [incident.id,stepKey],
+    );
+    const attempt=Number(previous.rows[0]?.attempt??0)+1;
+    const id=createId("laiws"),operationKey=`incident:${incident.id}:${stepKey}:${attempt}`;
+    await this.runtime.db.query(
+      `INSERT INTO lai_incident_workflow_steps(id,incident_id,organization_id,step_key,agent_key,status,attempt,operation_key,input_json,heartbeat_at,started_at)
+       VALUES($1,$2,$3,$4,$5,'running',$6,$7,$8::jsonb,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+      [id,incident.id,incident.organizationId,stepKey,agentKey,attempt,operationKey,JSON.stringify(safeJson(input))],
+    );
+    await this.appendEvent({incidentId:incident.id,organizationId:incident.organizationId,eventType:"workflow_checkpoint",status:incident.status,
+      actorType:"agent",actorId:agentKey,summary:`${BUILT_IN_EMPLOYEE_NAMES[agentKey]??agentKey} started ${stepKey.replaceAll("_"," ")}.`,metadata:{stepKey,attempt,operationKey}});
+    return{id,stepKey,attempt,agentKey};
+  }
+
+  private async completeStep(step:{id:string},output:Record<string,unknown>={}){
+    await this.runtime.db.query(
+      `UPDATE lai_incident_workflow_steps SET status='completed',output_json=$1::jsonb,heartbeat_at=CURRENT_TIMESTAMP,
+       completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2`,
+      [JSON.stringify(safeJson(output)),step.id],
+    );
+  }
+
+  private async runWithHeartbeat<T>(incident:IncidentRow,step:{id:string;stepKey:string;agentKey:string;attempt:number},work:()=>Promise<T>){
+    let ticks=0,busy=false;
+    const pulse=async()=>{
+      if(busy)return;busy=true;
+      try{
+        await this.runtime.db.query("UPDATE lai_incident_workflow_steps SET heartbeat_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND status='running'",[step.id]);
+        await this.runtime.db.query("UPDATE lai_incidents SET updated_at=CURRENT_TIMESTAMP WHERE id=$1",[incident.id]);
+        ticks+=1;
+        if(ticks%2===0)await this.appendEvent({incidentId:incident.id,organizationId:incident.organizationId,eventType:"workflow_heartbeat",status:incident.status,
+          actorType:"agent",actorId:step.agentKey,summary:`${BUILT_IN_EMPLOYEE_NAMES[step.agentKey]??step.agentKey} is still working on ${step.stepKey.replaceAll("_"," ")}.`,metadata:{stepKey:step.stepKey,attempt:step.attempt}});
+      }finally{busy=false;}
+    };
+    const timer=setInterval(()=>{void pulse();},45_000);
+    try{return await work();}
+    catch(error){
+      const message=error instanceof Error?error.message:String(error);
+      await this.runtime.db.query("UPDATE lai_incident_workflow_steps SET status='failed',error_text=$1,heartbeat_at=CURRENT_TIMESTAMP,completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=$2",[message.slice(0,4000),step.id]);
+      throw error;
+    }finally{clearInterval(timer);}
+  }
+
+  async recoverStalledWorkflows(){
+    await this.runtime.db.query(
+      `UPDATE lai_provider_executions SET status='failed',error_text='Worker heartbeat expired; execution was recovered.',completed_at=CURRENT_TIMESTAMP
+       WHERE status='running' AND started_at<CURRENT_TIMESTAMP-INTERVAL '20 minutes'`,
+    );
+    const stalled=await this.runtime.db.query(
+      this.selectIncident()+` WHERE status IN ('investigating','fixing','testing','staging')
+       AND updated_at<CURRENT_TIMESTAMP-INTERVAL '3 minutes' ORDER BY updated_at LIMIT 20`,
+    );
+    for(const row of stalled.rows){
+      const incident=this.mapIncident(row);
+      await this.runtime.db.query("UPDATE lai_git_workspaces SET status='failed',updated_at=CURRENT_TIMESTAMP WHERE incident_id=$1 AND status='active'",[incident.id]);
+      await this.runtime.db.query("UPDATE lai_incident_workflow_steps SET status='failed',error_text='Worker heartbeat expired; automatically recovered.',completed_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE incident_id=$1 AND status='running'",[incident.id]);
+      await this.runtime.db.query("UPDATE lai_incidents SET status='open',workspace_path=NULL,branch_name=NULL,base_sha=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1",[incident.id]);
+      await this.appendEvent({incidentId:incident.id,organizationId:incident.organizationId,eventType:"workflow_recovered",status:"open",actorType:"system",actorId:"ledgerly-ai",summary:"The worker heartbeat expired. Saved checkpoints were preserved and the incident was automatically requeued.",metadata:{previousStatus:incident.status}});
+      await this.runtime.queue.publish("ledgerly-ai.incident.process",{incidentId:incident.id},{queue:"ledgerly-ai",maxAttempts:2});
+    }
+    return{recovered:stalled.rowCount??0};
   }
 
   private async collectLogs(incident:IncidentRow){
@@ -822,6 +893,7 @@ export class LedgerlyAiIncidentService{
     });
 
     try{
+      const investigationStep=await this.startStep(incident,"investigation",incident.assignedAgentKey??"kato",{title:incident.title});
       if(incident.organizationId)await this.employees.ensureBuiltIns(incident.organizationId);
       const logs=await this.collectLogs(incident);
       const work=await this.git.createWorkspace({
@@ -844,14 +916,16 @@ export class LedgerlyAiIncidentService{
         actorType:"system",actorId:"ledgerly-ai",summary:"Created isolated governed Git worktree and branch.",
         metadata:{gitWorkspaceId:work.id,branch:work.branchName,baseSha:work.baseSha},
       });
+      await this.completeStep(investigationStep,{gitWorkspaceId:work.id,branch:work.branchName,logsCollected:true});
 
-      const fixResult=await this.providers.execute({
+      const implementationStep=await this.startStep(incident,"implementation",incident.assignedAgentKey??"kato",{gitWorkspaceId:work.id});
+      const fixResult=await this.runWithHeartbeat(incident,implementationStep,()=>this.providers.execute({
         id:createId("laiifix"),organizationId:incident.organizationId??"platform",
         userId:"ledgerly-ai:"+(incident.assignedAgentKey??"kato"),
         correlationId:"incident:"+id+":fix",prompt:this.engineeringPrompt(incident,work.workspacePath,logs),
         taskKind:"engineering",workspacePath:work.workspacePath,sandbox:"workspace-write",
-        timeoutMs:Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,900_000),
-      });
+        timeoutMs:Math.min(Math.max(this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,120_000),180_000),
+      }));
       const paths=await this.git.changedPaths(work.workspacePath);
       this.git.validateChangedPaths(paths);
       if(!paths.length){
@@ -860,6 +934,7 @@ export class LedgerlyAiIncidentService{
         });
         return{incidentId:id,status:"failed",reason:"no_changes"};
       }
+      await this.completeStep(implementationStep,{changedPaths:paths,provider:fixResult.provider});
       await this.appendEvent({
         incidentId:id,organizationId:incident.organizationId,eventType:"patch_prepared",status:"testing",
         actorType:"agent",actorId:incident.assignedAgentKey??"kato",
@@ -869,6 +944,7 @@ export class LedgerlyAiIncidentService{
       await this.runtime.db.query("UPDATE lai_incidents SET status='testing',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
       incident.status="testing";
 
+      const verificationStep=await this.startStep(incident,"verification","safi",{changedPaths:paths});
       const checks=await this.workspace.runVerification(work.workspacePath,paths);
       for(const check of checks)await this.persistCheck(incident,check);
       const failed=checks.find(check=>check.status==="failed");
@@ -882,6 +958,7 @@ export class LedgerlyAiIncidentService{
         await this.fail(incident,"Independent QA rejected the incident fix.",{qa});
         return{incidentId:id,status:"failed",reason:"qa_rejected"};
       }
+      await this.completeStep(verificationStep,{checks:checks.map(x=>({key:x.commandKey,status:x.status})),qaApproved:true});
 
       const agentKey=incident.assignedAgentKey??"kato";
       await this.appendEvent({
@@ -890,6 +967,7 @@ export class LedgerlyAiIncidentService{
         summary:"Tuma joined as GitHub specialist to take over commit governance, pull-request creation, CI tracking, and merge readiness.",
         metadata:{implementationAgent:agentKey,changedPaths:paths},
       });
+      const gitStep=await this.startStep(incident,"git_governance","tuma",{gitWorkspaceId:work.id,changedPaths:paths});
       const committed=await this.git.commitWorkspace({
         workspaceId:work.id,
         subject:`fix(incident): ${incident.title.slice(0,120)}`,
@@ -910,6 +988,7 @@ export class LedgerlyAiIncidentService{
           changeRisk,changedPaths:committed.changedPaths,diffSummary:committed.diffSummary,
         },
       });
+      await this.completeStep(gitStep,{fixSha:committed.sha,branch:work.branchName,changedPaths:committed.changedPaths});
       let pullRequestId:string|null=null;
       if(this.git.autoPrEnabled()){
         try{
@@ -931,6 +1010,7 @@ export class LedgerlyAiIncidentService{
 
       await this.runtime.db.query("UPDATE lai_incidents SET status='staging',updated_at=CURRENT_TIMESTAMP WHERE id=$1",[id]);
       incident.status="staging";
+      const deploymentStep=await this.startStep(incident,"staging_deployment","jabali",{fixSha:committed.sha});
       const deploymentId=createId("laidep");
       await this.runtime.db.query(
         `INSERT INTO lai_incident_deployments(
@@ -964,6 +1044,7 @@ export class LedgerlyAiIncidentService{
         actorType:"agent",actorId:"jabali",summary:"Jabali verified the incident fix in isolated staging and completed smoke checks.",
         metadata:{deploymentId,projectKey:staging.projectKey,smoke:staging.smoke},
       });
+      await this.completeStep(deploymentStep,{deploymentId,projectKey:staging.projectKey,smoke:staging.smoke});
       const approvalId=await this.requestProductionApproval(incident,committed.sha,committed.changedPaths,deploymentId);
       if(pullRequestId){
         await this.appendEvent({
