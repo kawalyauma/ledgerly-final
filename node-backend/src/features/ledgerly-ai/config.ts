@@ -50,6 +50,13 @@ const schema = z.object({
   LEDGERLY_AI_TOOL_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(900_000).default(120_000),
   LEDGERLY_AI_TOOL_MAX_RESULT_BYTES: z.coerce.number().int().min(16_384).max(8 * 1024 * 1024).default(512 * 1024),
   LEDGERLY_AI_REPO_ROOT: z.string().min(1).default("/opt/ledgerly/source"),
+  // The SAME repo checkout as LEDGERLY_AI_REPO_ROOT, but as the real Docker host sees it.
+  // Nested `docker run` calls go through the host daemon via the socket, so bind-mount
+  // sources must be real host paths — LEDGERLY_AI_REPO_ROOT is only valid inside this
+  // container. Defaults to matching LEDGERLY_AI_REPO_ROOT for the common case where the
+  // two happen to coincide; set it explicitly whenever they don't (see LEDGERLY_SOURCE_ROOT
+  // in compose.yml, which is the host path compose itself bind-mounts here).
+  LEDGERLY_AI_HOST_REPO_ROOT: z.string().min(1).default("/opt/ledgerly/source"),
   LEDGERLY_AI_GIT_BASE_BRANCH: z.string().min(1).default("main"),
   LEDGERLY_AI_GIT_REMOTE: z.string().min(1).default("origin"),
   LEDGERLY_AI_GIT_PROTECTED_BRANCHES: z.string().default("main,master,production"),

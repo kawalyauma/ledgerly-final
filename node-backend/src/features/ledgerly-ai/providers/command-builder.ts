@@ -78,6 +78,12 @@ export class ProviderCommandBuilder {
       ...(provider === "codex" ? ["-e", "CODEX_HOME=/home/ledgerly-ai/.codex"] : []),
       "--mount", `type=bind,src=${safeWorkspace},dst=/workspace${isWorkspaceWrite ? "" : ",readonly"}`,
       "--mount", `type=bind,src=${sessionHome},dst=${containerSessionTarget}`,
+      // A workspace under LEDGERLY_AI_WORK_ROOT is a `git worktree`, whose .git file points at
+      // an admin dir inside the main repo's .git/worktrees/<id> by absolute path. Without the
+      // main repo mounted at that same path, every git command inside the container fails with
+      // "gitdir ... does not exist" — this is the container's only view of it, so it must land
+      // at the identical absolute path the host/queue container uses.
+      "--mount", `type=bind,src=${this.config.LEDGERLY_AI_HOST_REPO_ROOT},dst=${this.config.LEDGERLY_AI_REPO_ROOT},readonly`,
       "-w", "/workspace",
       image,
       ...cliArgs,
