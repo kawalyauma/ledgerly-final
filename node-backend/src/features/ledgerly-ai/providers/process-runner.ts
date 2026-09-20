@@ -57,6 +57,8 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
     let timedOut = false;
     let aborted = false;
     let settled = false;
+    const nameIndex=options.args.indexOf("--name");
+    const dockerContainerName=nameIndex>=0&&typeof options.args[nameIndex+1]==="string"?options.args[nameIndex+1]:null;
 
     const emit = (event: ProviderStreamEvent) => {
       events.push(event);
@@ -88,6 +90,12 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
       timedOut = reason === "timeout";
       aborted = reason === "abort";
       child.kill("SIGTERM");
+      if(dockerContainerName){
+        const cleanup=spawn(options.command,["rm","-f",dockerContainerName],{
+          cwd:options.cwd,env:options.env,stdio:"ignore",shell:false,windowsHide:true,
+        });
+        cleanup.unref();
+      }
       setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 5_000).unref();
     };
 

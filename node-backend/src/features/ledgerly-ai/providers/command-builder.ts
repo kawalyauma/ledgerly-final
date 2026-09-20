@@ -56,8 +56,11 @@ export class ProviderCommandBuilder {
     // Keep the host bind explicitly read-only for read-only requests while
     // allowing the namespace setup inside this already-isolated container.
     const needsNestedSandbox = provider === "codex" || isWorkspaceWrite;
+    const containerName = `ledgerly-ai-${provider}-${path.basename(safeWorkspace)}-${Date.now()}`
+      .replace(/[^a-zA-Z0-9_.-]/g,"-").slice(0,120);
     const containerArgs = [
       "run", "--rm",
+      "--name", containerName,
       "--network", this.config.LEDGERLY_AI_DOCKER_NETWORK,
       "--read-only",
       ...(needsNestedSandbox
