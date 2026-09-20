@@ -89,9 +89,6 @@ const schema = z.object({
     ["LEDGERLY_AI_MONITOR_DISK_WARN_PERCENT","LEDGERLY_AI_MONITOR_DISK_CRITICAL_PERCENT"],
     ["LEDGERLY_AI_MONITOR_MEMORY_WARN_PERCENT","LEDGERLY_AI_MONITOR_MEMORY_CRITICAL_PERCENT"],
   ] as const;
-  if (value.LEDGERLY_AI_DOCKER_NETWORK.trim().toLowerCase() === "host") {
-    ctx.addIssue({ code: "custom", path: ["LEDGERLY_AI_DOCKER_NETWORK"], message: "Ledgerly AI workers may not use the Docker host network." });
-  }
   for (const [warn,critical] of orderedThresholds) {
     if (value[critical] <= value[warn]) {
       ctx.addIssue({ code: "custom", path: [critical], message: critical + " must be greater than " + warn + "." });
