@@ -3,7 +3,7 @@ import {
   Activity, AlertTriangle, Archive, BarChart3, Bot, Brain, CheckCircle2, Clock3,
   Database, GitPullRequest, HeartPulse, MessageSquare, PauseCircle,
   Play, RefreshCw, Rocket, Search, Send, ShieldCheck, SlidersHorizontal, Sparkles,
-  TerminalSquare, Users, Wrench, XCircle, Zap
+  Star, TerminalSquare, Users, Wrench, XCircle, Zap, Inbox, Mail, MoreVertical
 } from "lucide-react";
 import { authStore, errorText, get, post, put } from "../../../web/api";
 import "./ledgerly-ai-console.css";
@@ -106,8 +106,10 @@ export function LedgerlyAiConsolePage(){
           get<Employee[]>("/ledgerly-ai/employees"),
         ]);
         setChats(chatRows);setEmployees(employeeRows);
-        if(chatId){
-          const detail=await get<any>("/ledgerly-ai/chats/"+chatId);
+        const activeChatId=chatId??chatRows[0]?.id??null;
+        if(activeChatId){
+          if(!chatId)setChatId(activeChatId);
+          const detail=await get<any>("/ledgerly-ai/chats/"+activeChatId);
           setChatMessages(detail.messages??[]);
         }
       }else if(active==="employees"){
@@ -158,8 +160,8 @@ export function LedgerlyAiConsolePage(){
   useEffect(()=>{void loadSection(section);},[section,refreshKey]);
   useEffect(()=>{if(section==="usage")void loadSection("usage");},[usageDays]);
   useEffect(()=>{
-    if(!["overview","incidents","jobs","activity","approvals","deployments"].includes(section))return;
-    const id=window.setInterval(()=>setRefreshKey(x=>x+1),15000);
+    if(!["overview","chat","incidents","jobs","activity","approvals","deployments"].includes(section))return;
+    const id=window.setInterval(()=>setRefreshKey(x=>x+1),section==="chat"?5000:15000);
     return()=>window.clearInterval(id);
   },[section]);
 
@@ -176,10 +178,25 @@ export function LedgerlyAiConsolePage(){
     const message=chatText.trim();if(!message||sending)return;
     setSending(true);setError("");setChatText("");
     try{
+      if(!chatId){
+        const selectedEmployee=employees.find(employee=>employee.id===chatAgent);
+        const engineeringKeys=["kato","maya","tendo","nia","jabali","safi"];
+        const employeeKey=engineeringKeys.includes(selectedEmployee?.key??"")?selectedEmployee!.key:"kato";
+        const title=message.split("\n")[0].slice(0,220)||"Admin engineering task";
+        const incident=await post<any>("/ledgerly-ai/incidents/feature-requests",{title,description:message,employeeKey});
+        let id:string|null=null;
+        for(let attempt=0;attempt<8&&!id;attempt++){
+          await new Promise(resolve=>window.setTimeout(resolve,750));
+          const detail=await get<any>("/ledgerly-ai/incidents/"+incident.id);
+          id=detail.incident?.teamChatId??null;
+        }
+        const rows=await get<Chat[]>("/ledgerly-ai/chats");setChats(rows);
+        if(id){setChatId(id);await selectChat(id);}
+        else setError("Task accepted. Its team stream will appear in the inbox as soon as the engineer checks in.");
+        return;
+      }
       const body={message,agentId:chatAgent||null,taskKind:"chat" as const};
-      const response=chatId
-        ? await post<any>("/ledgerly-ai/chats/"+chatId+"/messages",body)
-        : await post<any>("/ledgerly-ai/chat",{...body,title:"Admin Ledgerly AI"});
+      const response=await post<any>("/ledgerly-ai/chats/"+chatId+"/messages",body);
       const id=response.chat?.id??chatId;
       if(id){setChatId(id);await selectChat(id);}
       const rows=await get<Chat[]>("/ledgerly-ai/chats");setChats(rows);
@@ -344,30 +361,37 @@ function ChatPanel({chats,employees,selected,messages,agent,text,sending,onSelec
   chats:Chat[];employees:Employee[];selected:string|null;messages:ChatMessage[];agent:string;text:string;sending:boolean;
   onSelect:(id:string)=>void;onNew:()=>void;onAgent:(id:string)=>void;onText:(text:string)=>void;onSend:()=>void;
 }){
+  const selectedChat=chats.find(chat=>chat.id===selected);
+  const isIncidentChat=selectedChat?.title?.startsWith("Incident team ·");
   return <div className="lai-chat-shell">
     <aside>
-      <button className="lai-new-chat" onClick={onNew}><Sparkles size={14}/> New admin chat</button>
+      <div className="lai-mail-brand"><Mail size={19}/><div><b>Ledgerly Mail</b><small>AI operations inbox</small></div></div>
+      <button className="lai-new-chat" onClick={onNew}><Sparkles size={14}/> Compose task</button>
+      <div className="lai-mail-folders"><button className="active"><Inbox size={14}/> Inbox <b>{chats.length}</b></button><button><Star size={14}/> Starred</button></div>
       <div className="lai-chat-list">{chats.map(chat=><button key={chat.id} className={selected===chat.id?"active":""} onClick={()=>onSelect(chat.id)}>
-        <MessageSquare size={14}/><span><b>{chat.title}</b><small>{when(chat.lastMessageAt??chat.createdAt)}</small></span>
+        <span className="lai-mail-avatar">{chat.title?.startsWith("Incident team")?"IT":"AI"}</span><span className="lai-mail-summary"><span><b>{chat.title}</b><time>{when(chat.lastMessageAt??chat.createdAt)}</time></span><small>{chat.title?.startsWith("Incident team")?"Engineering team activity stream":"Admin conversation"}</small></span>
       </button>)}</div>
     </aside>
     <section>
       <header>
-        <div><small>PERSISTENT MEMORY CHAT</small><h3>{selected?"Conversation":"New conversation"}</h3></div>
+        <div><small>{isIncidentChat?"LIVE INCIDENT WORKSPACE":"PERSISTENT OPERATIONS CHAT"}</small><h3>{selectedChat?.title??"Compose a new task"}</h3>{selectedChat&&<span className="lai-live"><i/> Live · refreshes every 5 seconds</span>}</div>
+        <div className="lai-mail-header-actions">
         <select value={agent} onChange={e=>onAgent(e.target.value)} disabled={Boolean(selected)}>
-          <option value="">Ledgerly AI automatic routing</option>
-          {employees.map(emp=><option key={emp.id} value={emp.id}>{emp.name} · {emp.role}</option>)}
+          <option value="">Kato · default engineer</option>
+          {employees.filter(emp=>["kato","maya","tendo","nia","jabali","safi"].includes(emp.key)).map(emp=><option key={emp.id} value={emp.id}>{emp.name} · {emp.role}</option>)}
         </select>
+        <button className="secondary" title="Conversation actions"><MoreVertical size={16}/></button>
+        </div>
       </header>
       <div className="lai-messages">
-        {!messages.length&&<div className="lai-chat-welcome"><Brain size={34}/><h3>Ask Ledgerly AI</h3><p>Conversation memory is captured by the managed Ledgerly AI memory service. Provider identity stays hidden.</p></div>}
+        {!messages.length&&<div className="lai-chat-welcome"><Brain size={34}/><h3>{selected?"Waiting for the first update":"Assign work to Ledgerly AI"}</h3><p>Investigation, code changes, tests, Git handoffs, deployment, failures and recovery will appear here as one continuous team stream.</p></div>}
         {messages.map(m=><article key={m.id} className={"lai-message "+m.role}>
-          <small>{m.role==="assistant"?(employees.find(emp=>emp.id===m.agentId)?.name??"Ledgerly AI"):m.role}</small><p>{m.content}</p><time>{when(m.createdAt)}</time>
+          <span className="lai-message-avatar">{m.role==="assistant"?"AI":m.role==="system"?"S":"ME"}</span><div className="lai-message-body"><header><b>{m.role==="assistant"?(employees.find(emp=>emp.id===m.agentId)?.name??"Ledgerly AI"):m.role==="system"?"Ledgerly workflow":"You"}</b><time>{when(m.createdAt)}</time></header><p>{m.content}</p></div>
         </article>)}
       </div>
       <footer>
-        <textarea value={text} onChange={e=>onText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();onSend();}}} placeholder="Ask Ledgerly AI…"/>
-        <button onClick={onSend} disabled={sending||!text.trim()}><Send size={15}/>{sending?"Sending…":"Send"}</button>
+        <textarea value={text} onChange={e=>onText(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();onSend();}}} placeholder={selected?"Reply to the team stream…":"Describe the engineering task and expected result…"}/>
+        <button onClick={onSend} disabled={sending||!text.trim()}><Send size={15}/>{sending?"Sending…":selected?"Reply":"Assign task"}</button>
       </footer>
     </section>
   </div>;
