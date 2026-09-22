@@ -38,7 +38,7 @@ function SystemStatusPage() {
 }
 
 const moduleDefinition: FrontendModuleDefinition = {
-  key: "ledgerly",
+  key: "ledgerly-core",
   name: "Ledgerly Core",
   version: "1.0.0",
   order: 1,
