@@ -380,7 +380,7 @@ function ChatPanel({chats,employees,selected,messages,agent,text,sending,onSelec
           <option value="">Kato · default engineer</option>
           {employees.filter(emp=>["kato","maya","tendo","nia","jabali","safi"].includes(emp.key)).map(emp=><option key={emp.id} value={emp.id}>{emp.name} · {emp.role}</option>)}
         </select>
-        <button className="secondary" title="Conversation actions"><MoreVertical size={16}/></button>
+        <button className="secondary" aria-label="Conversation actions" title="Conversation actions"><MoreVertical size={16}/></button>
         </div>
       </header>
       <div className="lai-messages">

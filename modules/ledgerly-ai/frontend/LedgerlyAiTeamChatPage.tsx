@@ -202,7 +202,7 @@ export function LedgerlyAiTeamChatPage(){
       {turns.length>0&&<button className="secondary" onClick={resetRoom}><X size={14}/> New room</button>}
     </header>
 
-    {error&&<div className="laitc-error"><CircleAlert size={16}/><span>{error}</span><button className="icon" onClick={()=>setError("")}><X size={14}/></button></div>}
+    {error&&<div className="laitc-error" role="alert"><CircleAlert size={16}/><span>{error}</span><button className="icon" aria-label="Dismiss error" onClick={()=>setError("")}><X size={14}/></button></div>}
 
     <div className="laitc-layout">
       <aside className="laitc-roster">
@@ -235,7 +235,7 @@ export function LedgerlyAiTeamChatPage(){
         {pendingFile&&<div className="laitc-attachment-chip">
           <FileImage size={13}/><b>{pendingFile.name}</b>
           <span>Ask Ledgerly AI to "create a scheme from this" and it will use the academics.scheme.import_from_document tool.</span>
-          <button className="icon" onClick={()=>setPendingFile(null)}><X size={12}/></button>
+          <button className="icon" aria-label={`Remove ${pendingFile.name}`} onClick={()=>setPendingFile(null)}><X size={12}/></button>
         </div>}
         <footer className="laitc-composer">
           <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp" hidden
