@@ -42,5 +42,7 @@ jobs:
         run: npm run modules:sync
       - name: Verify generated module files are committed
         run: git diff --exit-code
+      - name: Run Fusion UI consistency checks
+        run: npm run ui:check
       - name: Build web application
         run: npm run build:web
