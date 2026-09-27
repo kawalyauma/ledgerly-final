@@ -15,7 +15,8 @@ import { TaxPage } from "../../../web/pages/TaxPayrollPages";
 import { OrganizationPage } from "../../../web/pages/OrganizationPages";
 import { TeamPage, ApiKeysPage } from "../../../web/pages/AdminPages";
 import { ModulesPage } from "../../../web/pages/ModulesPage";
-import { OverviewDashboard, WelcomePage, WorkspaceSettingsPage } from "./OverviewPages";
+import { OverviewDashboard, WorkspaceSettingsPage } from "./OverviewPages";
+import { FusionWelcome } from "./FusionWelcome";
 
 type HealthComponent = { status: string; latencyMs?: number; error?: string };
 type Health = { status: string; timestamp: string; components: Record<string, HealthComponent> };
@@ -41,7 +42,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   version: "1.0.0",
   order: 1,
   routes: {
-    welcome: { view: WelcomePage },
+    welcome: { view: FusionWelcome },
     dashboards: { view: OverviewDashboard },
     customDashboards: { view: DashboardsPage },
     "workspace-settings": { scope: "admin:read", admin: true, view: WorkspaceSettingsPage },
