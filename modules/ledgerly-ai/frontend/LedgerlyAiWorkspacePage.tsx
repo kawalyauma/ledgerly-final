@@ -40,6 +40,7 @@ export function LedgerlyAiWorkspacePage(){
   const[liveProgress,setLiveProgress]=useState<Message[]>([]);
   const[lastFailed,setLastFailed]=useState<Failed|null>(null),fileRef=useRef<HTMLInputElement|null>(null),messagesEndRef=useRef<HTMLDivElement|null>(null);
   const[provider,setProvider]=useState<Provider>(loadStoredProvider);
+  useEffect(()=>{try{const pending=sessionStorage.getItem("ledgerly-ai.prefill");if(pending){setText(pending);sessionStorage.removeItem("ledgerly-ai.prefill");}}catch{}},[]);
   useEffect(()=>{try{localStorage.setItem(PROVIDER_STORAGE_KEY,provider);}catch{}},[provider]);
   const currentChat=useMemo(()=>chats.find(chat=>chat.id===chatId)??null,[chats,chatId]);
   const filteredChats=useMemo(()=>{const query=search.trim().toLowerCase();return query?chats.filter(chat=>chat.title.toLowerCase().includes(query)):chats;},[chats,search]);
