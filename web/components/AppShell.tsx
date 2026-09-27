@@ -54,6 +54,12 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
    {subscription?.status==="suspended"&&<div className="plan-suspended">This organization's Ledgerly subscription is suspended. <button onClick={()=>go("billing")}>View plan &amp; usage</button></div>}
    <main>{children}</main>
   </div>
+  <nav className="mobile-dock" aria-label="Mobile navigation">
+   <button className={active==="welcome"?"active":""} onClick={()=>go("welcome")}><Home size={19}/><span>Home</span></button>
+   <button className={quick?"active":""} onClick={()=>{setQuick(v=>!v);setApps(false);setMenu(null)}}><Plus size={20}/><span>Create</span></button>
+   <button className={apps?"active":""} onClick={()=>{setApps(v=>!v);setQuick(false);setMenu(null)}}><LayoutGrid size={19}/><span>Apps</span></button>
+   <button onClick={()=>setMobile(true)}><Menu size={19}/><span>Menu</span></button>
+  </nav>
   {(quick||selected||apps)&&<button className="floating-panel-scrim" aria-label="Close menu" onClick={()=>{setQuick(false);setMenu(null);setApps(false)}}/>}
   {quick&&<section className="floating-panel quick-panel"><header><div><strong>Create / quick actions</strong><small>Jump straight to common work.</small></div><button onClick={()=>setQuick(false)}><X size={17}/></button></header><div className="quick-action-grid">{quickItems.map(item=>{const Icon=item.icon??Circle;return <button key={item.path} onClick={()=>go(item.path)}><span><Icon size={18}/></span><strong>{item.label}</strong></button>})}</div></section>}
   {selected&&<section className="floating-panel module-menu"><header><div><strong>{selected.group.label}</strong><small>Choose a page in this module</small></div><button onClick={()=>setMenu(null)}><X size={17}/></button></header><div className="module-menu-grid">{selected.items.map(item=><Link key={`${item.path}-${item.label}`} item={item} active={activeItem} onGo={go}/>)}</div></section>}
