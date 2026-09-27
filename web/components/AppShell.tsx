@@ -19,6 +19,12 @@ function Link({item,active,onGo,depth=0}:{item:Item;active:string;onGo:(p:string
  return <div className={`nav-branch ${current?"current":""}`}><button className={`nav-item depth-${depth}`} onClick={()=>{setOpen(v=>!v);if(depth>0)onGo(item.path)}}><Icon size={17}/><span>{item.label}</span>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button>{open&&<div className="nav-branch-children">{kids.map(k=><Link key={`${k.path}-${k.label}`} item={k} active={active} onGo={onGo} depth={depth+1}/>)}</div>}</div>
 }
 
+function MobileGroup({group,items,active,onGo}:{group:Group;items:Item[];active:string;onGo:(p:string)=>void}){
+ const current=flat(items).some(item=>hit(active,item.path)),[open,setOpen]=useState(current);const Icon=group.icon;
+ useEffect(()=>{if(current)setOpen(true)},[current]);
+ return <section className={`nav-section ${current?"current":""}`}><button className="nav-section-head mobile-group-head" aria-expanded={open} onClick={()=>setOpen(v=>!v)}><span><Icon size={16}/>{group.label}</span>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button>{open&&<div className="nav-section-items">{items.map(item=><Link key={`${item.path}-${item.label}`} item={item} active={active} onGo={onGo}/>)}</div>}</section>
+}
+
 type Org={id:string;name:string};
 export function AppShell({children,active,onNavigate}:{children:ReactNode;active:string;onNavigate:(p:string)=>void}){
  const[mobile,setMobile]=useState(false),[account,setAccount]=useState(false),[orgs,setOrgs]=useState<Org[]>([]),[switching,setSwitching]=useState(false),[name,setName]=useState("Current user"),[chatUnread,setChatUnread]=useState(0),[menu,setMenu]=useState<string|null>(null),[apps,setApps]=useState(false),[quick,setQuick]=useState(false),[q,setQ]=useState("");
@@ -48,7 +54,7 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
    <div className="brand"><button className="brand-home" onClick={()=>go("welcome")}><span className="ledgerly-mark">L</span><b>Ledgerly</b></button><button className="mobile-close" aria-label="Close navigation" onClick={()=>setMobile(false)}><X size={19}/></button></div>
    <button className={`rail-action ${quick?"active":""}`} aria-expanded={quick} aria-label="Open create and quick actions" onClick={()=>{setQuick(v=>!v);setApps(false);setMenu(null);setMobile(false)}}><Plus size={20}/><span>Create</span></button>
    <nav className="rail-links"><button className={active==="welcome"?"active":""} onClick={()=>go("welcome")}><Home size={19}/><span>Home</span></button><button className={hit(active,"dashboards")?"active":""} onClick={()=>go("dashboards")}><LayoutGrid size={19}/><span>Dashboard</span></button>{entries.some(e=>e.item.path==="reports")&&<button className={hit(active,"reports")?"active":""} onClick={()=>go("reports")}><FileBarChart size={19}/><span>Reports</span></button>}<button className={apps?"active":""} aria-expanded={apps} onClick={()=>{setApps(v=>!v);setQuick(false);setMenu(null)}}><LayoutGrid size={19}/><span>Apps</span></button></nav>
-   <div className="mobile-navigation">{orgs.length>1&&<select disabled={switching} value={principal?.organizationId||""} onChange={e=>void switchOrg(e.target.value)}>{orgs.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select>}<div className="nav-list">{groups.map(({group,items})=><section className="nav-section" key={group.key}><div className="nav-section-head"><span>{group.label}</span></div>{items.map(i=><Link key={`${i.path}-${i.label}`} item={i} active={activeItem} onGo={go}/>)}</section>)}</div></div>
+   <div className="mobile-navigation">{orgs.length>1&&<select disabled={switching} value={principal?.organizationId||""} onChange={e=>void switchOrg(e.target.value)}>{orgs.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select>}<div className="nav-list">{groups.map(({group,items})=><MobileGroup key={group.key} group={group} items={items} active={activeItem} onGo={go}/>)}</div></div>
    {isAdmin&&<button className="rail-customize" onClick={()=>go("workspace-settings")}><Settings size={18}/><span>Customize</span></button>}
   </aside>
   <div className="workspace">
