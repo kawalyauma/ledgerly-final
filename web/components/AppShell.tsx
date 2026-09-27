@@ -22,9 +22,11 @@ function Link({item,active,onGo,depth=0}:{item:Item;active:string;onGo:(p:string
 type Org={id:string;name:string};
 export function AppShell({children,active,onNavigate}:{children:ReactNode;active:string;onNavigate:(p:string)=>void}){
  const[mobile,setMobile]=useState(false),[account,setAccount]=useState(false),[orgs,setOrgs]=useState<Org[]>([]),[switching,setSwitching]=useState(false),[name,setName]=useState("Current user"),[chatUnread,setChatUnread]=useState(0),[menu,setMenu]=useState<string|null>(null),[apps,setApps]=useState(false),[quick,setQuick]=useState(false),[q,setQ]=useState("");
- const searchRef=useRef<HTMLInputElement>(null);\n const{principal,login,logout}=useAuth();
+ const searchRef=useRef<HTMLInputElement>(null);
+ const{principal,login,logout}=useAuth();
  useEffect(()=>{get<Org[]>("/organizations").then(setOrgs).catch(()=>{});if(can(principal,"admin:read"))get<Array<{userId:string;displayName:string}>>("/admin/memberships").then(x=>setName(x.find(m=>m.userId===principal?.userId)?.displayName||"Current user")).catch(()=>{})},[principal]);
- useEffect(()=>{const load=()=>get<Array<{unread_count?:number}>>("/work/chat/threads").then(x=>setChatUnread(x.reduce((n,t)=>n+Number(t.unread_count||0),0))).catch(()=>{});load();const timer=setInterval(load,15000);return()=>clearInterval(timer)},[principal]);\n useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}};addEventListener("keydown",onKey);return()=>removeEventListener("keydown",onKey)},[]);
+ useEffect(()=>{const load=()=>get<Array<{unread_count?:number}>>("/work/chat/threads").then(x=>setChatUnread(x.reduce((n,t)=>n+Number(t.unread_count||0),0))).catch(()=>{});load();const timer=setInterval(load,15000);return()=>clearInterval(timer)},[principal]);
+ useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus()}};addEventListener("keydown",onKey);return()=>removeEventListener("keydown",onKey)},[]);
  async function switchOrg(id:string){if(id===principal?.organizationId)return;setSwitching(true);try{const s=await post<Session>("/organizations/switch",{organizationId:id});localStorage.setItem("finance.activeOrganization",id);login(s,localStorage.getItem("finance.remember")!=="false");location.reload()}finally{setSwitching(false)}}
  const go=(p:string)=>{onNavigate(p);setMobile(false);setAccount(false);setMenu(null);setApps(false);setQuick(false);setQ("")};
  const layout=useNavigationSettings(principal?.organizationId),subscription=useSubscription(principal?.organizationId),isAdmin=!!principal&&["owner","admin"].includes(principal.role);
