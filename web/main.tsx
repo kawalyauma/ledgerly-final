@@ -7,6 +7,7 @@ import { installLegacyPrintBridge } from "./printing";
 import { installJournalReversalGuard } from "./reversalGuard";
 import "./styles.css";
 import "./theme.css";
+import "./fusion.css";
 
 installLegacyPrintBridge();
 installDynamicSchoolSelectors();
