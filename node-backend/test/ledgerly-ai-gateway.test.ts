@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseLedgerlyAiConfig } from "../src/features/ledgerly-ai/config.js";
 import { normalizeLedgerlyAiResponse } from "../src/features/ledgerly-ai/gateway/normalize.js";
 import { redactLedgerlyAiText, redactLedgerlyAiValue } from "../src/features/ledgerly-ai/gateway/redaction.js";
+import { providerCheckpointFromEvent } from "../src/features/ledgerly-ai/gateway/service.js";
 
 describe("Ledgerly AI gateway", () => {
   it("has bounded user, organization and agent request defaults", () => {
@@ -31,5 +32,16 @@ describe("Ledgerly AI gateway", () => {
     expect(normalized.content).toBe("I am Ledgerly AI and I completed the analysis.");
     expect(normalized).not.toHaveProperty("provider");
     expect(normalized).not.toHaveProperty("sessionId");
+  });
+
+  it("captures provider sessions from live events before a run can fail", () => {
+    expect(providerCheckpointFromEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"thread.started",
+      data:{type:"thread.started",thread_id:"codex-thread-1"},
+    })).toEqual({provider:"codex",sessionId:"codex-thread-1"});
+    expect(providerCheckpointFromEvent({
+      at:new Date().toISOString(),stream:"stdout",type:"system",
+      data:{type:"system",session_id:"claude-session-1"},
+    })).toEqual({provider:"claude-code",sessionId:"claude-session-1"});
   });
 });

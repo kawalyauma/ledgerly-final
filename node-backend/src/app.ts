@@ -19,7 +19,8 @@ export function createApp(options: {
   features?: BackendFeature[];
   runtime?: Runtime;
 }) {
-  const app = new Hono<AppEnv>();
+  // strict:false lets "/api/v1/exams/" match routes declared as "/" (the web client uses both forms).
+  const app = new Hono<AppEnv>({ strict: false });
   const captureIncident = (input: {
     organizationId?: string | null;
     source: string;
@@ -95,6 +96,8 @@ export function createApp(options: {
     features: activeFeatures.map((feature) => ({ key: feature.key, version: feature.version })),
   }));
   app.get("/system/live", (c) => c.json({ status: "ok", timestamp: new Date().toISOString() }));
+  // The web client reaches everything through /api/v1, so expose the same health check there too.
+  app.get("/api/v1/system/health", async (c) => c.json(await options.health.check()));
   app.get("/system/health", async (c) => {
     const health = await options.health.check();
     if (health.status !== "ok") {

@@ -3,6 +3,7 @@ import { AppError } from "../../http/errors.js";
 import type { Runtime } from "../../runtime.js";
 import { createId } from "../core-identity/security.js";
 import { createJournal, postJournal, type JournalLineInput } from "../finance-core/service.js";
+import { sharedLedgerDimensions } from "../finance-core/dimensions.js";
 
 type Db = Pool | PoolClient;
 export type DocumentType = "invoice" | "bill" | "credit_note" | "supplier_credit";
@@ -190,7 +191,8 @@ export async function postDocument(runtime: Runtime, organizationId: string, act
     const narration = documentNarration(doc.type, doc.number, raw.rows.map((line) => line.description));
     const lines: JournalLineInput[] = [];
     const controlDebit = doc.type === "invoice" || doc.type === "supplier_credit";
-    lines.push({ accountId: controlAccountId, contactId: doc.contactId, description: narration, ...(controlDebit ? { debitMinor: doc.totalMinor } : { creditMinor: doc.totalMinor }) });
+    const controlDimensions = sharedLedgerDimensions(raw.rows.map(line => line.dimensions));
+    lines.push({ accountId: controlAccountId, contactId: doc.contactId, description: narration, dimensions: controlDimensions, ...(controlDebit ? { debitMinor: doc.totalMinor } : { creditMinor: doc.totalMinor }) });
     const detailDebit = doc.type === "bill" || doc.type === "credit_note";
     for (const line of raw.rows) {
       lines.push({

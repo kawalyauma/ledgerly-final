@@ -317,6 +317,7 @@ export class LedgerlyAiIncidentService{
         JSON.stringify(safeJson(input.metadata??{})),
       ],
     );
+    if(!this.config.LEDGERLY_AI_INCIDENT_CHAT_MIRROR_ENABLED)return;
     try{
       const incident=await this.incident(input.incidentId);
       await this.mirrorEventToTeamChat(incident,input);

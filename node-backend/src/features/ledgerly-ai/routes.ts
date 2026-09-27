@@ -1,27 +1,8 @@
 import { Hono } from "hono";
 import type { AppEnv } from "../../http/types.js";
 import { requireScope } from "../core-identity/security.js";
-import {
-  createLedgerlyAiEmployeeAdminRoutes,
-  createLedgerlyAiEmployeeRoutes,
-} from "./employees/routes.js";
 import { createLedgerlyAiGatewayRoutes } from "./gateway/routes.js";
-import {
-  createLedgerlyAiMemoryAdminRoutes,
-  createLedgerlyAiMemoryRoutes,
-} from "./memory/routes.js";
 import type { LedgerlyAiFoundationService } from "./service.js";
-import { createLedgerlyAiForgeRoutes } from "./forge/routes.js";
-import { createLedgerlyAiCustomRuntimeRoutes } from "./custom-runtime/routes.js";
-import { createLedgerlyAiIncidentRoutes } from "./incidents/routes.js";
-import { createLedgerlyAiGitRoutes } from "./git/routes.js";
-import { createLedgerlyAiMonitoringRoutes } from "./monitoring/routes.js";
-import { createLedgerlyAiPolicyRoutes } from "./policy/routes.js";
-import { createLedgerlyAiConsoleRoutes } from "./console/routes.js";
-import {
-  createLedgerlyAiApprovalRoutes,
-  createLedgerlyAiToolRoutes,
-} from "./tools/routes.js";
 
 export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
   const routes = new Hono<AppEnv>();
@@ -43,21 +24,17 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     c.json({
       data: {
         name: "Ledgerly AI",
-        featureVersion: "0.18.0",
+        featureVersion: "0.19.0",
         enabled: service.config.LEDGERLY_AI_ENABLED,
         providerSelection: "managed",
         memory: true,
-        namedEmployees: true,
-        tools: true,
-        approvals: true,
-        legacyEmployeesIntegrated: true,
-        forgeAgentBuilder: true,
-        customAgentRuntime: true,
-        engineeringIncidents: true,
-        governedGitWorkflow: true,
-        autonomousMonitoring: true,
-        policyAndApprovals: true,
-        adminConsole: true,
+        singleController: true,
+        directProviderExecution: true,
+        namedEmployees: false,
+        tools: false,
+        forgeAgentBuilder: false,
+        customAgentRuntime: false,
+        projectRebuildAfterEdits: true,
         endUserWorkspace: true,
         securityIsolation: true,
         reliabilityTesting: true,
@@ -77,19 +54,6 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     });
   });
 
-  routes.route("/internal/employees", createLedgerlyAiEmployeeAdminRoutes(service.employees));
-  routes.route("/internal/memories", createLedgerlyAiMemoryAdminRoutes(service.memory));
-  routes.route("/employees", createLedgerlyAiEmployeeRoutes(service.employees));
-  routes.route("/memories", createLedgerlyAiMemoryRoutes(service.memory));
-  routes.route("/tools", createLedgerlyAiToolRoutes(service.tools, service.employees));
-  routes.route("/approvals", createLedgerlyAiApprovalRoutes(service.tools));
-  routes.route("/forge", createLedgerlyAiForgeRoutes(service.forge));
-  routes.route("/custom-agents", createLedgerlyAiCustomRuntimeRoutes(service.customRuntime));
-  routes.route("/incidents", createLedgerlyAiIncidentRoutes(service.incidents));
-  routes.route("/git", createLedgerlyAiGitRoutes(service.git));
-  routes.route("/monitoring", createLedgerlyAiMonitoringRoutes(service.monitoring));
-  routes.route("/policy", createLedgerlyAiPolicyRoutes(service.policy));
-  routes.route("/console", createLedgerlyAiConsoleRoutes(service.console));
-  routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway, service.employees));
+  routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway,service.runtime));
   return routes;
 }

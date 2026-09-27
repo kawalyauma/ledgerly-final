@@ -85,6 +85,7 @@ export function LedgerlyAiConsolePage(){
   const [chats,setChats]=useState<Chat[]>([]);
   const [employees,setEmployees]=useState<Employee[]>([]);
   const [chatId,setChatId]=useState<string|null>(null);
+  const [composing,setComposing]=useState(false);
   const [chatMessages,setChatMessages]=useState<ChatMessage[]>([]);
   const [chatAgent,setChatAgent]=useState("");
   const [chatText,setChatText]=useState("");
@@ -106,9 +107,8 @@ export function LedgerlyAiConsolePage(){
           get<Employee[]>("/ledgerly-ai/employees"),
         ]);
         setChats(chatRows);setEmployees(employeeRows);
-        const activeChatId=chatId??chatRows[0]?.id??null;
+        const activeChatId=composing?null:chatId;
         if(activeChatId){
-          if(!chatId)setChatId(activeChatId);
           const detail=await get<any>("/ledgerly-ai/chats/"+activeChatId);
           setChatMessages(detail.messages??[]);
         }
@@ -166,7 +166,7 @@ export function LedgerlyAiConsolePage(){
   },[section]);
 
   async function selectChat(id:string){
-    setChatId(id);setLoading(true);setError("");
+    setComposing(false);setChatId(id);setLoading(true);setError("");
     try{
       const detail=await get<any>("/ledgerly-ai/chats/"+id);
       setChatMessages(detail.messages??[]);
@@ -191,7 +191,7 @@ export function LedgerlyAiConsolePage(){
           id=detail.incident?.teamChatId??null;
         }
         const rows=await get<Chat[]>("/ledgerly-ai/chats");setChats(rows);
-        if(id){setChatId(id);await selectChat(id);}
+        if(id){setComposing(false);setChatId(id);await selectChat(id);}
         else setError("Task accepted. Its team stream will appear in the inbox as soon as the engineer checks in.");
         return;
       }
@@ -293,7 +293,7 @@ export function LedgerlyAiConsolePage(){
         {section==="overview"&&<Overview data={data.overview} isOwner={Boolean(isOwner)} onControl={setOrgControl}/>}
         {section==="chat"&&<ChatPanel chats={chats} employees={employees} selected={chatId} messages={chatMessages}
           agent={chatAgent} text={chatText} sending={sending}
-          onSelect={selectChat} onNew={()=>{setChatId(null);setChatMessages([]);setChatAgent("");}}
+          onSelect={selectChat} onNew={()=>{setComposing(true);setChatId(null);setChatMessages([]);setChatAgent("");}}
           onAgent={setChatAgent} onText={setChatText} onSend={sendChat}/>}
         {section==="employees"&&<Employees rows={data.employees??[]} controls={data.controls??[]} onControl={setAgentControl}/>}
         {section==="custom"&&<CustomAgents rows={data.custom??[]} onAction={customAction}/>}

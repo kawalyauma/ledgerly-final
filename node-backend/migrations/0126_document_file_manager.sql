@@ -1,0 +1,80 @@
+CREATE TABLE IF NOT EXISTS file_folders (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  parent_id TEXT REFERENCES file_folders(id) ON DELETE RESTRICT,
+  name TEXT NOT NULL,
+  name_normalized TEXT NOT NULL,
+  created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS file_folders_org_parent_name_uq ON file_folders(organization_id,COALESCE(parent_id,''),name_normalized) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS file_folders_org_parent_idx ON file_folders(organization_id,parent_id,deleted_at,name);
+
+CREATE TABLE IF NOT EXISTS file_items (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  folder_id TEXT REFERENCES file_folders(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes BIGINT NOT NULL DEFAULT 0 CHECK(size_bytes>=0),
+  checksum_sha256 TEXT,
+  storage_bucket TEXT NOT NULL DEFAULT 'work' CHECK(storage_bucket IN ('work','reports')),
+  object_key TEXT,
+  preview_object_key TEXT,
+  preview_mime_type TEXT,
+  preview_size_bytes BIGINT,
+  source_type TEXT NOT NULL DEFAULT 'upload' CHECK(source_type IN ('upload','ai_generated','school_file','scannerly','report_export','system_generated','finance_attachment','printerly')),
+  source_module TEXT,
+  source_entity_type TEXT,
+  source_entity_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived','trashed')),
+  current_version INTEGER NOT NULL DEFAULT 1 CHECK(current_version>=1),
+  tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+  metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  updated_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  deleted_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS file_items_org_folder_idx ON file_items(organization_id,folder_id,status,updated_at DESC);
+CREATE INDEX IF NOT EXISTS file_items_org_source_idx ON file_items(organization_id,source_type,source_module,updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS file_items_source_entity_uq ON file_items(organization_id,source_module,source_entity_type,source_entity_id) WHERE source_module IS NOT NULL AND source_entity_type IS NOT NULL AND source_entity_id IS NOT NULL AND deleted_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS file_versions (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  file_item_id TEXT NOT NULL REFERENCES file_items(id) ON DELETE CASCADE,
+  version_number INTEGER NOT NULL CHECK(version_number>=1),
+  filename TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size_bytes BIGINT NOT NULL DEFAULT 0 CHECK(size_bytes>=0),
+  checksum_sha256 TEXT,
+  storage_bucket TEXT NOT NULL DEFAULT 'work' CHECK(storage_bucket IN ('work','reports')),
+  object_key TEXT NOT NULL,
+  preview_object_key TEXT,
+  preview_mime_type TEXT,
+  preview_size_bytes BIGINT,
+  created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(organization_id,file_item_id,version_number)
+);
+CREATE INDEX IF NOT EXISTS file_versions_item_idx ON file_versions(organization_id,file_item_id,version_number DESC);
+
+CREATE TABLE IF NOT EXISTS file_links (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  file_item_id TEXT NOT NULL REFERENCES file_items(id) ON DELETE CASCADE,
+  module_key TEXT,
+  entity_type TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  label TEXT,
+  created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(organization_id,file_item_id,entity_type,entity_id)
+);
+CREATE INDEX IF NOT EXISTS file_links_entity_idx ON file_links(organization_id,entity_type,entity_id,created_at DESC);

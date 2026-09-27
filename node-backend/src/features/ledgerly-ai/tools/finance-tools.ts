@@ -20,7 +20,7 @@ const feesRead: LedgerlyAiToolDefinition = {
   approvalRequired: false,
   mutating: false,
   async execute(ctx, input) {
-    const [student, charges, receipts] = await Promise.all([
+    const [student, ledger, receipts] = await Promise.all([
       ctx.runtime.db.query(
         `SELECT id,admission_number AS "admissionNumber",
                 concat_ws(' ',first_name,middle_name,last_name) AS name
@@ -29,13 +29,16 @@ const feesRead: LedgerlyAiToolDefinition = {
         [ctx.principal.organizationId, input.studentId],
       ),
       ctx.runtime.db.query(
-        `SELECT c.id,c.amount_minor AS "amountMinor",c.due_date AS "dueDate",
-                d.number AS "documentNumber",d.status,d.total_minor AS "documentTotalMinor",
-                d.paid_minor AS "paidMinor",GREATEST(d.total_minor-d.paid_minor,0) AS "outstandingMinor"
-           FROM school_student_fee_charges c
-           JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-          WHERE c.organization_id=$1 AND c.student_id=$2
-          ORDER BY c.created_at DESC LIMIT 200`,
+        `SELECT j.id,j.transaction_date AS "transactionDate",j.entry_number AS "entryNumber",
+                j.description,j.reference,j.source_type AS "sourceType",
+                l.debit_minor AS "debitMinor",l.credit_minor AS "creditMinor",
+                l.debit_minor-l.credit_minor AS "balanceChangeMinor"
+           FROM journal_lines l
+           JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+           JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
+          WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2
+            AND a.subtype='school_fee_receivable' AND j.status='posted'
+          ORDER BY j.transaction_date DESC,j.created_at DESC LIMIT 200`,
         [ctx.principal.organizationId, input.studentId],
       ),
       ctx.runtime.db.query(
@@ -48,9 +51,9 @@ const feesRead: LedgerlyAiToolDefinition = {
       ),
     ]);
     if (!student.rows[0]) return { found: false };
-    const outstandingMinor = (charges.rows as Array<{ outstandingMinor?: unknown }>)
-      .reduce((sum, row) => sum + Number(row.outstandingMinor ?? 0), 0);
-    return { found: true, student: student.rows[0], outstandingMinor, charges: charges.rows, receipts: receipts.rows };
+    const outstandingMinor = (ledger.rows as Array<{ balanceChangeMinor?: unknown }>)
+      .reduce((sum, row) => sum + Number(row.balanceChangeMinor ?? 0), 0);
+    return { found: true, student: student.rows[0], outstandingMinor, ledgerTransactions: ledger.rows, receipts: receipts.rows };
   },
 };
 

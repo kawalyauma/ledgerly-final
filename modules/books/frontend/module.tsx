@@ -16,7 +16,7 @@ const moduleDefinition: FrontendModuleDefinition = {
       label: "Books",
       icon: BookOpenCheck,
       order: 35,
-      items: [{ label: "Writing Books", path: "books", scope: "school:read" }],
+      items: [{ label: "Writing Books", path: "books", scope: "school:read", icon: BookOpenCheck}],
     },
   ],
 };

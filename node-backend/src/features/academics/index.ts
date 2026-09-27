@@ -5,6 +5,7 @@ import { createAcademicSupervisionRoutes } from "./supervision.js";
 import { createAcademicTimetableRoutes } from "./timetables.js";
 import { createAcademicDeliveryRoutes } from "./delivery.js";
 import { createAcademicAttachmentRoutes } from "./attachments.js";
+import { createSupervisionComplianceRoutes } from "./compliance.js";
 import { processLessonPlanOcrJob } from "./ocr-jobs.js";
 
 export const academicsFeature: BackendFeature = {
@@ -17,6 +18,7 @@ export const academicsFeature: BackendFeature = {
     app.route("/api/v1/academics",createAcademicTimetableRoutes(runtime));
     app.route("/api/v1/academics",createAcademicDeliveryRoutes(runtime));
     app.route("/api/v1/academics",createAcademicAttachmentRoutes(runtime));
+    app.route("/api/v1/academics",createSupervisionComplianceRoutes(runtime));
   },
   registerJobs(registry){
     registry.register("academics.ocr.lesson_plan", processLessonPlanOcrJob);

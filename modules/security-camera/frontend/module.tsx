@@ -1,4 +1,4 @@
-import { Camera } from "lucide-react";
+import { Archive, Camera, Cctv, Inbox, LayoutGrid, LifeBuoy, Scale, ScanSearch, ShieldCheck, Siren, Wrench } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { SecurityCameraWorkspace } from "./SecurityCameraWorkspace";
 import { SecurityCameraArchive } from "./SecurityCameraArchive";
@@ -36,17 +36,17 @@ const moduleDefinition:FrontendModuleDefinition={
     "security-camera-governance":{scope:"school:read",view:SecurityCameraGovernance},
   },
   navigation:[{label:"Security",icon:Camera,order:43,items:[
-    {label:"Cameras",path:"security-camera",scope:"school:read"},
-    {label:"Monitor wall",path:"security-camera-wall",scope:"school:read"},
-    {label:"Events",path:"security-camera-events",scope:"school:read"},
-    {label:"Archive",path:"security-camera-archive",scope:"school:read"},
-    {label:"Integrity",path:"security-camera-integrity",scope:"school:read"},
-    {label:"Forensics",path:"security-camera-forensics",scope:"school:read"},
-    {label:"Fleet",path:"security-camera-fleet",scope:"school:read"},
-    {label:"Operations",path:"security-camera-operations",scope:"school:read"},
-    {label:"Resilience",path:"security-camera-resilience",scope:"school:read"},
-    {label:"Alerts inbox",path:"security-camera-inbox",scope:"school:read"},
-    {label:"Governance",path:"security-camera-governance",scope:"school:read"},
+    {label:"Cameras",path:"security-camera",scope:"school:read",icon:Camera},
+    {label:"Monitor wall",path:"security-camera-wall",scope:"school:read", icon: LayoutGrid},
+    {label:"Events",path:"security-camera-events",scope:"school:read",icon:Siren},
+    {label:"Archive",path:"security-camera-archive",scope:"school:read",icon:Archive},
+    {label:"Integrity",path:"security-camera-integrity",scope:"school:read",icon:ShieldCheck},
+    {label:"Forensics",path:"security-camera-forensics",scope:"school:read",icon:ScanSearch},
+    {label:"Fleet",path:"security-camera-fleet",scope:"school:read",icon:Cctv},
+    {label:"Operations",path:"security-camera-operations",scope:"school:read",icon:Wrench},
+    {label:"Resilience",path:"security-camera-resilience",scope:"school:read",icon:LifeBuoy},
+    {label:"Alerts inbox",path:"security-camera-inbox",scope:"school:read", icon: Inbox},
+    {label:"Governance",path:"security-camera-governance",scope:"school:read",icon:Scale},
   ]}],
 };
 export default moduleDefinition;

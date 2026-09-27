@@ -28,7 +28,7 @@
 .laitc-message{display:flex;gap:8px;max-width:78%;margin-bottom:13px}
 .laitc-message.user{margin-left:auto;flex-direction:row-reverse}
 .laitc-message>div{padding:11px 13px;border:1px solid var(--t-line);border-radius:14px;background:#fff;min-width:0}
-.laitc-message.user>div{background:#155f45;border-color:#155f45;color:#fff}
+.laitc-message.user>div{background:#115e59;border-color:#115e59;color:#fff}
 .laitc-message.error>div{background:#fff5f5;border-color:#f0cccc;color:#a42e2e}
 .laitc-message-avatar{width:30px;height:30px;flex:0 0 auto;border-radius:10px;background:#e4f0ea;color:#147650;display:grid;place-items:center;font-size:9px;font-weight:900}
 .laitc-message.user .laitc-message-avatar{background:#d8e6df}

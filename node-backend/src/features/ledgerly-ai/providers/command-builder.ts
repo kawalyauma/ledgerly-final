@@ -3,9 +3,10 @@ import type { LedgerlyAiConfig, LedgerlyAiProviderId } from "../config.js";
 import type { LedgerlyAiSandbox } from "./types.js";
 import { ProviderSessionStore } from "./session.js";
 
-function ensureInside(root:string,candidate:string){
+function ensureInside(root:string,candidate:string,repositoryRoot:string|undefined,sandbox:LedgerlyAiSandbox){
   const resolvedRoot=path.resolve(root)+path.sep;
   const resolved=path.resolve(candidate);
+  if(sandbox==="workspace-write"&&repositoryRoot&&resolved===path.resolve(repositoryRoot))return resolved;
   if(!(resolved+path.sep).startsWith(resolvedRoot)){
     throw new Error("Ledgerly AI provider workspace escaped the configured work root.");
   }
@@ -25,9 +26,9 @@ export class ProviderCommandBuilder {
     private readonly sessions: ProviderSessionStore,
   ) {}
 
-  build(provider: LedgerlyAiProviderId, cliArgs: string[], workspacePath: string, sandbox: LedgerlyAiSandbox): ProviderCommand {
+  build(provider: LedgerlyAiProviderId, cliArgs: string[], workspacePath: string, sandbox: LedgerlyAiSandbox, runtimePaths?:{attachmentRoot?:string;outputRoot?:string}): ProviderCommand {
     const env = this.sessions.environment(provider);
-    const safeWorkspace=ensureInside(this.config.LEDGERLY_AI_WORK_ROOT,workspacePath);
+    const safeWorkspace=ensureInside(this.config.LEDGERLY_AI_WORK_ROOT,workspacePath,this.config.LEDGERLY_AI_REPO_ROOT,sandbox);
     if (this.config.LEDGERLY_AI_EXECUTION_MODE === "local") {
       return {
         command: provider === "codex" ? this.config.LEDGERLY_AI_CODEX_BIN : this.config.LEDGERLY_AI_CLAUDE_BIN,
@@ -40,21 +41,18 @@ export class ProviderCommandBuilder {
     const image = provider === "codex" ? this.config.LEDGERLY_AI_CODEX_IMAGE : this.config.LEDGERLY_AI_CLAUDE_IMAGE;
     const sessionHome = path.resolve(this.sessions.home(provider));
     const containerSessionTarget = provider === "codex" ? "/home/ledgerly-ai/.codex" : "/home/ledgerly-ai";
-    // workspace-write (engineering-incident) jobs run the CLI's own bubblewrap
-    // sandbox, which needs to create a nested mount/user namespace. Docker's
-    // default seccomp/AppArmor profile and a stripped capability set block
-    // that namespace creation outright, so those jobs get a narrower,
-    // deliberately relaxed profile instead of the standard hardened one.
-    // read-only (chat/named-employee) jobs never take this branch.
     const isWorkspaceWrite = sandbox === "workspace-write";
-    // Codex enforces both read-only and workspace-write modes with its own
-    // Linux sandbox. That sandbox needs a nested mount/user namespace even
-    // when it is only reading files (for example an uploaded OCR image).
-    // Keep the host bind explicitly read-only for read-only requests while
-    // allowing the namespace setup inside this already-isolated container.
-    const needsNestedSandbox = provider === "codex" || isWorkspaceWrite;
+    // Codex relies on this outer Docker boundary; nesting its bubblewrap sandbox
+    // fails on loopback setup. Claude workspace-write still needs its own
+    // namespace support.
+    const needsNestedSandbox = provider === "claude-code" && isWorkspaceWrite;
     const containerName = `ledgerly-ai-${provider}-${path.basename(safeWorkspace)}-${Date.now()}`
       .replace(/[^a-zA-Z0-9_.-]/g,"-").slice(0,120);
+    const repositoryWorkspace=Boolean(this.config.LEDGERLY_AI_REPO_ROOT)
+      && safeWorkspace===path.resolve(this.config.LEDGERLY_AI_REPO_ROOT);
+    const workspaceSource=repositoryWorkspace
+      ? (this.config.LEDGERLY_AI_HOST_REPO_ROOT||this.config.LEDGERLY_AI_REPO_ROOT)
+      : safeWorkspace;
     const containerArgs = [
       "run", "--rm",
       "--name", containerName,
@@ -73,14 +71,16 @@ export class ProviderCommandBuilder {
       "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size="+String(this.config.LEDGERLY_AI_WORKER_TMPFS_MB)+"m",
       "-e", "HOME=/home/ledgerly-ai",
       ...(provider === "codex" ? ["-e", "CODEX_HOME=/home/ledgerly-ai/.codex"] : []),
-      "--mount", `type=bind,src=${safeWorkspace},dst=/workspace${isWorkspaceWrite ? "" : ",readonly"}`,
+      "--mount", `type=bind,src=${workspaceSource},dst=/workspace${isWorkspaceWrite ? "" : ",readonly"}`,
       "--mount", `type=bind,src=${sessionHome},dst=${containerSessionTarget}`,
+      ...(runtimePaths?.attachmentRoot?["--mount",`type=bind,src=${path.resolve(runtimePaths.attachmentRoot)},dst=/attachments,readonly`]:[]),
+      ...(runtimePaths?.outputRoot?["--mount",`type=bind,src=${path.resolve(runtimePaths.outputRoot)},dst=/outputs`]:[]),
       // A workspace under LEDGERLY_AI_WORK_ROOT is a `git worktree`, whose .git file points at
       // an admin dir inside the main repo's .git/worktrees/<id> by absolute path. Without the
       // main repo mounted at that same path, every git command inside the container fails with
       // "gitdir ... does not exist" — this is the container's only view of it, so it must land
       // at the identical absolute path the host/queue container uses.
-      "--mount", `type=bind,src=${this.config.LEDGERLY_AI_HOST_REPO_ROOT},dst=${this.config.LEDGERLY_AI_REPO_ROOT},readonly`,
+      ...(!repositoryWorkspace?["--mount", `type=bind,src=${this.config.LEDGERLY_AI_HOST_REPO_ROOT},dst=${this.config.LEDGERLY_AI_REPO_ROOT},readonly`]:[]),
       "-w", "/workspace",
       image,
       ...cliArgs,

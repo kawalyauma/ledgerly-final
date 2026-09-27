@@ -11,9 +11,14 @@ export type FrontendNavigationItem = {
   path: string;
   scope?: string;
   admin?: boolean;
+  icon?: ElementType;
+  /** Nested pages rendered as a collapsible branch under this item in the global sidebar. */
+  children?: FrontendNavigationItem[];
 };
 
 export type FrontendNavigationGroup = {
+  /** Stable id used by the per-organization sidebar layout; defaults to "<moduleKey>:<label>". */
+  key?: string;
   label: string;
   icon: ElementType;
   order?: number;

@@ -21,6 +21,14 @@ export const post=<T>(p:string,b:unknown,headers?:HeadersInit)=>api<T>(p,{method
 export const put=<T>(p:string,b:unknown)=>api<T>(p,{method:"PUT",body:JSON.stringify(b)});
 export const patch=<T>(p:string,b:unknown)=>api<T>(p,{method:"PATCH",body:JSON.stringify(b)});
 export const del=(p:string)=>api<void>(p,{method:"DELETE"});
+export async function postStream(path:string,body:unknown,extraHeaders?:HeadersInit,retry=true){
+  const headers=new Headers(extraHeaders);headers.set("Accept","text/event-stream");headers.set("Content-Type","application/json");
+  const token=authStore.getAccess();if(token)headers.set("Authorization",`Bearer ${token}`);
+  let response:Response;try{response=await fetch(`/api/v1${path}`,{method:"POST",headers,body:JSON.stringify(body)});}catch{throw new ApiError(0,"NETWORK_ERROR","Unable to reach the finance service");}
+  if(response.status===401&&retry&&authStore.getRefresh()&&await refresh())return postStream(path,body,extraHeaders,false);
+  if(!response.ok){const payload=await response.json().catch(()=>({})) as {error?:{code?:string;message?:string;details?:unknown}};throw new ApiError(response.status,payload.error?.code||"REQUEST_FAILED",payload.error?.message||`Request failed (${response.status})`,payload.error?.details);}
+  return response;
+}
 export const can=(p:Principal|null,s:string)=>!!p&&(p.role==="owner"||p.role==="admin"||p.scopes.includes(s));
 export async function downloadFile(path:string,filename:string){const response=await fetch(`/api/v1${path}`,{headers:{Authorization:`Bearer ${authStore.getAccess()||""}`}});if(!response.ok){const payload=await response.clone().json().catch(()=>({})) as {error?:{code?:string;message?:string;details?:unknown}};throw new ApiError(response.status,payload.error?.code||"DOWNLOAD_FAILED",payload.error?.message||`The file could not be downloaded (${response.status})`,payload.error?.details)}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
 

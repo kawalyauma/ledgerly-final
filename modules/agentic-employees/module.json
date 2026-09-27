@@ -5,7 +5,7 @@
   "description": "Tenant-safe Ledgerly AI employees with managed execution, governed tools/actions, memory, advanced reporting, a high-end Agentic Command Center with searchable slash commands, composite multi-tool reports and guided evidence analysis, and Forge-guided custom AI employee creation.",
   "category": "automation",
   "core": false,
-  "active": true,
+  "active": false,
   "manifest": {
     "standalone": true,
     "requiresModules": [

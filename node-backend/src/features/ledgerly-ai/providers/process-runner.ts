@@ -73,6 +73,13 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
     const capture = (stream: "stdout" | "stderr", line: string) => {
       const safeLine=redactLedgerlyAiText(line);
       const bytes = Buffer.byteLength(safeLine, "utf8");
+      // Past the budget, still keep the provider's final answer (Claude "result", Codex
+      // agent message / turn summary); verbose tool output must not swallow it.
+      if (capturedBytes + bytes > options.maxOutputBytes && stream === "stdout" && bytes <= 1024 * 1024 && isTerminalLine(safeLine)) {
+        stdoutLines.push(safeLine);
+        emit(parseLine(stream, safeLine));
+        return;
+      }
       if (capturedBytes + bytes > options.maxOutputBytes) {
         if (!truncationEmitted) {
           truncationEmitted = true;
@@ -138,4 +145,12 @@ export function runProviderProcess(options: ProcessRunOptions): Promise<ProcessR
       });
     });
   });
+}
+
+function isTerminalLine(line: string) {
+  if (!line.startsWith("{")) return false;
+  try {
+    const data = JSON.parse(line) as { type?: string; item?: { type?: string } };
+    return data.type === "result" || data.type === "turn.completed" || (data.type === "item.completed" && data.item?.type === "agent_message");
+  } catch { return false; }
 }

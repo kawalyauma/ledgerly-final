@@ -76,7 +76,16 @@ export class LedgerlyAiProviderRuntime {
       await mkdir(workspacePath, { recursive: true, mode: 0o700 });
       const controller = new AbortController();
       this.activeControllers.set(request.id, controller);
-      const candidates = await this.router.rank(request.taskKind);
+      if (request.providerOverride) {
+        const disabled = new Set(
+          this.config.LEDGERLY_AI_DISABLED_PROVIDERS.split(",").map((value) => value.trim()).filter(Boolean),
+        );
+        if (disabled.has(request.providerOverride)) {
+          this.activeControllers.delete(request.id);
+          throw new Error(`The ${request.providerOverride} provider is currently disabled by an administrator.`);
+        }
+      }
+      const candidates = request.providerOverride ? [request.providerOverride] : await this.router.rank(request.taskKind);
       const failures: Array<{ provider: LedgerlyAiProviderId; error: string }> = [];
       try {
         await this.auditEngineeringExecution(request,"ledgerly_ai.security.engineering_execution_started");

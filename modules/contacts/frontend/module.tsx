@@ -9,7 +9,7 @@ const moduleDefinition: FrontendModuleDefinition = {
   version: "1.0.0",
   order: 15,
   routes: { contacts: { scope: "contacts:read", view: ContactsPage } },
-  navigation: [{ label: "Contacts", icon: ContactRound, order: 25, items: [{ label: "People & organizations", path: "contacts", scope: "contacts:read" }] }],
+  navigation: [{ label: "Contacts", icon: ContactRound, order: 25, items: [{ label: "People & organizations", path: "contacts", scope: "contacts:read", icon: ContactRound}] }],
 };
 
 export default moduleDefinition;

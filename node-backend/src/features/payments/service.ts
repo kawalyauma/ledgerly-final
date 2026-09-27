@@ -3,6 +3,7 @@ import { AppError } from "../../http/errors.js";
 import type { Runtime } from "../../runtime.js";
 import { createId } from "../core-identity/security.js";
 import { createJournal, postJournal, type JournalLineInput } from "../finance-core/service.js";
+import { sharedLedgerDimensions, type LedgerDimensionValue } from "../finance-core/dimensions.js";
 
 type Db = Pool | PoolClient;
 export type PaymentType = "receipt" | "payment";
@@ -197,9 +198,15 @@ export async function postPayment(runtime: Runtime, organizationId: string, acto
 
     const receipt = payment.type === "receipt";
     const narration = `${receipt ? "Receipt" : "Payment"} ${payment.number}`;
+    const allocatedDimensions = allocations.length ? await lock.client.query<{ dimensions: Record<string, LedgerDimensionValue> }>(
+      `SELECT dimensions_json AS dimensions FROM document_lines
+       WHERE organization_id=$1 AND document_id=ANY($2::text[]) ORDER BY document_id,id`,
+      [organizationId, allocations.map(allocation => allocation.documentId)],
+    ) : null;
+    const controlDimensions = sharedLedgerDimensions(allocatedDimensions?.rows.map(row => row.dimensions) ?? []);
     const lines: JournalLineInput[] = [
       { accountId: payment.bankAccountId, description: narration, contactId: payment.contactId, ...(receipt ? { debitMinor: payment.amountMinor } : { creditMinor: payment.amountMinor }) },
-      { accountId: payment.controlAccountId, description: narration, contactId: payment.contactId, ...(receipt ? { creditMinor: payment.amountMinor } : { debitMinor: payment.amountMinor }) },
+      { accountId: payment.controlAccountId, description: narration, contactId: payment.contactId, dimensions: controlDimensions, ...(receipt ? { creditMinor: payment.amountMinor } : { debitMinor: payment.amountMinor }) },
     ];
     const journal = await createJournal(runtime, organizationId, actorId, {
       transactionDate: payment.paymentDate,

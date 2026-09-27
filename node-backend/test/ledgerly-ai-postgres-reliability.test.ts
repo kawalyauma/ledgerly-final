@@ -106,6 +106,26 @@ describeDb("Ledgerly AI PostgreSQL reliability integration",()=>{
       .rejects.toMatchObject({code:"LEDGERLY_AI_MEMORY_NOT_FOUND"});
   });
 
+  it("persists an interrupted provider checkpoint and retires it after a successful resume",async()=>{
+    const repository=new LedgerlyAiGatewayRepository(pool);
+    const chat=await repository.createChat({principal:principalA,title:"Resumable request"});
+    const interrupted=await repository.createJob({
+      principal:principalA,chatId:chat.id,correlationId:"corr_resume_1",taskKind:"chat",request:{message:"long task"},
+    });
+    await repository.startJob(orgA,interrupted);
+    await repository.checkpointJob(orgA,interrupted,{provider:"codex",sessionId:"thread-resume-123"});
+    await repository.failJob(orgA,interrupted,"provider disconnected");
+    await expect(repository.getResumableJob(principalA,chat.id,interrupted)).resolves.toMatchObject({
+      provider:"codex",sessionId:"thread-resume-123",status:"failed",
+    });
+    const resumed=await repository.createJob({
+      principal:principalA,chatId:chat.id,correlationId:"corr_resume_2",taskKind:"chat",request:{resumeFromJobId:interrupted},
+    });
+    await repository.markJobResumed(orgA,chat.id,interrupted,resumed);
+    await expect(repository.getResumableJob(principalA,chat.id,interrupted))
+      .rejects.toMatchObject({code:"LEDGERLY_AI_JOB_NOT_RESUMABLE"});
+  });
+
   it("materializes tenant-specific named employees and never resolves another tenant's employee ID",async()=>{
     const registry=new LedgerlyAiEmployeeRegistry(pool);
     await registry.ensureBuiltIns(orgA);

@@ -207,13 +207,12 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
       const value = String(args.query || "").trim(), student = await findStudent(ctx.db, organizationId, value);
       if (!student) return { found: false };
       const balance = await ctx.db.prepare(`
-        SELECT COALESCE(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0)),0) AS balanceMinor,COUNT(*) AS chargeCount
-        FROM school_student_fee_charges c JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.student_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid')
+        SELECT COALESCE(SUM(l.debit_minor-l.credit_minor),0) AS balanceMinor,COUNT(DISTINCT j.id) AS transactionCount
+        FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+        JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
+        WHERE l.organization_id=? AND l.dimensions_json->>'schoolStudentId'=? AND a.subtype='school_fee_receivable' AND j.status='posted'
       `).bind(organizationId, String(student.id)).first<any>();
-      return { found: true, student, balanceMinor: Number(balance?.balanceMinor || 0), chargeCount: Number(balance?.chargeCount || 0) };
+      return { found: true, student, balanceMinor: Number(balance?.balanceMinor || 0), transactionCount: Number(balance?.transactionCount || 0) };
     }
 
     case "fee_arrears_summary": {
@@ -221,13 +220,12 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
       const limit = clampLimit(args.limit, 10, 30);
       const rows = await ctx.db.prepare(`
         SELECT s.id,s.admission_number AS admissionNumber,s.first_name||' '||s.last_name AS studentName,
-               ROUND(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0))) AS balanceMinor
-        FROM school_student_fee_charges c JOIN school_students s ON s.id=c.student_id AND s.organization_id=c.organization_id
-        JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid') GROUP BY s.id
-        HAVING SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0))>0 ORDER BY balanceMinor DESC LIMIT ?
+               ROUND(SUM(l.debit_minor-l.credit_minor)) AS balanceMinor
+        FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+        JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
+        JOIN school_students s ON s.id=l.dimensions_json->>'schoolStudentId' AND s.organization_id=l.organization_id
+        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted' GROUP BY s.id
+        HAVING SUM(l.debit_minor-l.credit_minor)>0 ORDER BY balanceMinor DESC LIMIT ?
       `).bind(organizationId, limit).all();
       return { arrears: rows.results };
     }
@@ -235,13 +233,14 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
     case "fee_collection_summary": {
       need(ctx, "school:read");
       const row = await ctx.db.prepare(`
-        SELECT COALESCE(SUM(c.total_minor),0) AS billedMinor,COALESCE(SUM(c.credited_minor),0) AS creditedMinor,
-               COALESCE(SUM(c.written_off_minor),0) AS writtenOffMinor,COALESCE(SUM(COALESCE(p.paid_minor,0)),0) AS paidMinor,
-               COALESCE(SUM(c.total_minor-c.credited_minor-c.written_off_minor-COALESCE(p.paid_minor,0)),0) AS outstandingMinor
-        FROM school_student_fee_charges c JOIN documents d ON d.id=c.document_id AND d.organization_id=c.organization_id
-        LEFT JOIN (SELECT organization_id,document_id,SUM(amount_minor) AS paid_minor FROM payment_allocations WHERE reversed_at IS NULL GROUP BY organization_id,document_id) p
-          ON p.organization_id=c.organization_id AND p.document_id=c.document_id
-        WHERE c.organization_id=? AND c.status<>'voided' AND d.status IN ('open','partially_paid','paid')
+        SELECT COALESCE(SUM(l.debit_minor),0) AS billedMinor,
+               COALESCE(SUM(CASE WHEN j.source_type='schoolpay_payment' THEN l.credit_minor ELSE 0 END),0) AS paidMinor,
+               COALESCE(SUM(CASE WHEN j.source_type IN ('schoolpay_credit','schoolpay_bursary') THEN l.credit_minor ELSE 0 END),0) AS creditedMinor,
+               COALESCE(SUM(CASE WHEN j.source_type='school_fee_writeoff' THEN l.credit_minor ELSE 0 END),0) AS writtenOffMinor,
+               COALESCE(SUM(l.debit_minor-l.credit_minor),0) AS outstandingMinor
+        FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+        JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
+        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted'
       `).bind(organizationId).first<any>();
       return { billedMinor: Number(row?.billedMinor || 0), paidMinor: Number(row?.paidMinor || 0), creditedMinor: Number(row?.creditedMinor || 0), writtenOffMinor: Number(row?.writtenOffMinor || 0), outstandingMinor: Number(row?.outstandingMinor || 0) };
     }

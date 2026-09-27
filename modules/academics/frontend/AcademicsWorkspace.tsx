@@ -31,6 +31,7 @@ import {
   post,
   uploadFile,
 } from "../../../web/api";
+import { useHashView } from "../../../web/navigation";
 import {
   Badge,
   Button,
@@ -43,6 +44,7 @@ import {
 } from "../../../web/components/ui";
 import * as XLSX from "xlsx";
 import { LearningCycleWorkspace } from "./LearningCycleWorkspace";
+import { SupervisionWorkspace } from "./SupervisionWorkspace";
 
 const base = "/academics";
 type R = Record<string, any>;
@@ -53,6 +55,7 @@ type Setup = {
   streams: R[];
   subjects: R[];
   teachers: R[];
+  students: R[];
   teacherAllocations: R[];
 };
 const DAYS = [
@@ -235,6 +238,7 @@ function useSetup() {
     streams: [],
     subjects: [],
     teachers: [],
+    students: [],
     teacherAllocations: [],
   });
 }
@@ -273,13 +277,6 @@ function Evidence({
 }
 
 export function AcademicsWorkspace() {
-  const [view, setView] = useState(
-    () => sessionStorage.getItem("ledgerly.academics.view") || "dashboard",
-  );
-  const choose = (v: string) => {
-    sessionStorage.setItem("ledgerly.academics.view", v);
-    setView(v);
-  };
   const items = [
     ["dashboard", "Dashboard", BarChart3],
     ["schemes", "Schemes & lessons", BookMarked],
@@ -287,30 +284,9 @@ export function AcademicsWorkspace() {
     ["supervision", "Supervision", UserCheck],
     ["imports", "Imports", Upload],
   ] as const;
+  const [view] = useHashView("academics", "dashboard", items.map((item) => item[0]));
   return (
     <div className="acad-shell">
-      <aside className="acad-sidebar">
-        <div className="acad-brand">
-          <BookOpenCheck size={22} />
-          <div>
-            <b>Academics</b>
-            <small>Teaching & supervision</small>
-          </div>
-        </div>
-        <nav>
-          {items.map(([k, l, I]) => (
-            <button key={k} className={view === k ? "active" : ""} onClick={() => choose(k)}>
-              <I size={17} />
-              <span>{l}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="acad-sidebar-foot">
-          <small>Depends on</small>
-          <b>School Management</b>
-          <span>Exams remain separate</span>
-        </div>
-      </aside>
       <section className="acad-work">
         {view === "dashboard" ? (
           <Dashboard />
@@ -908,6 +884,11 @@ function EntryModal({
 }
 
 function Supervision() {
+  const setup=useSetup();
+  return <SupervisionWorkspace setup={setup.data}/>;
+}
+
+function LegacySupervision() {
   const setup = useSetup(),
     observations = useLoad<R[]>(`${base}/supervision/observations`, []),
     inspections = useLoad<R[]>(`${base}/record-inspections`, []),

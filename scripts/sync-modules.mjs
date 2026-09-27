@@ -14,6 +14,7 @@ const catalog = [];
 const seenKeys = new Set();
 for (const name of entries) {
   const manifestPath = path.join(modulesDir, name, "module.json");
+  let active = true;
   try {
     const raw = JSON.parse(await readFile(manifestPath, "utf8"));
     if (!raw.key || !raw.name || !raw.version) throw new Error("key, name and version are required");
@@ -22,6 +23,7 @@ for (const name of entries) {
     }
     if (seenKeys.has(raw.key)) throw new Error(`duplicate module key '${raw.key}'`);
     seenKeys.add(raw.key);
+    active = raw.active !== false;
     catalog.push({
       key: String(raw.key),
       name: String(raw.name),
@@ -29,12 +31,13 @@ for (const name of entries) {
       description: String(raw.description || `${raw.name} module.`),
       category: String(raw.category || "business"),
       core: Boolean(raw.core),
-      active: raw.active !== false,
+      active,
       manifest: raw.manifest && typeof raw.manifest === "object" ? raw.manifest : {},
     });
   } catch (error) {
     throw new Error(`Module '${name}' is missing or has an invalid module.json: ${error.message}`);
   }
+  if (!active) continue;
   const backendEntry = path.join(modulesDir, name, "backend", "module.ts");
   try {
     await access(backendEntry);

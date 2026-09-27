@@ -59,7 +59,12 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
 
   async execute(request: ProviderRequest, signal?: AbortSignal): Promise<ProviderResult> {
     const sandbox = request.sandbox ?? "read-only";
-    const base = this.config.LEDGERLY_AI_EXECUTION_MODE==="local"&&sandbox==="workspace-write"
+    // Docker is the security boundary for provider jobs. Running Codex's bubblewrap
+    // sandbox inside that container fails while configuring its nested loopback
+    // interface (RTM_NEWADDR), so let the outer container enforce mounts, resource
+    // limits, user identity, and network policy instead.
+    const usesOuterSandbox = this.config.LEDGERLY_AI_EXECUTION_MODE === "docker";
+    const base = usesOuterSandbox || sandbox === "workspace-write"
       ? ["exec", "--skip-git-repo-check", "--json", "--dangerously-bypass-approvals-and-sandbox"]
       : ["exec", "--skip-git-repo-check", "--json", "--sandbox", sandbox];
     if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
@@ -67,11 +72,12 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
     for (const imagePath of request.imagePaths ?? []) {
       const resolved = path.resolve(imagePath);
       const relative = path.relative(workspace, resolved);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) {
-        throw new Error("Ledgerly AI image escaped the configured workspace.");
-      }
+      const attachmentRelative=request.attachmentRoot?path.relative(path.resolve(request.attachmentRoot),resolved):"..";
+      const inWorkspace=!relative.startsWith("..")&&!path.isAbsolute(relative);
+      const inAttachments=!attachmentRelative.startsWith("..")&&!path.isAbsolute(attachmentRelative);
+      if (!inWorkspace&&!inAttachments) throw new Error("Ledgerly AI image escaped the configured request files.");
       const providerImagePath = this.config.LEDGERLY_AI_EXECUTION_MODE === "docker"
-        ? path.posix.join("/workspace", relative.split(path.sep).join(path.posix.sep))
+        ? path.posix.join(inAttachments?"/attachments":"/workspace",(inAttachments?attachmentRelative:relative).split(path.sep).join(path.posix.sep))
         : resolved;
       // Use the equals form because Codex's variadic --image option otherwise
       // consumes the positional prompt as an additional image path.
@@ -80,7 +86,7 @@ export class CodexCliProvider implements LedgerlyAiProviderAdapter {
     const args = request.sessionId
       ? [...base, "resume", request.sessionId, request.prompt]
       : [...base, request.prompt];
-    const command = this.commands.build(this.id, args, request.workspacePath, sandbox);
+    const command = this.commands.build(this.id, args, request.workspacePath, sandbox,{attachmentRoot:request.attachmentRoot,outputRoot:request.outputRoot});
     const result = await runProviderProcess({
       ...command,
       timeoutMs: request.timeoutMs ?? this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,

@@ -12,6 +12,8 @@ export const inventoryFeature: BackendFeature = {
     app.use("/api/v1/inventory", auth); app.use("/api/v1/inventory/*", auth);
     app.route("/api/v1/products", createProductRoutes(runtime));
     app.route("/api/v1/inventory", createInventoryRoutes(runtime));
+    // Inventory page reads reorder suggestions, reservations and stock counts under /operations/inventory.
+    app.route("/api/v1/operations/inventory", createInventoryRoutes(runtime));
   },
   registerJobs(registry) {
     registry.register("inventory.release-expired-reservations", async (_job, runtime) => {

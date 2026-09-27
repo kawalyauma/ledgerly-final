@@ -15,8 +15,11 @@ export type ProviderRequest = {
   taskKind: LedgerlyAiTaskKind;
   workspacePath?: string;
   imagePaths?: string[];
+  attachmentRoot?: string;
+  outputRoot?: string;
   sessionId?: string;
   sandbox?: LedgerlyAiSandbox;
+  providerOverride?: LedgerlyAiProviderId;
   maxTurns?: number;
   timeoutMs?: number;
   onEvent?: (event: ProviderStreamEvent) => void | Promise<void>;

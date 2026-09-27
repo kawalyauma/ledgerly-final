@@ -37,6 +37,9 @@ services:
     network_mode: host
     restart: "no"
     command: ["node", "dist/db/migrate.js"]
+    env_file: &backend-env-file
+      - path: .env
+        required: false
     environment: &backend-env
       NODE_ENV: production
       DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@127.0.0.1:5432/ledgerly
@@ -71,7 +74,7 @@ services:
       LEDGERLY_AI_DOCKER_BIN: ${LEDGERLY_AI_DOCKER_BIN:-docker}
       LEDGERLY_AI_CODEX_BIN: ${LEDGERLY_AI_CODEX_BIN:-codex}
       LEDGERLY_AI_CLAUDE_BIN: ${LEDGERLY_AI_CLAUDE_BIN:-claude}
-      LEDGERLY_AI_JOB_TIMEOUT_MS: ${LEDGERLY_AI_JOB_TIMEOUT_MS:-300000}
+      LEDGERLY_AI_JOB_TIMEOUT_MS: ${LEDGERLY_AI_JOB_TIMEOUT_MS:-1800000}
       LEDGERLY_AI_MAX_OUTPUT_BYTES: ${LEDGERLY_AI_MAX_OUTPUT_BYTES:-4194304}
       LEDGERLY_AI_RETRY_ATTEMPTS: ${LEDGERLY_AI_RETRY_ATTEMPTS:-1}
       LEDGERLY_AI_RETRY_BACKOFF_MS: ${LEDGERLY_AI_RETRY_BACKOFF_MS:-1000}
@@ -83,6 +86,7 @@ services:
       LEDGERLY_AI_WORKER_NOFILE: ${LEDGERLY_AI_WORKER_NOFILE:-1024}
       LEDGERLY_AI_WORKER_TMPFS_MB: ${LEDGERLY_AI_WORKER_TMPFS_MB:-512}
       LEDGERLY_AI_WORKER_MAX_TURNS: ${LEDGERLY_AI_WORKER_MAX_TURNS:-12}
+      LEDGERLY_AI_CLAUDE_MAX_TURNS: ${LEDGERLY_AI_CLAUDE_MAX_TURNS:-200}
       LEDGERLY_AI_SESSION_ROOT: /var/lib/ledgerly-ai/sessions
       LEDGERLY_AI_WORK_ROOT: /var/lib/ledgerly-ai/workspaces
       LEDGERLY_AI_MAX_CONCURRENCY: ${LEDGERLY_AI_MAX_CONCURRENCY:-4}
@@ -109,6 +113,7 @@ services:
       LEDGERLY_AI_GITHUB_API_URL: ${LEDGERLY_AI_GITHUB_API_URL:-https://api.github.com}
       LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS: ${LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS:-300}
       LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS: ${LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS:-600}
+      LEDGERLY_AI_INCIDENT_CHAT_MIRROR_ENABLED: ${LEDGERLY_AI_INCIDENT_CHAT_MIRROR_ENABLED:-true}
       LEDGERLY_AI_MONITOR_DB_WARN_MS: ${LEDGERLY_AI_MONITOR_DB_WARN_MS:-500}
       LEDGERLY_AI_MONITOR_DB_CRITICAL_MS: ${LEDGERLY_AI_MONITOR_DB_CRITICAL_MS:-2000}
       LEDGERLY_AI_MONITOR_SLOW_QUERY_MS: ${LEDGERLY_AI_MONITOR_SLOW_QUERY_MS:-10000}
@@ -132,6 +137,7 @@ services:
     network_mode: host
     restart: unless-stopped
     command: ["node", "dist/server.js"]
+    env_file: *backend-env-file
     environment:
       <<: *backend-env
       PORT: ${LEDGERLY_API_PORT:-8787}
@@ -154,6 +160,7 @@ services:
     network_mode: host
     restart: unless-stopped
     command: ["node", "dist/queue/worker.js"]
+    env_file: *backend-env-file
     environment: *backend-env
     group_add:
       - "${DOCKER_GID:-999}"
@@ -174,12 +181,27 @@ services:
     network_mode: host
     restart: unless-stopped
     command: ["node", "dist/scheduler/scheduler.js"]
+    env_file: *backend-env-file
     environment: *backend-env
     volumes:
       - app-storage:/data/storage
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+
+  web:
+    image: nginx:1.27-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      LEDGERLY_WEB_LISTEN: ${LEDGERLY_WEB_LISTEN:-127.0.0.1:8090}
+      LEDGERLY_API_PORT: ${LEDGERLY_API_PORT:-8787}
+      NGINX_ENVSUBST_FILTER: "^LEDGERLY_"
+    volumes:
+      - ../dist:/usr/share/nginx/html:ro
+      - ./deploy/web/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      - api
 
 volumes:
   postgres-data:

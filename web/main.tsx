@@ -6,6 +6,7 @@ import { installDynamicSchoolSelectors } from "./dynamicSchoolSelectors";
 import { installLegacyPrintBridge } from "./printing";
 import { installJournalReversalGuard } from "./reversalGuard";
 import "./styles.css";
+import "./theme.css";
 
 installLegacyPrintBridge();
 installDynamicSchoolSelectors();

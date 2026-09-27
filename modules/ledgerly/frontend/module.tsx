@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  LayoutDashboard, Landmark, ShoppingCart, FolderKanban, Warehouse,
-  Percent, FileBarChart, Building2, Activity,
-} from "lucide-react";
+import { Activity, BookOpen, Building2, CheckCheck, FileBarChart, FolderCog, FolderKanban, HandCoins, KeyRound, Landmark, Layers, LayoutDashboard, Lock, NotebookPen, Package, Percent, PiggyBank, Plug, Puzzle, Receipt, Repeat, Scale, Send, ShieldCheck, ShoppingCart, Tags, Users, Wallet, Warehouse } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { get } from "../../../web/api";
 import { Card, Spinner, Notice } from "../../../web/components/ui";
@@ -18,6 +15,7 @@ import { TaxPage } from "../../../web/pages/TaxPayrollPages";
 import { OrganizationPage } from "../../../web/pages/OrganizationPages";
 import { TeamPage, ApiKeysPage } from "../../../web/pages/AdminPages";
 import { ModulesPage } from "../../../web/pages/ModulesPage";
+import { OverviewDashboard, WelcomePage, WorkspaceSettingsPage } from "./OverviewPages";
 
 type HealthComponent = { status: string; latencyMs?: number; error?: string };
 type Health = { status: string; timestamp: string; components: Record<string, HealthComponent> };
@@ -43,7 +41,10 @@ const moduleDefinition: FrontendModuleDefinition = {
   version: "1.0.0",
   order: 1,
   routes: {
-    dashboards: { view: DashboardsPage },
+    welcome: { view: WelcomePage },
+    dashboards: { view: OverviewDashboard },
+    customDashboards: { view: DashboardsPage },
+    "workspace-settings": { scope: "admin:read", admin: true, view: WorkspaceSettingsPage },
     "system-status": { view: SystemStatusPage },
 
     accounts: { scope: "accounts:read", view: AccountsPage },
@@ -81,52 +82,52 @@ const moduleDefinition: FrontendModuleDefinition = {
     integrations: { scope: "admin:read", admin: true, view: IntegrationsPage },
   },
   navigation: [
-    { label: "Dashboards", icon: LayoutDashboard, order: 1, items: [
-      { label: "Dashboards", path: "dashboards" },
+    { key: "ledgerly-core:Dashboards", label: "Dashboard", icon: LayoutDashboard, order: 1, items: [
+      { label: "Dashboard", path: "dashboards", icon: LayoutDashboard},
     ] },
     { label: "Accounting", icon: Landmark, order: 5, items: [
-      { label: "Chart of accounts", path: "accounts", scope: "accounts:read" },
-      { label: "Account groups", path: "groups", scope: "accounts:read" },
-      { label: "Dimensions", path: "dimensions", scope: "accounts:read" },
-      { label: "Opening balances", path: "openingBalances", scope: "accounts:write" },
-      { label: "Journals", path: "journals", scope: "journals:read" },
+      { label: "Chart of accounts", path: "accounts", scope: "accounts:read", icon: BookOpen},
+      { label: "Account groups", path: "groups", scope: "accounts:read", icon: Layers},
+      { label: "Dimensions", path: "dimensions", scope: "accounts:read", icon: Tags},
+      { label: "Opening balances", path: "openingBalances", scope: "accounts:write", icon: Scale},
+      { label: "Journals", path: "journals", scope: "journals:read", icon: NotebookPen},
     ] },
     { label: "Sales & Purchasing", icon: ShoppingCart, order: 8, items: [
-      { label: "Products & services", path: "products", scope: "products:read" },
-      { label: "Sales", path: "sales", scope: "documents:read" },
-      { label: "Purchasing", path: "purchasing", scope: "documents:read" },
-      { label: "Receivables", path: "receivables", scope: "documents:read" },
-      { label: "Approvals", path: "approvals", scope: "documents:read" },
+      { label: "Products & services", path: "products", scope: "products:read", icon: Package},
+      { label: "Sales", path: "sales", scope: "documents:read", icon: Receipt},
+      { label: "Purchasing", path: "purchasing", scope: "documents:read", icon: ShoppingCart},
+      { label: "Receivables", path: "receivables", scope: "documents:read", icon: HandCoins},
+      { label: "Approvals", path: "approvals", scope: "documents:read", icon: CheckCheck},
     ] },
     { label: "Operations", icon: FolderKanban, order: 10, items: [
-      { label: "Expenses", path: "expenses", scope: "documents:read" },
-      { label: "Recurring transactions", path: "recurring", scope: "documents:read" },
-      { label: "Projects", path: "projects", scope: "accounts:read" },
+      { label: "Expenses", path: "expenses", scope: "documents:read", icon: Wallet},
+      { label: "Recurring transactions", path: "recurring", scope: "documents:read", icon: Repeat},
+      { label: "Projects", path: "projects", scope: "accounts:read", icon: FolderKanban},
     ] },
     { label: "Banking & Inventory", icon: Warehouse, order: 12, items: [
-      { label: "Banking", path: "banking", scope: "payments:read" },
-      { label: "Inventory", path: "inventory", scope: "products:read" },
+      { label: "Banking", path: "banking", scope: "payments:read", icon: Landmark},
+      { label: "Inventory", path: "inventory", scope: "products:read", icon: Warehouse},
     ] },
     { label: "Tax", icon: Percent, order: 14, items: [
-      { label: "Tax", path: "tax", scope: "reports:read" },
+      { label: "Tax", path: "tax", scope: "reports:read", icon: Percent},
     ] },
     { label: "Planning & Reporting", icon: FileBarChart, order: 16, items: [
-      { label: "Budgets", path: "budgets", scope: "reports:read" },
-      { label: "Period closing", path: "closing", scope: "periods:write" },
-      { label: "Reports", path: "reports", scope: "reports:read" },
-      { label: "Report management", path: "reportManagement", scope: "reports:read" },
-      { label: "Document delivery", path: "documentDelivery", scope: "documents:read" },
+      { label: "Budgets", path: "budgets", scope: "reports:read", icon: PiggyBank},
+      { label: "Period closing", path: "closing", scope: "periods:write", icon: Lock},
+      { label: "Reports", path: "reports", scope: "reports:read", icon: FileBarChart},
+      { label: "Report management", path: "reportManagement", scope: "reports:read", icon: FolderCog},
+      { label: "Document delivery", path: "documentDelivery", scope: "documents:read", icon: Send},
     ] },
     { label: "Organization", icon: Building2, order: 90, items: [
-      { label: "Organization settings", path: "organization", scope: "admin:read" },
-      { label: "Team", path: "team", scope: "admin:read" },
-      { label: "API keys", path: "apiKeys", scope: "admin:read", admin: true },
-      { label: "Modules", path: "modules", scope: "admin:read", admin: true },
-      { label: "Compliance", path: "compliance", scope: "admin:read", admin: true },
-      { label: "Integrations", path: "integrations", scope: "admin:read", admin: true },
+      { label: "Organization settings", path: "organization", scope: "admin:read", icon: Building2},
+      { label: "Team", path: "team", scope: "admin:read", icon: Users},
+      { label: "API keys", path: "apiKeys", scope: "admin:read", admin: true, icon: KeyRound},
+      { label: "Modules & sections", path: "workspace-settings", scope: "admin:read", admin: true, icon: Puzzle},
+      { label: "Compliance", path: "compliance", scope: "admin:read", admin: true, icon: ShieldCheck},
+      { label: "Integrations", path: "integrations", scope: "admin:read", admin: true, icon: Plug},
     ] },
     { label: "System status", icon: Activity, order: 99, items: [
-      { label: "System status", path: "system-status" },
+      { label: "System status", path: "system-status", icon: Activity},
     ] },
   ],
 };

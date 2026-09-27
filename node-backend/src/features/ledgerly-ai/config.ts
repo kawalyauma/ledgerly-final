@@ -23,6 +23,8 @@ const schema = z.object({
   LEDGERLY_AI_WORKER_NOFILE: z.coerce.number().int().min(128).max(65535).default(1024),
   LEDGERLY_AI_WORKER_TMPFS_MB: z.coerce.number().int().min(64).max(4096).default(512),
   LEDGERLY_AI_WORKER_MAX_TURNS: z.coerce.number().int().min(1).max(50).default(12),
+  // Codex has no turn cap, so Claude Code gets a high floor to handle the same heavy jobs.
+  LEDGERLY_AI_CLAUDE_MAX_TURNS: z.coerce.number().int().min(1).max(1000).default(200),
   LEDGERLY_AI_CODEX_BIN: z.string().min(1).default("codex"),
   LEDGERLY_AI_CLAUDE_BIN: z.string().min(1).default("claude"),
   LEDGERLY_AI_DOCKER_BIN: z.string().min(1).default("docker"),
@@ -30,7 +32,7 @@ const schema = z.object({
   LEDGERLY_AI_CLAUDE_IMAGE: z.string().min(1).default("ledgerly-ai-claude-code:local"),
   LEDGERLY_AI_SESSION_ROOT: z.string().min(1).default("/var/lib/ledgerly-ai/sessions"),
   LEDGERLY_AI_WORK_ROOT: z.string().min(1).default("/var/lib/ledgerly-ai/workspaces"),
-  LEDGERLY_AI_JOB_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(3_600_000).default(300_000),
+  LEDGERLY_AI_JOB_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(3_600_000).default(1_800_000),
   LEDGERLY_AI_HEALTH_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(60_000).default(10_000),
   LEDGERLY_AI_MAX_CONCURRENCY: z.coerce.number().int().min(1).max(64).default(4),
   LEDGERLY_AI_MAX_QUEUE: z.coerce.number().int().min(1).max(10_000).default(100),
@@ -71,6 +73,9 @@ const schema = z.object({
   LEDGERLY_AI_GITHUB_API_URL: z.string().url().default("https://api.github.com"),
   LEDGERLY_AI_INCIDENT_EVENT_COOLDOWN_SECONDS: z.coerce.number().int().min(30).max(86_400).default(300),
   LEDGERLY_AI_INCIDENT_DISPATCH_COOLDOWN_SECONDS: z.coerce.number().int().min(60).max(86_400).default(600),
+  // Incident detection, workflow, and the incident dashboard keep running either way; this only
+  // silences the "Incident team · ..." chats that mirror every workflow step into lai_chats.
+  LEDGERLY_AI_INCIDENT_CHAT_MIRROR_ENABLED: envBoolean(true),
   LEDGERLY_AI_MONITOR_DB_WARN_MS: z.coerce.number().int().min(10).max(60_000).default(500),
   LEDGERLY_AI_MONITOR_DB_CRITICAL_MS: z.coerce.number().int().min(50).max(120_000).default(2_000),
   LEDGERLY_AI_MONITOR_SLOW_QUERY_MS: z.coerce.number().int().min(1_000).max(600_000).default(10_000),

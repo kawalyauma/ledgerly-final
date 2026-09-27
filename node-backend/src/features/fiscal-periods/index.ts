@@ -33,5 +33,7 @@ export const fiscalPeriodsFeature: BackendFeature = {
     app.use("/api/v1/periods/*", auth);
     app.route("/api/v1/fiscal-years", createFiscalYearRoutes(runtime));
     app.route("/api/v1/periods", createFiscalPeriodRoutes(runtime));
+    // Web client (Period closing page) uses the /fiscal-periods name for the same resource.
+    app.route("/api/v1/fiscal-periods", createFiscalPeriodRoutes(runtime));
   },
 };

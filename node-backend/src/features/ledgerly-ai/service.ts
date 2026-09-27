@@ -52,7 +52,7 @@ export class LedgerlyAiFoundationService {
   private startPromise: Promise<void> | null = null;
 
   constructor(
-    private readonly runtime: Runtime,
+    readonly runtime: Runtime,
     env: NodeJS.ProcessEnv | Record<string, unknown> = process.env,
   ) {
     this.config = parseLedgerlyAiConfig(env);
@@ -77,11 +77,10 @@ export class LedgerlyAiFoundationService {
       this.repository,
       this.providers,
       this.memory,
-      this.employees,
-      this.tools,
       this.security,
       this.config,
       runtime.db,
+      runtime.storage,
       this.logger,
     );
     this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway,this.policy);
@@ -104,6 +103,8 @@ export class LedgerlyAiFoundationService {
     if (this.startPromise) return this.startPromise;
     this.startPromise = this.providers.initialize()
       .then(async () => {
+        const recovered=await this.repository.recoverInterruptedJobs();
+        if(recovered>0)this.logger.warn({recovered},"Ledgerly AI recovered interrupted requests after restart");
         if (!this.config.LEDGERLY_AI_STARTUP_HEALTHCHECK) return;
         const health = await this.health();
         if (health.ready) this.logger.info({ health }, "Ledgerly AI startup health check passed");

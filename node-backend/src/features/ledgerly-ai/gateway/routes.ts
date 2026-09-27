@@ -3,18 +3,21 @@ import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { AppError } from "../../../http/errors.js";
 import type { AppEnv } from "../../../http/types.js";
+import type { Runtime } from "../../../runtime.js";
+import { createId } from "../../core-identity/security.js";
 import type { LedgerlyAiTaskKind } from "../providers/types.js";
 import type { LedgerlyAiGatewayRepository } from "./repository.js";
 import type { LedgerlyAiGatewayService } from "./service.js";
-import type { LedgerlyAiEmployeeRegistry } from "../employees/registry.js";
 
 const taskKinds = ["chat","analysis","report","research","code","engineering","testing","operations"] as const;
+const providerIds = ["claude-code","codex"] as const;
 const attachmentSchema=z.object({
+  fileId:z.string().trim().min(1).max(120).optional(),
   name:z.string().trim().min(1).max(160),
-  mimeType:z.enum(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml"]),
-  content:z.string().max(40000),
+  mimeType:z.string().trim().min(1).max(150),
+  content:z.string().max(40000).default(""),
   kind:z.enum(["file","context"]),
-});
+}).refine(item=>item.kind==="context"?Boolean(item.content.trim()):Boolean(item.fileId||item.content),"File attachment is missing its uploaded file id.");
 const requestSchema = z.object({
   message: z.string().trim().min(1).max(30000),
   chatId: z.string().min(1).max(120).optional(),
@@ -22,6 +25,7 @@ const requestSchema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
   activeModule: z.string().trim().min(1).max(120).nullable().optional(),
   taskKind: z.enum(taskKinds).default("chat"),
+  provider: z.enum(providerIds).nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   attachments:z.array(attachmentSchema).max(5)
     .refine(
@@ -29,6 +33,7 @@ const requestSchema = z.object({
       "Attached context is limited to 120 KB per message.",
     )
     .default([]),
+  resumeJobId:z.string().trim().min(1).max(120).optional(),
 });
 
 function idempotencyKey(c: { req: { header(name: string): string | undefined } }) {
@@ -38,7 +43,7 @@ function idempotencyKey(c: { req: { header(name: string): string | undefined } }
 export function createLedgerlyAiGatewayRoutes(
   repository: LedgerlyAiGatewayRepository,
   gateway: LedgerlyAiGatewayService,
-  employees?: LedgerlyAiEmployeeRegistry,
+  runtime:Runtime,
 ) {
   const routes = new Hono<AppEnv>();
 
@@ -100,6 +105,24 @@ export function createLedgerlyAiGatewayRoutes(
     return c.json({data:await repository.listMyChats(c.get("principal"),status.data)});
   });
 
+  routes.post("/my/files",async(c)=>{
+    const principal=c.get("principal"),form=await c.req.formData(),part=form.get("file");
+    if(!(part instanceof File))throw new AppError(422,"FILE_REQUIRED","Choose a file to attach.");
+    if(part.size<=0||part.size>25*1024*1024)throw new AppError(part.size>25*1024*1024?413:422,"INVALID_FILE_SIZE","Chat files must be between 1 byte and 25 MB.");
+    const allowed=new Set(["text/plain","text/markdown","text/csv","application/json","application/xml","text/xml","application/pdf","application/vnd.openxmlformats-officedocument.wordprocessingml.document","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","application/vnd.openxmlformats-officedocument.presentationml.presentation","image/png","image/jpeg","image/webp","image/gif"]);
+    const mime=(part.type||"application/octet-stream").toLowerCase();
+    if(!allowed.has(mime))throw new AppError(415,"UNSUPPORTED_CHAT_FILE","Attach a text, PDF, Word, Excel, PowerPoint, PNG, JPEG, WebP, or GIF file.");
+    const id=createId("laif"),safe=part.name.replace(/[^a-zA-Z0-9._-]+/g,"-").slice(0,160)||"attachment",objectKey=`ledgerly-ai/${principal.organizationId}/inputs/${id}/${safe}`;
+    const bytes=new Uint8Array(await part.arrayBuffer());await runtime.storage.put(objectKey,bytes,mime);
+    try{const file=await repository.createChatFile({principal,id,direction:"input",objectKey,filename:part.name.slice(0,160),mimeType:mime,sizeBytes:bytes.byteLength});return c.json({data:{id:file.id,name:file.filename,mimeType:file.mimeType,sizeBytes:file.sizeBytes,kind:"file"}},201);}catch(error){await runtime.storage.delete(objectKey).catch(()=>{});throw error;}
+  });
+
+  routes.get("/my/files/:id",async(c)=>{
+    const file=await repository.getMyChatFile(c.get("principal"),c.req.param("id")),bytes=await runtime.storage.get(file.objectKey);
+    if(!bytes)throw new AppError(404,"LEDGERLY_AI_FILE_MISSING","The chat file is no longer available.");
+    c.header("Content-Type",file.mimeType);c.header("Content-Length",String(bytes.byteLength));c.header("Content-Disposition",`attachment; filename="${file.filename.replace(/["\r\n]/g,"-")}"`);c.header("X-Content-Type-Options","nosniff");return c.body(bytes as any);
+  });
+
   routes.get("/my/chats/:id", async (c) => {
     const principal=c.get("principal");
     const chat=await repository.getMyChat(principal,c.req.param("id"));
@@ -140,17 +163,13 @@ export function createLedgerlyAiGatewayRoutes(
   routes.post("/chats", async (c) => {
     const parsed = z.object({
       title: z.string().trim().min(1).max(160),
-      agentId: z.string().min(1).max(120).nullable().optional(),
     }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) throw new AppError(422, "VALIDATION_ERROR", "Invalid Ledgerly AI chat.", parsed.error.flatten());
     const principal=c.get("principal");
-    if(parsed.data.agentId&&employees){
-      await employees.resolveSelectable(principal,parsed.data.agentId);
-    }
     const chat = await repository.createChat({
       principal,
       title: parsed.data.title,
-      agentId: parsed.data.agentId,
+      agentId:null,
     });
     return c.json({ data: chat }, 201);
   });

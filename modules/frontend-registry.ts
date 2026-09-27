@@ -1,12 +1,17 @@
 import type { FrontendGlobalAction, FrontendModuleDefinition, FrontendNavigationGroup, FrontendRoute } from "./frontend-types";
+import { moduleCatalog } from "./catalog.generated";
 
 // Vite expands this at build time. Adding modules/<name>/frontend/module.tsx is enough
 // for UI routes/navigation/global actions to be discovered without hard-coding modules in App.tsx or AppShell.tsx.
-const discovered = import.meta.glob<{ default: FrontendModuleDefinition }>("./*/frontend/module.tsx", { eager: true });
+const discovered = import.meta.glob<{ default: FrontendModuleDefinition }>([
+  "./*/frontend/module.tsx",
+  "!./agentic-employees/frontend/module.tsx",
+], { eager: true });
+const activeModuleKeys=new Set(moduleCatalog.filter(module=>module.active).map(module=>module.key));
 
 export const frontendModules = Object.values(discovered)
   .map(entry => entry.default)
-  .filter(Boolean)
+  .filter(module=>Boolean(module)&&activeModuleKeys.has(module.key))
   .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.name.localeCompare(b.name));
 
 export const appRoutes: Record<string, FrontendRoute> = {};
@@ -18,7 +23,7 @@ for (const module of frontendModules) {
 }
 
 export const appNavigation: FrontendNavigationGroup[] = frontendModules
-  .flatMap(module => module.navigation)
+  .flatMap(module => module.navigation.map(group => ({ ...group, key: group.key ?? `${module.key}:${group.label}` })))
   .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label));
 
 export const appGlobalActions: FrontendGlobalAction[] = frontendModules

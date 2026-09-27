@@ -16,6 +16,7 @@ import { complianceFeature } from "./compliance/index.js";
 import { reportsFeature } from "./reports/index.js";
 import { reportManagementFeature } from "./report-management/index.js";
 import { documentOutputFeature } from "./document-output/index.js";
+import { fileManagerFeature } from "./file-manager/index.js";
 import { financeMaintenanceFeature } from "./finance-maintenance/index.js";
 import { integrationsFeature } from "./integrations/index.js";
 import { modulesFeature } from "./modules/index.js";
@@ -40,9 +41,9 @@ import { printerlyHealthFeature } from "./printerly-health/index.js";
 import { nvrFeature } from "./nvr/index.js";
 import { nvrGroupsFeature } from "./nvr-groups/index.js";
 import { nvrMetricsFeature } from "./nvr-metrics/index.js";
-import { agenticEmployeesFeature } from "./agentic-employees/index.js";
 import { ledgerlyAiFeature } from "./ledgerly-ai/index.js";
+import { workspaceSettingsFeature } from "./workspace-settings/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
-export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, schoolPayFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsIntegrityFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature, nvrGroupsFeature, nvrMetricsFeature, agenticEmployeesFeature, ledgerlyAiFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, fileManagerFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, schoolPayFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsIntegrityFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature, nvrGroupsFeature, nvrMetricsFeature, ledgerlyAiFeature, workspaceSettingsFeature];

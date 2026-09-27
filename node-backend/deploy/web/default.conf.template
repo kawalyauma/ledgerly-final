@@ -1,0 +1,29 @@
+# Ledgerly single-origin web server: serves the built SPA (../dist) and proxies the
+# API paths to the Node API on the host. Runs with network_mode: host, so it listens
+# on ${LEDGERLY_WEB_LISTEN} (e.g. a docker bridge gateway IP that a front proxy can reach).
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+server {
+  listen ${LEDGERLY_WEB_LISTEN};
+  server_name _;
+  root /usr/share/nginx/html;
+  client_max_body_size 100m;
+
+  location ~ ^/(api|auth|system|docs)(/|$) {
+    proxy_pass http://127.0.0.1:${LEDGERLY_API_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_buffering off;
+    proxy_read_timeout 1900s;
+    proxy_send_timeout 1900s;
+  }
+  location = /openapi.json { proxy_pass http://127.0.0.1:${LEDGERLY_API_PORT}; }
+
+  location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; try_files $uri =404; }
+  location / { add_header Cache-Control "no-cache"; try_files $uri /index.html; }
+}

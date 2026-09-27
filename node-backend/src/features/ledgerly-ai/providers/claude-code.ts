@@ -61,18 +61,21 @@ export class ClaudeCodeCliProvider implements LedgerlyAiProviderAdapter {
       throw new Error("Claude Code CLI does not support native local image attachments; use an image-capable provider.");
     }
     const sandbox = request.sandbox ?? "read-only";
+    const maxTurns = Math.max(request.maxTurns ?? 0, this.config.LEDGERLY_AI_CLAUDE_MAX_TURNS);
     const args = [
       "-p", request.prompt,
       "--output-format", "stream-json",
       "--verbose",
-      "--max-turns", String(request.maxTurns ?? 12),
+      "--max-turns", String(maxTurns),
     ];
     if (request.sessionId) args.push("--resume", request.sessionId);
-    if (sandbox === "read-only") args.push("--permission-mode", "plan");
-    if (sandbox === "workspace-write") args.push("--dangerously-skip-permissions");
+    // Same policy as Codex: in docker mode the container (read-only mounts, resource limits)
+    // is the boundary. Plan mode would stop Claude from running any tool on read-only jobs.
+    if (this.config.LEDGERLY_AI_EXECUTION_MODE === "docker" || sandbox === "workspace-write") args.push("--dangerously-skip-permissions");
+    else args.push("--permission-mode", "plan");
     if (!request.workspacePath) throw new Error("Ledgerly AI workspace is required.");
 
-    const command = this.commands.build(this.id, args, request.workspacePath, sandbox);
+    const command = this.commands.build(this.id, args, request.workspacePath, sandbox,{attachmentRoot:request.attachmentRoot,outputRoot:request.outputRoot});
     const result = await runProviderProcess({
       ...command,
       timeoutMs: request.timeoutMs ?? this.config.LEDGERLY_AI_JOB_TIMEOUT_MS,
@@ -83,7 +86,9 @@ export class ClaudeCodeCliProvider implements LedgerlyAiProviderAdapter {
     if (result.timedOut) throw new Error("Ledgerly AI provider execution timed out.");
     if (result.aborted) throw new Error("Ledgerly AI provider execution was cancelled.");
     if (result.exitCode !== 0) {
-      throw new Error(result.stderrLines.at(-1) || "Ledgerly AI provider execution failed.");
+      const final = result.events.map((e) => e.data as Record<string, unknown> | undefined).reverse().find((d) => d?.type === "result");
+      if (final?.subtype === "error_max_turns") throw new Error(`Claude Code stopped after reaching the ${maxTurns}-turn limit.`);
+      throw new Error(result.stderrLines.at(-1) || (typeof final?.result === "string" && final.result) || "Ledgerly AI provider execution failed.");
     }
 
     let text = "";

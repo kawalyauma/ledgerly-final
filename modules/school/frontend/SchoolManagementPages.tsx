@@ -12,6 +12,7 @@ import { StaffWorkspace } from "./SchoolStaffPages";
 import { SchoolFeesWorkspace, type FeeView } from "./SchoolFeesPages";
 import { DisciplineWorkspace, PromotionWorkspace } from "./PromotionDisciplinePages";
 import { useAuth } from "../../../web/auth";
+import { useHashSegments } from "../../../web/navigation";
 import { Badge, Button, Card, EmptyState, Field, Modal, Notice, Pagination, SearchableSelect, Spinner } from "../../../web/components/ui";
 import { downloadTableCsv, printReportElement } from "../../../web/reporting";
 
@@ -153,38 +154,13 @@ function SchoolPageHeader({ title, text, action }: { title: string; text: string
   return <div className="school-page-head"><div><span className="eyebrow">School management</span><h1>{title}</h1><p>{text}</p></div>{action && <div className="heading-actions">{action}</div>}</div>;
 }
 
-const schoolNav: Array<{ key: SchoolView; label: string; icon: any }> = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard },
-  { key: "students", label: "Students", icon: GraduationCap },
-  { key: "admissions", label: "Admissions", icon: ClipboardCheck },
-  { key: "staff", label: "Staff & teachers", icon: BriefcaseBusiness },
-  { key: "promotion", label: "Promotion engine", icon: GraduationCap },
-  { key: "discipline", label: "Discipline & behaviour", icon: Gavel },
-  { key: "people", label: "People & access", icon: Users },
-  { key: "setup", label: "School setup", icon: Settings2 },
-];
-
-const feeNavGroups: Array<{key:string;label:string;icon:any;items:Array<{key:FeeView;label:string}>}> = [
-  {key:"configuration",label:"Configuration",icon:Settings2,items:[
-    {key:"structures",label:"Fee structures"},{key:"discounts",label:"Discounts & awards"},{key:"late-fees",label:"Late-fee rules"},{key:"accounting",label:"Accounting setup"}
-  ]},
-  {key:"transactions",label:"Transactions",icon:WalletCards,items:[
-    {key:"billing",label:"Billing & charges"},{key:"receipts",label:"Receipts & payments"},{key:"refunds",label:"Refunds & credits"},{key:"plans",label:"Payment plans"},{key:"holds",label:"Holds & clearance"}
-  ]},
-  {key:"reports",label:"Reports",icon:BarChart3,items:[
-    {key:"balances",label:"Student balances"},{key:"defaulters",label:"Defaulters"},{key:"class-summary",label:"Class summary"},{key:"collections",label:"Collections"},{key:"aging",label:"Ageing"},{key:"statements",label:"Statements"}
-  ]},
-  {key:"imports",label:"Data import",icon:FileSpreadsheet,items:[
-    {key:"opening-import",label:"Opening balances"},{key:"payment-import",label:"Payment import"}
-  ]},
-];
+const schoolViews: SchoolView[] = ["overview","students","admissions","staff","fees","promotion","discipline","people","setup"];
 
 export function SchoolManagementPage() {
   const { principal } = useAuth();
-  const [view, setView] = useState<SchoolView>(() => { const saved=sessionStorage.getItem("ledgerly.school.view"); return saved==="attendance"?"overview":(saved as SchoolView)||"overview"; });
-  const [feeView, setFeeView] = useState<FeeView>(() => (sessionStorage.getItem("ledgerly.school.fees.view") as FeeView) || "overview");
-  const [feesOpen, setFeesOpen] = useState(() => view === "fees");
-  const [feeGroupsOpen, setFeeGroupsOpen] = useState<Record<string, boolean>>({configuration:true,transactions:true,reports:false,imports:false});
+  const [segments, go] = useHashSegments("school");
+  const view: SchoolView = schoolViews.includes(segments[0] as SchoolView) ? segments[0] as SchoolView : "overview";
+  const feeView = (view === "fees" && segments[1] ? segments[1] : "overview") as FeeView;
   const [disabled, setDisabled] = useState(false);
   const [enabling, setEnabling] = useState(false);
   const [moduleError, setModuleError] = useState("");
@@ -196,30 +172,10 @@ export function SchoolManagementPage() {
     }
   };
   useEffect(() => { void check(); }, [principal?.organizationId]);
-  const navigate = (v: SchoolView) => { setView(v); sessionStorage.setItem("ledgerly.school.view", v); if(v === "fees") setFeesOpen(true); };
-  const navigateFee = (v: FeeView) => { setFeeView(v); setView("fees"); setFeesOpen(true); sessionStorage.setItem("ledgerly.school.view", "fees"); sessionStorage.setItem("ledgerly.school.fees.view", v); };
+  const navigate = (v: SchoolView) => go(v === "overview" ? undefined : v);
+  const navigateFee = (v: FeeView) => go("fees", v === "overview" ? undefined : v);
   if (disabled) return <div className="page school-shell"><SchoolPageHeader title="School Management" text="A modular school operations workspace built on Ledgerly's existing identity and accounting engine."/><Card className="school-module-disabled"><School size={38}/><h2>School Management is not enabled</h2><p>Enable the module for this organization to configure academics, users, admissions and students.</p>{can(principal,"admin:write")?<Button disabled={enabling} onClick={async()=>{setEnabling(true);try{await Promise.race([post("/modules/school-management/enable",{configuration:{}}),new Promise(resolve=>setTimeout(resolve,6000))]);await check()}catch(e){setModuleError(errorText(e))}finally{setEnabling(false)}}}>{enabling?"Enabling…":"Enable School Management"}</Button>:<Notice tone="warning">Ask an organization owner or administrator to enable this module.</Notice>}{moduleError&&<Notice tone="danger">{moduleError}</Notice>}</Card></div>;
   return <div className="school-module-layout">
-    <aside className="school-module-sidebar">
-      <div className="school-module-brand"><span className="school-mark"><School size={21}/></span><div><strong>School Management</strong><small>Academic administration</small></div></div>
-      <nav aria-label="School management navigation">
-        {schoolNav.slice(0,4).map(item=>{const Icon=item.icon;return <button key={item.key} className={view===item.key?"active":""} onClick={()=>navigate(item.key)}><Icon size={18}/><span>{item.label}</span></button>})}
-        <div className={`school-nav-tree ${view==="fees"?"is-active":""}`}>
-          <button className={`school-nav-parent ${view==="fees"?"active":""}`} onClick={()=>{setFeesOpen(x=>!x);if(view!=="fees")navigateFee("overview")}} aria-expanded={feesOpen}>
-            <CircleDollarSign size={18}/><span>Fees & billing</span>{feesOpen?<ChevronDown className="school-nav-chevron" size={14}/>:<ChevronRight className="school-nav-chevron" size={14}/>}
-          </button>
-          {feesOpen&&<div className="school-nav-branch">
-            <button className={`school-nav-child ${view==="fees"&&feeView==="overview"?"active":""}`} onClick={()=>navigateFee("overview")}><span className="school-nav-dot"/>Fees overview</button>
-            {feeNavGroups.map(group=>{const Icon=group.icon,open=feeGroupsOpen[group.key];return <div className="school-nav-subtree" key={group.key}>
-              <button className="school-nav-group" onClick={()=>setFeeGroupsOpen(x=>({...x,[group.key]:!x[group.key]}))} aria-expanded={open}><Icon size={14}/><span>{group.label}</span>{open?<ChevronDown className="school-nav-chevron" size={12}/>:<ChevronRight className="school-nav-chevron" size={12}/>}</button>
-              {open&&<div className="school-nav-subbranch">{group.items.map(item=><button key={item.key} className={`school-nav-subchild ${view==="fees"&&feeView===item.key?"active":""}`} onClick={()=>navigateFee(item.key)}>{item.label}</button>)}</div>}
-            </div>})}
-          </div>}
-        </div>
-        {schoolNav.slice(4).map(item=>{const Icon=item.icon;return <button key={item.key} className={view===item.key?"active":""} onClick={()=>navigate(item.key)}><Icon size={18}/><span>{item.label}</span></button>})}
-      </nav>
-      <div className="school-module-sidebar-foot"><button onClick={()=>{location.hash="#dashboards"}}><ArrowLeft size={17}/><span>Back to Ledgerly</span></button><small><Check size={12}/> School module active</small></div>
-    </aside>
     <div className="page school-shell school-module-content">
       {moduleError&&<Notice tone="danger">{moduleError}</Notice>}
       {view === "overview" && <SchoolOverview onNavigate={navigate}/>} 

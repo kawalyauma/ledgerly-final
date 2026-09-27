@@ -15,7 +15,7 @@ const moduleDefinition:FrontendModuleDefinition={
     label:"Documents",
     icon:FolderArchive,
     order:18,
-    items:[{label:"Documents & Files",path:"files",scope:"documents:read"}],
+    items:[{label:"Documents & Files",path:"files",scope:"documents:read", icon: FolderArchive}],
   }],
 };
 export default moduleDefinition;
