@@ -13,7 +13,7 @@ const flat=(xs:Item[]):Item[]=>xs.flatMap(i=>[i,...flat(i.children??[])]);
 const hit=(path:string,p:string)=>path===p||path.startsWith(`${p}/`);
 
 function Link({item,active,onGo,depth=0}:{item:Item;active:string;onGo:(p:string)=>void;depth?:number}){
- const kids=item.children??[],current=hit(active,item.path),[open,setOpen]=useState(kids.some(k=>hit(active,k.path)));
+ const kids=item.children??[],current=kids.length?hit(active,item.path):active===item.path,[open,setOpen]=useState(flat(kids).some(k=>hit(active,k.path)));
  useEffect(()=>{if(current)setOpen(true)},[current]);const Icon=item.icon??Circle;
  if(!kids.length)return <button className={`nav-item depth-${depth} ${current?"active":""}`} onClick={()=>onGo(item.path)}><Icon size={17}/><span>{item.label}</span></button>;
  return <div className={`nav-branch ${current?"current":""}`}><button className={`nav-item depth-${depth}`} onClick={()=>{setOpen(v=>!v);if(depth>0)onGo(item.path)}}><Icon size={17}/><span>{item.label}</span>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button>{open&&<div className="nav-branch-children">{kids.map(k=><Link key={`${k.path}-${k.label}`} item={k} active={active} onGo={onGo} depth={depth+1}/>)}</div>}</div>
