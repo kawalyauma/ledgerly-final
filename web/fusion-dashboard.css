@@ -1,0 +1,19 @@
+/* Fusion dashboard + workspace settings */
+.ov-page{max-width:1500px!important;margin:0 auto!important;padding:20px 24px 34px!important;gap:14px!important;color:var(--ink)!important}
+.ov-head{background:#fff!important;border:1px solid var(--line)!important;border-radius:12px!important;padding:18px 20px!important;box-shadow:none!important;align-items:flex-end!important}
+.ov-head h1{font-size:23px!important;line-height:1.15!important;letter-spacing:-.4px!important;color:var(--ink)!important}.ov-head p{font-size:11px!important;color:var(--muted)!important}
+.ov-tiles{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.ov-tile{min-height:108px!important;background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:14px!important;box-shadow:none!important}
+.ov-tile>span{font-size:9px!important;color:var(--muted)!important;letter-spacing:.04em!important}.ov-tile strong{font-size:22px!important;color:var(--ink)!important}.ov-tile small{font-size:10px!important;color:var(--muted)!important}
+.ov-tile strong.ov-good{color:var(--brand-dark)!important}.ov-tile strong.ov-bad{color:#b42318!important}
+.ov-grid{gap:12px!important}.ov-card{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:15px!important;box-shadow:none!important}
+.ov-card>header{margin-bottom:11px!important;border-bottom:1px solid var(--line-soft)!important;padding-bottom:9px!important}.ov-card h2{font-size:13px!important;color:var(--ink)!important}.ov-card>header span,.ov-card>header a{font-size:10px!important}
+.ov-bar,.ov-bd-fill{fill:var(--brand)!important;background:var(--brand)!important}.ov-bar-rev{fill:var(--brand)!important}.ov-bar-exp{fill:#6b7b83!important}.ov-sw-rev{background:var(--brand)!important}.ov-sw-exp{background:#6b7b83!important}
+.ov-chart svg{max-height:210px}.ov-tooltip{background:#27302c!important;border-radius:7px!important;font-size:10px!important}.ov-breakdown li{font-size:10px!important}.ov-bd-track{height:8px!important}
+.ov-foot{font-size:9px!important;text-align:right!important}
+.ov-tabs{border-bottom:1px solid var(--line)!important}.ov-tabs button{font-size:10px!important;padding:9px 11px!important}.ov-tabs button.active{color:var(--brand-dark)!important;border-bottom-color:var(--brand)!important}
+.ov-sections{gap:6px!important}.ov-sections li{background:#fff!important;border:1px solid var(--line)!important;border-radius:9px!important;padding:9px 11px!important}.ov-sections li.is-hidden{background:#f7f8f8!important}.ov-order{color:var(--brand-dark)!important}.ov-launch-icon{background:var(--brand-soft)!important;color:var(--brand-dark)!important;border-radius:9px!important}.ov-visible.on{background:var(--brand-soft)!important;border-color:#aed8ba!important;color:var(--brand-dark)!important}
+.ov-actions{gap:7px!important}.ov-launch{gap:10px!important}.ov-launch-card{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:14px!important;box-shadow:none!important}.ov-launch-card:hover{border-color:#9bc8a8!important;background:#f9fcfa!important;box-shadow:none!important}
+@media(max-width:1100px){.ov-tiles{grid-template-columns:repeat(2,minmax(0,1fr))!important}}
+@media(max-width:800px){.ov-page{padding:14px 12px 28px!important}.ov-head{align-items:flex-start!important;flex-direction:column!important;padding:15px!important}.ov-grid{grid-template-columns:1fr!important}.ov-card.ov-wide{grid-column:auto!important}}
+@media(max-width:560px){.ov-tiles{grid-template-columns:1fr 1fr!important;gap:8px!important}.ov-tile{min-height:96px!important;padding:12px!important}.ov-tile strong{font-size:18px!important}.ov-card{padding:12px!important}.ov-sections li{flex-wrap:wrap!important}.ov-sec-actions{width:100%!important;justify-content:flex-end!important}}
