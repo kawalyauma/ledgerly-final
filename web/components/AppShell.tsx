@@ -63,7 +63,7 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
    {subscription?.status==="suspended"&&<div className="plan-suspended">This organization's Ledgerly subscription is suspended. <button onClick={()=>go("billing")}>View plan &amp; usage</button></div>}
    <main>{children}</main>
   </div>
-  <nav className="mobile-dock" aria-label="Mobile navigation">
+  <nav className={`mobile-dock ${mobile?"is-hidden":""}`} aria-label="Mobile navigation">
    <button className={active==="welcome"?"active":""} onClick={()=>go("welcome")}><Home size={19}/><span>Home</span></button>
    <button className={quick?"active":""} aria-expanded={quick} onClick={()=>{setQuick(v=>!v);setApps(false);setMenu(null)}}><Plus size={20}/><span>Create</span></button>
    <button className={apps?"active":""} aria-expanded={apps} onClick={()=>{setApps(v=>!v);setQuick(false);setMenu(null)}}><LayoutGrid size={19}/><span>Apps</span></button>
