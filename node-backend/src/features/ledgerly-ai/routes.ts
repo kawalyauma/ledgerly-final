@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppEnv } from "../../http/types.js";
 import { requireScope } from "../core-identity/security.js";
 import { createLedgerlyAiGatewayRoutes } from "./gateway/routes.js";
+import { createLedgerlyAiIntegrationRoutes } from "./integrations/complete.js";
 import type { LedgerlyAiFoundationService } from "./service.js";
 
 export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
@@ -54,6 +55,7 @@ export function createLedgerlyAiRoutes(service: LedgerlyAiFoundationService) {
     });
   });
 
+  routes.route("/", createLedgerlyAiIntegrationRoutes(service));
   routes.route("/", createLedgerlyAiGatewayRoutes(service.repository, service.gateway,service.runtime));
   return routes;
 }

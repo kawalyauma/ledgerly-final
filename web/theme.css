@@ -104,3 +104,7 @@ table th{color:var(--muted);font-size:12px;font-weight:600;letter-spacing:.03em;
 @media(max-width:1000px){.unified-sidebar .brand .mobile-close{display:grid}}
 .topbar__actions>*{flex:0 0 auto}
 .topbar__actions button{white-space:nowrap}
+.plan-suspended{margin:16px 28px 0;padding:12px 16px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.plan-suspended button{border:0;background:#991b1b;color:#fff;border-radius:8px;padding:6px 12px;font-weight:600}
+.auth-home{display:inline-block;margin-bottom:14px;color:inherit;opacity:.8;font-size:13px;font-weight:600;text-decoration:none}
+.auth-home:hover{opacity:1}

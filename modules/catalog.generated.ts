@@ -419,6 +419,24 @@ export const moduleCatalog = [
     }
   },
   {
+    "key": "billing",
+    "name": "Plans & Billing",
+    "version": "1.0.0",
+    "description": "Ledgerly subscription plans, per-student termly usage, mobile-money payments (Ssentezo) and the platform admin portal.",
+    "category": "platform",
+    "core": true,
+    "active": true,
+    "manifest": {
+      "standalone": true,
+      "owns": [
+        "billing_subscriptions",
+        "billing_invoices",
+        "billing_payments",
+        "billing_settings"
+      ]
+    }
+  },
+  {
     "key": "books",
     "name": "Books",
     "version": "1.1.0",

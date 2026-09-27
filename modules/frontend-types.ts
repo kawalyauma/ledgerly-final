@@ -27,6 +27,8 @@ export type FrontendNavigationGroup = {
 
 export type FrontendGlobalAction = {
   key: string;
+  /** Set by the registry: the module that contributed this action (used for plan gating). */
+  moduleKey?: string;
   label: string;
   order?: number;
   scope?: string;

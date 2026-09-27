@@ -53,6 +53,15 @@ const schema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   RESEND_FROM_EMAIL: z.string().email().optional(),
   SCHOOLPAY_API_BASE_URL: z.string().url().default("https://schoolpay.co.ug"),
+  // Ledgerly subscription billing (Ssentezo Wallet mobile-money collections).
+  SSENTEZO_ENV: z.enum(["sandbox", "live"]).default("sandbox"),
+  SSENTEZO_API_USER: z.string().optional(),
+  SSENTEZO_API_KEY: z.string().optional(),
+  LEDGERLY_PUBLIC_URL: z.string().url().optional(),
+  // Comma-separated emails of Ledgerly platform operators (the admin portal for all schools).
+  PLATFORM_ADMIN_EMAILS: z.string().default(""),
+  // Encrypts payment credentials saved from the admin portal (falls back to JWT_SECRET).
+  BILLING_SECRET_ENCRYPTION_KEY: z.string().min(32).optional(),
   SCHOOLPAY_PUBLIC_BASE_URL: z.string().url().optional(),
   SCHOOLPAY_SECRET_ENCRYPTION_KEY: z.string().min(32).optional(),
   SCHOOLPAY_ENFORCE_WEBHOOK_IP_ALLOWLIST: envBoolean(false),

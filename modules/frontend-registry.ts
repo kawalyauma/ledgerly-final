@@ -27,5 +27,15 @@ export const appNavigation: FrontendNavigationGroup[] = frontendModules
   .sort((a, b) => (a.order ?? 100) - (b.order ?? 100) || a.label.localeCompare(b.label));
 
 export const appGlobalActions: FrontendGlobalAction[] = frontendModules
-  .flatMap(module => module.globalActions ?? [])
+  .flatMap(module => (module.globalActions ?? []).map(action => ({ ...action, moduleKey: module.key })))
   .sort((a,b)=>(a.order??100)-(b.order??100)||a.label.localeCompare(b.label));
+
+/** Route key (first hash segment) → the sidebar section that links to it, for plan gating. */
+export const routeSections: Record<string, string> = {};
+const collectPaths = (items: FrontendNavigationGroup["items"]): string[] => items.flatMap(i => [i.path, ...collectPaths(i.children ?? [])]);
+for (const group of appNavigation) {
+  for (const path of collectPaths(group.items)) {
+    const route = path.split("/")[0]!;
+    if (!routeSections[route]) routeSections[route] = group.key!;
+  }
+}

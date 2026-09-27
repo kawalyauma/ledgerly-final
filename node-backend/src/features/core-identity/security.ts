@@ -29,6 +29,7 @@ export const allScopes = [
   "work:read","work:write",
   "exams:read","exams:write",
   "nvr:read","nvr:write",
+  "ai:read","ai:write",
 ];
 
 export function createId(prefix: string): string { return `${prefix}_${randomUUID().replaceAll("-", "")}`; }

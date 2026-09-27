@@ -1,8 +1,9 @@
 import{useEffect,useMemo,useState,type ReactNode}from"react";
-import{Bell,ChevronDown,ChevronRight,Circle,LayoutGrid,LogOut,Menu,Search,X}from"lucide-react";
+import{Bell,ChevronDown,ChevronRight,Circle,LayoutGrid,LogOut,Menu,Search,ShieldCheck,Wallet,X}from"lucide-react";
 import{get,post,can,type Principal,type Session}from"../api";
 import{useAuth}from"../auth";
 import{arrangeGroups,useNavigationSettings}from"../navigationSettings";
+import{moduleInPlan,sectionInPlan,useSubscription}from"../plans";
 import{appGlobalActions,appNavigation}from"../../modules/frontend-registry";
 import type{FrontendGlobalAction as GlobalAction,FrontendNavigationGroup as Group,FrontendNavigationItem as Item}from"../../modules/frontend-types";
 
@@ -40,9 +41,9 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
  useEffect(()=>{const load=()=>get<Array<{unread_count?:number}>>("/work/chat/threads").then(x=>setChatUnread(x.reduce((n,t)=>n+Number(t.unread_count||0),0))).catch(()=>{});load();const timer=setInterval(load,15000);return()=>clearInterval(timer)},[principal]);
  async function switchOrg(id:string){if(id===principal?.organizationId)return;setSwitching(true);try{const s=await post<Session>("/organizations/switch",{organizationId:id});localStorage.setItem("finance.activeOrganization",id);login(s,localStorage.getItem("finance.remember")!=="false");location.reload()}finally{setSwitching(false)}}
  const navigate=(p:string)=>{onNavigate(p);setMobile(false)};
- const layout=useNavigationSettings(principal?.organizationId),isAdmin=!!principal&&["owner","admin"].includes(principal.role);
+ const layout=useNavigationSettings(principal?.organizationId),subscription=useSubscription(principal?.organizationId),isAdmin=!!principal&&["owner","admin"].includes(principal.role);
  // Allowed sections, filtered and ordered by the organization's "Modules & sections" layout.
- const groups=useMemo(()=>layout===undefined?[]:arrangeGroups(appNavigation,layout).map(g=>({group:g,items:visible(g.items,principal)})).filter(g=>g.items.length),[principal,layout]);
+ const groups=useMemo(()=>layout===undefined||!subscription?[]:arrangeGroups(appNavigation,layout).filter(g=>sectionInPlan(g.key,subscription.plan)).map(g=>({group:g,items:visible(g.items,principal)})).filter(g=>g.items.length),[principal,layout,subscription]);
  // The most specific nav path that prefixes the current hash path is the highlighted item.
  const activeItem=useMemo(()=>groups.flatMap(g=>flatten(g.items)).filter(i=>matches(active,i.path)).sort((a,b)=>b.path.length-a.path.length||Number(!!a.children?.length)-Number(!!b.children?.length))[0]?.path??active,[groups,active]);
  const toggle=(label:string,current:boolean)=>setSections(s=>{const next={...s,[label]:!current};try{localStorage.setItem(SECTIONS_KEY,JSON.stringify(next))}catch{}return next});
@@ -65,12 +66,13 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
     <button className="menu-button" aria-label="Open navigation" onClick={()=>setMobile(true)}><Menu size={20}/></button>
     <label className="global-search"><Search size={17}/><input placeholder={activeLabel?`Search ${activeLabel.toLowerCase()}…`:"Search workspace…"}/></label>
     <div className="topbar__actions">
-     {appGlobalActions.filter(a=>allowed(a as GlobalAction,principal)).map(action=>{const Action=action.component;return <Action key={action.key} activePath={active}/>})}
+     {appGlobalActions.filter(a=>allowed(a as GlobalAction,principal)&&!!subscription&&moduleInPlan(a.moduleKey,subscription.plan)).map(action=>{const Action=action.component;return <Action key={action.key} activePath={active}/>})}
      <button className="icon-button app-chat-bell" aria-label={`${chatUnread} unread chat messages`} onClick={()=>navigate("work/chats")}><Bell size={19}/>{chatUnread>0&&<b>{chatUnread>99?"99+":chatUnread}</b>}</button>
-     <div className="account-wrap"><button className="profile" onClick={()=>setAccount(!account)}><span><strong>{name}</strong><small>{principal?.role}</small></span></button>{account&&<div className="account-menu"><p><b>{principal?.role}</b><small>{principal?.scopes.length?principal.scopes.join(", "):"Full organization access"}</small></p>{isAdmin&&<button onClick={()=>{setAccount(false);navigate("workspace-settings")}}><LayoutGrid size={15}/> Modules &amp; sections</button>}<button onClick={logout}><LogOut size={15}/> Log out</button></div>}</div>
+     <div className="account-wrap"><button className="profile" onClick={()=>setAccount(!account)}><span><strong>{name}</strong><small>{principal?.role}</small></span></button>{account&&<div className="account-menu"><p><b>{principal?.role}</b><small>{principal?.scopes.length?principal.scopes.join(", "):"Full organization access"}</small></p><button onClick={()=>{setAccount(false);navigate("billing")}}><Wallet size={15}/> Plan &amp; usage</button>{isAdmin&&<button onClick={()=>{setAccount(false);navigate("workspace-settings")}}><LayoutGrid size={15}/> Modules &amp; sections</button>}{subscription?.isPlatformAdmin&&<button onClick={()=>{setAccount(false);navigate("platform-admin")}}><ShieldCheck size={15}/> Platform admin</button>}<button onClick={logout}><LogOut size={15}/> Log out</button></div>}</div>
      <button className="icon-button" aria-label="Log out" title="Log out" onClick={logout}><LogOut size={18}/></button>
     </div>
    </header>
+   {subscription?.status==="suspended"&&<div className="plan-suspended">This organization's Ledgerly subscription is suspended. <button onClick={()=>navigate("billing")}>View plan &amp; usage</button></div>}
    <main>{children}</main>
   </div>
  </div>;

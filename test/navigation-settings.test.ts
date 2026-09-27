@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { arrangeGroups, editableSections, SCHOOL_DEFAULT_SECTIONS } from "../web/navigationSettings";
+import { arrangeGroups, editableSections, SCHOOL_DEFAULT_SECTIONS } from "../web/navigationLayout";
 
 const groups = ["ledgerly-core:Accounting", "exams:Examinations", "school-management:School", "ledgerly-core:Dashboards", "tasks-work:Tasks & Work"].map(key => ({ key }));
 
