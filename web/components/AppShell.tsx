@@ -31,7 +31,7 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
  const go=(p:string)=>{onNavigate(p);setMobile(false);setAccount(false);setMenu(null);setApps(false);setQuick(false);setQ("")};
  const layout=useNavigationSettings(principal?.organizationId),subscription=useSubscription(principal?.organizationId),isAdmin=!!principal&&["owner","admin"].includes(principal.role);
  const groups=useMemo(()=>layout===undefined||!subscription?[]:arrangeGroups(appNavigation,layout).filter(g=>sectionInPlan(g.key,subscription.plan)).map(g=>({group:g,items:visible(g.items,principal)})).filter(g=>g.items.length),[principal,layout,subscription]);
- const entries=useMemo(()=>groups.flatMap(({group,items})=>flat(items).map(item=>({group,item}))),[groups]);
+ const entries=useMemo(()=>{const all=groups.flatMap(({group,items})=>flat(items).map(item=>({group,item})));return all.filter((entry,index)=>all.findIndex(other=>other.item.path===entry.item.path)===index)},[groups]);
  const activeItem=entries.filter(x=>hit(active,x.item.path)).sort((a,b)=>b.item.path.length-a.item.path.length)[0]?.item.path??active;
  const activeGroup=groups.find(g=>flat(g.items).some(i=>hit(active,i.path)))?.group.key;
  const stripGroups=groups.filter(({group})=>!["Dashboard","Organization","System status","Billing"].includes(group.label));
