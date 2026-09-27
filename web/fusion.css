@@ -86,3 +86,15 @@ button{transition:background .14s ease,border-color .14s ease,color .14s ease,bo
 }
 @media(max-width:460px){.fusion-shell .global-search input::placeholder{color:transparent}.fusion-shell .app-chat-bell{display:none}.module-strip{padding-right:7px}.module-pill{padding-left:6px}.fusion-shell .page{padding-left:11px;padding-right:11px}.quick-panel,.apps-panel{left:8px;right:8px}.module-menu{left:8px;right:8px}}
 @media(prefers-reduced-motion:reduce){.fusion-shell *{scroll-behavior:auto!important;transition:none!important}}
+
+/* Accessibility and touch ergonomics */
+.fusion-shell button:focus-visible,.fusion-shell a:focus-visible,.fusion-shell input:focus-visible,.fusion-shell select:focus-visible,.fusion-shell textarea:focus-visible{
+ outline:2px solid #4ca866!important;outline-offset:2px!important
+}
+.fusion-shell button:disabled{opacity:.48!important;cursor:not-allowed!important}
+.fusion-shell a{color:#0969b5}
+@media(max-width:680px){
+ .fusion-shell input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]),.fusion-shell select,.fusion-shell textarea{min-height:40px!important;font-size:16px!important}
+ .fusion-shell .button,.fusion-shell .exam-btn,.fusion-shell .fm-btn,.fusion-shell .prn-primary,.fusion-shell .prn-secondary,.fusion-shell .sec-primary,.fusion-shell .sec-ghost{min-height:38px!important}
+ .fusion-shell .modal-actions>button,.fusion-shell .form-actions>button{min-height:40px!important}
+}
