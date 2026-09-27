@@ -9,6 +9,7 @@ import "./styles.css";
 import "./theme.css";
 import "./fusion.css";
 import "./fusion-education.css";
+import "./fusion-business.css";
 
 installLegacyPrintBridge();
 installDynamicSchoolSelectors();
