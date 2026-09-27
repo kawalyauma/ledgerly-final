@@ -14,6 +14,7 @@ export function FusionWelcome(){
  const hour=new Date().getHours(),greeting=hour<12?"Good morning":hour<17?"Good afternoon":"Good evening",first=name.split(/\s+/).filter(Boolean)[0];
  const rate=Math.max(0,Math.min(100,Math.round((data?.fees?.collectionRate??0)*100))),attendance=data?.attendance?.marked?Math.round((data.attendance.present/data.attendance.marked)*100):0;
  const financeMax=Math.max(1,data?.finance?.revenueMinor??0,data?.finance?.expensesMinor??0),incomePct=Math.round(((data?.finance?.revenueMinor??0)/financeMax)*100),expensePct=Math.round(((data?.finance?.expensesMinor??0)/financeMax)*100),net=(data?.finance?.revenueMinor??0)-(data?.finance?.expensesMinor??0);
+ const financeTarget=can(principal,"reports:read")?"reports":"dashboards";
  const quick=[{label:"Students",path:"school/students",Icon:GraduationCap},{label:"Receive fees",path:"school/fees/receipts",Icon:Receipt},{label:"Attendance",path:"attendance/live",Icon:CalendarCheck},{label:"Tasks",path:"work/tasks",Icon:ListChecks},{label:"Examinations",path:"exams/exams",Icon:ClipboardList},{label:"Academics",path:"academics",Icon:BookOpenCheck}];
  return <div className="page fusion-home">
   <header className="fusion-greeting"><div><span className="fusion-kicker"><Sparkles size={14}/> Ledgerly workspace</span><h1>{greeting}{first?`, ${first}`:""}!</h1><p>{org} · {new Date().toLocaleDateString(undefined,{weekday:"long",day:"numeric",month:"long"})}</p></div><button className="fusion-refresh" onClick={load} disabled={loading}><RefreshCw size={15}/> Refresh</button></header>
@@ -33,7 +34,7 @@ export function FusionWelcome(){
    <article className="fusion-stat"><span>Open tasks</span><strong>{data?.tasks?data.tasks.open.toLocaleString():"—"}</strong><small>{data?.tasks?.overdue?`${data.tasks.overdue} overdue`:"No overdue work flagged"}</small><span className="fusion-stat-icon"><CheckCircle2 size={18}/></span></article>
   </div></section>
   <section className="fusion-finance-card">
-   <header><div><span>Finance snapshot</span><h2>{data?.finance?money(net):"—"}</h2><p>{data?.finance?(net>=0?"Net income":"Net position"):"Finance data will appear here"}</p></div><button onClick={()=>go("reports")}>Reports <ArrowRight size={14}/></button></header>
+   <header><div><span>Finance snapshot</span><h2>{data?.finance?money(net):"—"}</h2><p>{data?.finance?(net>=0?"Net income":"Net position"):"Finance data will appear here"}</p></div><button onClick={()=>go(financeTarget)}>{financeTarget==="reports"?"Reports":"Dashboard"} <ArrowRight size={14}/></button></header>
    <div className="fusion-finance-row"><div><span>Income</span><strong>{data?.finance?money(data.finance.revenueMinor):"—"}</strong></div><div className="fusion-finance-track"><i style={{width:`${incomePct}%`}}/></div></div>
    <div className="fusion-finance-row"><div><span>Expenses</span><strong>{data?.finance?money(data.finance.expensesMinor):"—"}</strong></div><div className="fusion-finance-track expense"><i style={{width:`${expensePct}%`}}/></div></div>
    <div className="fusion-finance-footer"><span>Cash & bank</span><strong>{data?.finance?money(data.finance.cashMinor):"—"}</strong></div>
