@@ -1,0 +1,200 @@
+/* Fusion education surfaces: School, Academics, Attendance, Exams and Books.
+   This file intentionally overrides module-local visual styling while preserving module behavior. */
+
+/* Shared page headers */
+.school-page-head,.acad-head,.att-head,.exam-page-head,.learn-hero,.st-head{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:12px!important;
+  box-shadow:0 1px 2px rgba(20,30,36,.04)!important;color:var(--ink)!important;
+  padding:18px 20px!important;display:flex;align-items:flex-end;justify-content:space-between;gap:14px
+}
+.school-page-head h1,.acad-head h1,.att-head h1,.exam-page-head h1,.learn-hero h1,.st-head h1{
+  color:var(--ink)!important;font-size:23px!important;line-height:1.15!important;letter-spacing:-.4px!important;margin:3px 0!important
+}
+.school-page-head p,.acad-head p,.att-head p,.exam-page-head p,.learn-hero p,.st-head p{
+  color:var(--muted)!important;font-size:11px!important;line-height:1.45!important;margin:3px 0 0!important
+}
+.school-page-head .eyebrow,.exam-eyebrow,.learn-kicker,.st-ai-label{
+  color:var(--brand-dark)!important;font-size:9px!important;font-weight:800!important;letter-spacing:.08em!important;text-transform:uppercase!important
+}
+.heading-actions,.acad-head-actions,.att-actions,.exam-actions,.learn-hero-actions,.st-head-actions{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap
+}
+
+/* School management */
+.school-shell,.school-section{color:var(--ink)}
+.school-module-content{background:transparent!important}
+.school-metrics,.fees-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.school-metrics>.card,.school-metrics>.school-panel,.school-metrics>article,.school-panel,.school-form-card,.school-table-card,
+.school-setup-card,.school-settings-card,.school-role-card,.school-detail-section{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:0 1px 2px rgba(20,30,36,.035)!important
+}
+.school-metrics>.card,.school-metrics>article{min-height:102px!important;padding:14px!important}
+.school-metric-icon{width:34px!important;height:34px!important;border-radius:9px!important;background:var(--brand-soft)!important;color:var(--brand-dark)!important}
+.school-two-col{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:12px!important}
+.school-panel{padding:15px!important}.school-panel-head,.school-table-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.school-panel-head{margin-bottom:11px!important}.school-panel-head h2,.school-form-card h2,.school-detail-section h2{font-size:14px!important;margin:0!important;color:var(--ink)!important}
+.school-action-grid,.fees-action-grid{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:8px!important}
+.school-action-grid button,.fees-action-grid button,.school-quick button{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:9px!important;color:var(--ink-2)!important;box-shadow:none!important
+}
+.school-action-grid button:hover,.fees-action-grid button:hover,.school-quick button:hover{border-color:#9bc8a8!important;background:#f8fcf9!important}
+.school-setup-groups,.school-settings-grid,.school-role-grid{gap:10px!important}.school-setup-card,.school-settings-card,.school-role-card{padding:14px!important}
+.school-setup-card-title,.school-panel-head,.school-detail-section>header{color:var(--ink)!important}
+.school-setup-links a,.school-back,.fees-inline-link{color:#0969b5!important}
+.school-form-card,.school-detail-section{padding:16px!important}
+.school-form-section{border:0!important;background:#f8faf9!important;border-radius:9px!important;padding:12px!important}
+.school-form-section>h3{font-size:12px!important;color:var(--ink)!important}
+.school-check{background:#f8faf9!important;border:1px solid var(--line-soft)!important;border-radius:8px!important}
+.school-subtabs{display:flex!important;gap:4px!important;overflow-x:auto!important;border-bottom:1px solid var(--line)!important;scrollbar-width:none}
+.school-subtabs button{border:0!important;background:transparent!important;color:var(--muted)!important;border-bottom:2px solid transparent!important;border-radius:0!important;white-space:nowrap!important}
+.school-subtabs button.active{color:var(--brand-dark)!important;border-bottom-color:var(--brand)!important}
+.school-table-toolbar{padding:10px 12px!important;background:#fff!important;border-bottom:1px solid var(--line-soft)!important}
+.school-filter-wrap{display:flex!important;align-items:center!important;gap:8px!important;flex-wrap:wrap!important}
+.school-filter-wrap>*,.school-table-toolbar select,.school-table-toolbar input{min-height:34px!important}
+.table-wrap,.table-scroll{border-radius:9px!important;overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+.school-table{min-width:760px!important}.school-table th,.fees-table th{font-size:9px!important;color:#667278!important;background:#f6f8f8!important;padding:9px 11px!important}
+.school-table td,.fees-table td{font-size:10px!important;color:#3f494e!important;padding:10px 11px!important}
+.row-actions{display:flex!important;gap:6px!important;align-items:center!important;flex-wrap:wrap!important}
+.row-actions button,.school-danger-link,.fees-action-menu button{font-size:10px!important}
+.school-student-hero,.staff-profile-hero,.fees-detail-hero{
+  border:1px solid var(--line)!important;border-radius:11px!important;background:#fff!important;padding:15px!important;color:var(--ink)!important
+}
+.school-student-avatar{background:var(--brand-soft)!important;color:var(--brand-dark)!important;border:1px solid #cfe8d6!important}
+.school-kv{gap:7px!important}.school-kv>div{border-bottom:1px solid var(--line-soft)!important;padding:8px 0!important}
+.school-list-item{border-color:var(--line-soft)!important;background:#fff!important;border-radius:8px!important}
+.school-role-pills span,.staff-accounting-pills span{background:#eef6f0!important;color:#2f5f3b!important;border:1px solid #d9eadf!important}
+.school-import-drop{border:1px dashed #aebbc1!important;background:#fafcfc!important;border-radius:11px!important}
+.school-import-preview,.fees-import-errors,.fees-import-grid,.fees-preview{border-radius:9px!important}
+.school-settings-row,.school-access-row,.school-session-list>*{border-color:var(--line-soft)!important}
+.school-permissions{background:#fafbfb!important;border-color:var(--line-soft)!important}
+.school-inline-editor,.line-editor,.fees-accounting-form{background:#f8faf9!important;border-color:var(--line-soft)!important;border-radius:9px!important}
+.fees-period-bar{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;color:var(--ink)!important}
+.fees-summary-list,.fees-list,.fees-allocation-list{gap:7px!important}
+.fees-list-row,.fees-import-row,.fees-installment-line{background:#fff!important;border:1px solid var(--line-soft)!important;border-radius:8px!important}
+.fees-lower-grid,.fees-config-columns{gap:12px!important}
+.fees-readonly-value{background:#f5f7f7!important;border-color:var(--line-soft)!important}
+.fees-report-filters{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:11px!important}
+.report-tools{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important}
+.staff-accounting-strip,.staff-ledger-summary,.staff-payslip{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important}
+.staff-rich-list>*{border-color:var(--line-soft)!important}
+
+/* Academics */
+.acad-page,.st-page{max-width:1500px!important;margin:0 auto!important;padding:20px 24px 34px!important;gap:12px!important}
+.acad-metrics,.st-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.acad-metric,.st-metric{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important;padding:14px!important;min-height:98px!important;color:var(--ink)!important}
+.acad-metric strong,.st-metric strong{font-size:22px!important;color:var(--ink)!important}
+.acad-grid-2,.st-two,.st-draft-columns{gap:12px!important}
+.acad-flow,.acad-import-card,.st-grid-card,.st-rule,.st-draft,.st-week{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important
+}
+.acad-flow,.acad-import-card,.st-grid-card,.st-draft{padding:15px!important}
+.acad-toolbar,.st-toolbar{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important;padding:10px!important}
+.acad-tabs{border-bottom:1px solid var(--line)!important;overflow-x:auto!important;scrollbar-width:none}
+.acad-tabs button{color:var(--muted)!important;border-bottom:2px solid transparent!important;background:transparent!important;border-radius:0!important}
+.acad-tabs button.active{color:var(--brand-dark)!important;border-bottom-color:var(--brand)!important}
+.acad-table{min-width:760px!important}.acad-table th{background:#f6f8f8!important}
+.acad-inline-form,.acad-scheme-add,.acad-plan-grid,.acad-form-grid{gap:9px!important}
+.acad-help,.acad-inline-note{background:#f6faf7!important;border-color:#dcebe0!important;color:#496353!important;border-radius:8px!important}
+.acad-conflict{border-radius:8px!important}
+.acad-modal-body,.acad-wide,.att-modal,.exam-modal,.st-modal,.learn-modal,.learn-marks-modal{
+  border-radius:12px!important;box-shadow:0 20px 55px rgba(22,32,38,.2)!important
+}
+.st-card-head{border-bottom:1px solid var(--line-soft)!important}.st-rule-icon{background:var(--brand-soft)!important;color:var(--brand-dark)!important}
+.st-validation{border-radius:8px!important}.st-week{padding:12px!important}.st-week-date{color:var(--brand-dark)!important}
+.st-matrix-wrap{border:1px solid var(--line)!important;border-radius:9px!important}.st-matrix th{background:#f6f8f8!important}
+
+/* Learning cycle */
+.learn-shell{max-width:1500px!important;margin:0 auto!important;padding:20px 24px 34px!important;gap:12px!important;color:var(--ink)!important}
+.learn-hero{margin:0!important}
+.learn-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.learn-metric{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:13px!important;box-shadow:none!important}
+.learn-layout{display:grid!important;grid-template-columns:280px minmax(0,1fr)!important;gap:12px!important}
+.learn-schemes,.learn-main{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important}
+.learn-schemes{padding:9px!important}.learn-schemes>button{border-radius:8px!important;border:1px solid transparent!important;background:#fff!important;color:var(--ink)!important}
+.learn-schemes>button:hover{background:#f6f8f7!important}.learn-schemes>button.active{background:var(--brand-soft)!important;border-color:#b9dfc3!important;color:var(--brand-dark)!important}
+.learn-side-head,.learn-scheme-head,.learn-section-title{border-color:var(--line-soft)!important}
+.learn-cycle,.learn-topic,.learn-lesson,.learn-workflow{background:#fff!important;border:1px solid var(--line-soft)!important;border-radius:9px!important;box-shadow:none!important}
+.learn-topic-head{background:#f8faf9!important;border-radius:9px 9px 0 0!important}.learn-topic-theme{background:#eaf7ee!important;color:var(--brand-dark)!important}
+.learn-topic-no,.learn-lesson-number{background:var(--brand-soft)!important;color:var(--brand-dark)!important}
+.learn-competencies span{background:#f4f7f5!important;border-color:#e0e8e3!important;color:#4d5d54!important}
+.learn-competencies span.missing{background:#fff7ed!important;color:#9a5a16!important}
+.learn-scan-box{background:#f8fcf9!important;border-color:#a9d4b5!important}.learn-empty,.learn-inline-empty,.learn-empty-side{color:var(--muted)!important}
+
+/* Supervision */
+.supervision-template-grid{gap:10px!important}.supervision-template-card,.supervision-section-builder,.supervision-field-builder,.supervision-form-section{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important
+}
+.supervision-template-card{padding:13px!important}.supervision-template-meta{color:var(--muted)!important}
+.supervision-editor,.supervision-review{background:#fff!important;border-radius:12px!important}
+.supervision-builder-head,.supervision-section-head{border-color:var(--line-soft)!important}
+.supervision-choice-field label,.supervision-config-row{background:#f6f8f7!important;border-color:var(--line-soft)!important}
+.supervision-rubric,.supervision-repeater{overflow-x:auto!important}
+
+/* Attendance */
+.att-page{max-width:1500px!important;margin:0 auto!important;padding:20px 24px 34px!important;gap:12px!important}
+.att-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.att-metric{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important;padding:14px!important;min-height:98px!important}
+.att-metric strong{font-size:22px!important;color:var(--ink)!important}.att-metric.amber,.att-metric.red,.att-metric.blue{border-left:3px solid var(--brand)!important}
+.att-two{gap:12px!important}.att-health,.att-block,.att-policy,.att-device-setup,.att-device-grid>article{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important
+}
+.att-health,.att-block,.att-policy,.att-device-setup{padding:14px!important}
+.att-toolbar{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;padding:10px!important}
+.att-section-title{color:var(--ink)!important}.att-device-grid{gap:9px!important}.att-device-actions{display:flex!important;gap:6px!important;flex-wrap:wrap!important}
+.att-check{background:#f8faf9!important;border-color:var(--line-soft)!important}
+.att-device-setup{border-color:#a6d1b2!important}.att-device-setup-values>div{border-color:var(--line-soft)!important;background:#fafcfa!important}
+.att-device-setup-values button{background:var(--brand-soft)!important;color:var(--brand-dark)!important}
+.att-qr-frame{background:#fff!important;border-color:var(--line)!important;border-radius:10px!important}.att-pin{color:var(--brand-dark)!important}
+
+/* Examinations */
+.exam-page{max-width:1500px!important;margin:0 auto!important;padding:20px 24px 34px!important;gap:12px!important}
+.exam-metrics{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.exam-metric,.exam-card,.exam-filter-card,.exam-detail,.exam-report-bar{
+  background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important
+}
+.exam-metric{padding:14px!important;min-height:98px!important}.exam-metric strong{font-size:22px!important;color:var(--ink)!important}
+.exam-card,.exam-detail,.exam-filter-card{padding:14px!important}.exam-card-title{color:var(--ink)!important}
+.exam-grid-2{gap:12px!important}.exam-table-wrap{border:1px solid var(--line)!important;border-radius:9px!important;overflow:auto!important}
+.exam-table{min-width:760px!important}.exam-table th{background:#f6f8f8!important;color:#667278!important}.exam-table td{color:#3f494e!important}
+.exam-status{border-radius:999px!important;font-size:9px!important}.exam-status--published,.exam-status--active{background:#eaf7ee!important;color:var(--brand-dark)!important}
+.exam-notice{border-radius:8px!important}.exam-subject-picker>*{border-color:var(--line-soft)!important;border-radius:8px!important;background:#fafcfa!important}
+.exam-marks-toolbar{background:#fff!important;border:1px solid var(--line)!important;border-radius:9px!important;padding:10px!important}
+.mark-input{border-radius:6px!important}.exam-comment-rule{border-color:var(--line-soft)!important}.exam-color{border-color:var(--line)!important}
+.exam-btn{border-radius:8px!important;font-size:10px!important;font-weight:700!important}.exam-btn--primary{background:var(--brand)!important;border-color:var(--brand)!important;color:#fff!important}.exam-btn--secondary{background:#fff!important;border-color:#c7d0d4!important;color:var(--ink-2)!important}
+
+/* Books */
+.books-page{color:var(--ink)!important}.books-dependency,.books-disabled{border-radius:9px!important}
+.books-metrics{grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:10px!important}
+.books-page .card,.books-stock-list>*,.books-summary{background:#fff!important;border:1px solid var(--line)!important;border-radius:10px!important;box-shadow:none!important}
+.books-card-head{gap:10px!important}.books-segment,.books-report-tabs{overflow-x:auto!important;scrollbar-width:none}.books-segment button,.books-report-tabs button{white-space:nowrap!important}
+.books-filters{background:#fff!important;border:1px solid var(--line)!important;border-radius:9px!important;padding:9px!important}
+.books-stock-list{gap:9px!important}.books-stock-list strong{font-size:22px!important}.books-two{gap:12px!important}
+
+/* Responsive education */
+@media(max-width:1100px){
+ .school-metrics,.fees-metrics,.acad-metrics,.att-metrics,.exam-metrics,.learn-metrics,.st-metrics,.books-metrics{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .school-action-grid,.fees-action-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+ .learn-layout{grid-template-columns:230px minmax(0,1fr)!important}
+}
+@media(max-width:800px){
+ .school-two-col,.acad-grid-2,.att-two,.exam-grid-2,.st-two,.st-draft-columns{grid-template-columns:1fr!important}
+ .learn-layout{grid-template-columns:1fr!important}.learn-schemes{max-height:310px;overflow:auto}
+ .school-page-head,.acad-head,.att-head,.exam-page-head,.learn-hero,.st-head{align-items:flex-start!important;flex-direction:column!important;padding:15px!important}
+ .heading-actions,.acad-head-actions,.att-actions,.exam-actions,.learn-hero-actions,.st-head-actions{width:100%!important}
+ .school-filter-wrap>*{flex:1 1 160px!important}
+ .school-settings-grid,.school-role-grid,.fees-config-columns,.fees-lower-grid{grid-template-columns:1fr!important}
+ .acad-page,.att-page,.exam-page,.learn-shell,.st-page{padding:14px 12px 28px!important}
+}
+@media(max-width:560px){
+ .school-metrics,.fees-metrics,.acad-metrics,.att-metrics,.exam-metrics,.learn-metrics,.st-metrics,.books-metrics{grid-template-columns:1fr 1fr!important;gap:8px!important}
+ .school-action-grid,.fees-action-grid{grid-template-columns:1fr!important}
+ .school-page-head h1,.acad-head h1,.att-head h1,.exam-page-head h1,.learn-hero h1,.st-head h1{font-size:20px!important}
+ .school-panel,.school-form-card,.school-detail-section,.acad-flow,.acad-import-card,.st-grid-card,.att-health,.att-block,.att-policy,.exam-card,.exam-detail{padding:12px!important}
+ .school-table-toolbar,.school-filter-wrap,.acad-toolbar,.att-toolbar,.exam-marks-toolbar,.st-toolbar{align-items:stretch!important;flex-direction:column!important}
+ .school-filter-wrap>*{width:100%!important;max-width:none!important;flex:auto!important}
+ .school-student-hero,.staff-profile-hero,.fees-detail-hero{display:grid!important;grid-template-columns:1fr!important}
+ .learn-topic-tools,.learn-workflow,.learn-section-title,.learn-assessment-head,.supervision-builder-head{align-items:flex-start!important;flex-direction:column!important}
+ .learn-form-grid,.learn-plan-grid,.att-form-grid,.exam-form-grid,.st-form-two,.supervision-form-fields{grid-template-columns:1fr!important}
+ .learn-modal,.learn-marks-modal,.acad-modal-body,.acad-wide,.att-modal,.exam-modal,.st-modal{width:calc(100vw - 18px)!important;max-width:none!important;min-width:0!important}
+ .books-two{grid-template-columns:1fr!important}.books-filters>*{width:100%!important;max-width:none!important}
+}
