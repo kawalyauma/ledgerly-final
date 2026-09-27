@@ -34,7 +34,7 @@ const shellRequirements = [
   'className="mobile-dock"',
   'className="global-search"',
   'sessionStorage.setItem("ledgerly-ai.prefill"',
-  'Ctrl',
+  'searchRef.current?.focus()',
 ];
 for (const requirement of shellRequirements) {
   if (!shell.includes(requirement)) failures.push(`AppShell.tsx: missing shell requirement ${requirement}`);
