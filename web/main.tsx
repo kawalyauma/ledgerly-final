@@ -8,6 +8,7 @@ import { installJournalReversalGuard } from "./reversalGuard";
 import "./styles.css";
 import "./theme.css";
 import "./fusion.css";
+import "./fusion-education.css";
 
 installLegacyPrintBridge();
 installDynamicSchoolSelectors();
