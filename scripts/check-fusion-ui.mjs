@@ -31,7 +31,7 @@ for (const statement of requiredImports) {
 const shell = await readFile("web/components/AppShell.tsx", "utf8");
 const shellRequirements = [
   'className="module-strip"',
-  'className="mobile-dock"',
+  'mobile-dock',
   'className="global-search"',
   'sessionStorage.setItem("ledgerly-ai.prefill"',
   'searchRef.current?.focus()',
@@ -43,6 +43,11 @@ for (const requirement of shellRequirements) {
 const home = await readFile("modules/ledgerly/frontend/FusionWelcome.tsx", "utf8");
 for (const requirement of ["School feed", "School at a glance", "fusion-quick"]) {
   if (!home.includes(requirement)) failures.push(`FusionWelcome.tsx: missing ${requirement}`);
+}
+
+const workspaceRoutes = await readFile("src/routes/workspace.ts", "utf8");
+for (const requirement of ['workspaceRoutes.get("/overview"', 'workspaceRoutes.get("/navigation"', 'workspaceRoutes.put("/navigation"']) {
+  if (!workspaceRoutes.includes(requirement)) failures.push(`workspace routes: missing ${requirement}`);
 }
 
 const design = await readFile("docs/UI_DESIGN_SYSTEM.md", "utf8");

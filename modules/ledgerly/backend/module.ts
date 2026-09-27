@@ -25,6 +25,7 @@ import { reportLibraryRoutes } from "../../../src/routes/report-library";
 import { reportSchedulesRoutes } from "../../../src/routes/report-schedules";
 import { reportsRoutes } from "../../../src/routes/reports";
 import { taxRoutes } from "../../../src/routes/tax";
+import { workspaceRoutes } from "../../../src/routes/workspace";
 import { financeMobileOperationsRoutes } from "./mobile-operations";
 import { processPendingFinanceMobileIntents } from "./offline-intents";
 
@@ -59,6 +60,7 @@ export const moduleDefinition: BackendModuleDefinition = {
     { basePath: "/api/v1/report-schedules", router: reportSchedulesRoutes },
     { basePath: "/api/v1/reports", router: reportsRoutes },
     { basePath: "/api/v1/tax", router: taxRoutes },
+    { basePath: "/api/v1/workspace", router: workspaceRoutes },
     { basePath: "/api/v1/finance-mobile", router: financeMobileOperationsRoutes },
   ],
   scheduled: async env => {
