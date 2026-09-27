@@ -9,6 +9,7 @@
     "dev:selfhost": "tsx selfhost/server.ts",
     "start:selfhost": "tsx selfhost/server.ts",
     "build:web": "vite build",
+    "ui:check": "node scripts/check-fusion-ui.mjs",
     "preview:web": "vite preview",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
