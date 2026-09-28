@@ -4,6 +4,7 @@ import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { createId, requireScope } from "../core-identity/security.js";
+import { feeReceivableAccountId } from "./fee-accounts.js";
 import { createDocument, postDocument } from "../documents/service.js";
 
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -42,7 +43,7 @@ export function createSchoolFeeOperationRoutes(runtime:Runtime){const r=new Hono
        const number=`FEE-${v.issueDate.replaceAll('-','')}-${createId('n').slice(-8).toUpperCase()}`;
        const periodDimensions={schoolStudentId:student.id,schoolAcademicYearId:String(structure.academic_year_id),schoolTermId:structure.term_id?String(structure.term_id):null};
        const doc=await createDocument(runtime,p.organizationId,p.userId,{type:'invoice',number,contactId:String(student.contact_id),issueDate:v.issueDate,dueDate:v.dueDate??v.issueDate,currency:String(structure.currency),customFields:{...periodDimensions,schoolFeeStructureId:v.structureId,massBilling:true},lines:net.map((x:any)=>({accountId:String(x.income_account_id),description:String(x.description??x.category_name),quantityMicros:1_000_000,unitPriceMinor:x.netMinor,taxMinor:0,classId:student.current_class_id??undefined,dimensions:{...periodDimensions,schoolFeeCategoryId:String(x.fee_category_id),grossMinor:x.grossMinor,discountMinor:x.discountMinor}}))});
-       await postDocument(runtime,p.organizationId,p.userId,doc.id,v.controlAccountId);
+       await postDocument(runtime,p.organizationId,p.userId,doc.id,v.controlAccountId??await feeReceivableAccountId(runtime,p.organizationId,"invoice"));
        for(const x of lines)await runtime.db.query(`INSERT INTO school_student_fee_charges(id,organization_id,student_id,structure_id,structure_line_id,document_id,fee_category_id,amount_minor,due_date,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,[createId('chg'),p.organizationId,student.id,v.structureId,x.id,doc.id,x.fee_category_id,x.netMinor,x.due_date??v.dueDate??v.issueDate,p.userId]);
        results.push({studentId:student.id,studentName:[student.first_name,student.last_name].filter(Boolean).join(' '),admissionNumber:student.admission_number,outcome:'billed',status:'billed',billedItems:net.length,documentId:doc.id,number,totalAmountMinor:doc.totalMinor,totalMinor:doc.totalMinor,discountMinor:lines.reduce((n:number,x:any)=>n+x.discountMinor,0)});
      }catch(e:any){results.push({studentId:student.id,studentName:[student.first_name,student.last_name].filter(Boolean).join(' '),admissionNumber:student.admission_number,outcome:'failed',status:'failed',failedItems:1,code:String(e?.code??'BILLING_FAILED'),message:String(e?.message??'Billing failed')});}

@@ -16,7 +16,7 @@ function clean(value:unknown,max=80){const text=String(value??"").replace(/[^\x2
 function money(minor:unknown,currency:string){const code=String(currency||"UGX").toUpperCase();return `${code} ${(Number(minor||0)/100).toLocaleString("en-US",{minimumFractionDigits:code==="UGX"?0:2,maximumFractionDigits:code==="UGX"?0:2})}`;}
 
 async function receiptSource(runtime:Runtime,org:string,id:string){
-  const row=(await runtime.db.query<Record<string,any>>(`SELECT r.id,r.receipt_number AS "receiptNumber",r.student_id AS "studentId",r.payment_id AS "paymentId",r.payment_date::text AS "paymentDate",r.amount_minor::float8 AS "amountMinor",r.reference,r.print_count AS "printCount",r.amount_in_words AS "amountWords",p.status AS "paymentStatus",p.currency,p.number AS "paymentNumber",p.contact_id AS "payerContactId",c.name AS "payerName",s.admission_number AS "admissionNumber",s.student_number AS "studentNumber",concat_ws(' ',s.first_name,s.middle_name,s.last_name) AS "studentName",cl.name AS "className",st.name AS "streamName",u.display_name AS "receivedBy",o.name AS "organizationName",o.legal_name AS "legalName",o.address,o.branding,sp.motto,sp.phone_numbers AS phones,sp.email_addresses AS emails,sp.website,sp.physical_address AS "physicalAddress",sp.postal_address AS "postalAddress" FROM school_fee_receipts r JOIN payments p ON p.id=r.payment_id AND p.organization_id=r.organization_id LEFT JOIN contacts c ON c.id=p.contact_id AND c.organization_id=p.organization_id JOIN school_students s ON s.id=r.student_id AND s.organization_id=r.organization_id LEFT JOIN school_classes cl ON cl.id=s.current_class_id AND cl.organization_id=s.organization_id LEFT JOIN school_streams st ON st.id=s.current_stream_id AND st.organization_id=s.organization_id LEFT JOIN users u ON u.id=r.created_by JOIN organizations o ON o.id=r.organization_id LEFT JOIN school_profiles sp ON sp.organization_id=r.organization_id WHERE r.id=$1 AND r.organization_id=$2`,[id,org])).rows[0];
+  const row=(await runtime.db.query<Record<string,any>>(`SELECT r.id,r.receipt_number AS "receiptNumber",r.student_id AS "studentId",r.payment_id AS "paymentId",r.payment_date::text AS "paymentDate",r.amount_minor::float8 AS "amountMinor",r.reference,r.print_count AS "printCount",r.amount_in_words AS "amountWords",p.status AS "paymentStatus",p.currency,p.number AS "paymentNumber",p.contact_id AS "payerContactId",c.name AS "payerName",s.admission_number AS "admissionNumber",s.student_number AS "studentNumber",concat_ws(' ',s.first_name,s.middle_name,s.last_name) AS "studentName",cl.name AS "className",st.name AS "streamName",u.display_name AS "receivedBy",o.name AS "organizationName",o.legal_name AS "legalName",o.address,o.branding,sp.motto,sp.phone_numbers AS phones,sp.email_addresses AS emails,sp.website,sp.physical_address AS "physicalAddress",sp.postal_address AS "postalAddress",(EXISTS(SELECT 1 FROM schoolpay_configurations spc WHERE spc.organization_id=r.organization_id AND spc.enabled) OR s.custom_fields->>'source'='SchoolPay' OR EXISTS(SELECT 1 FROM journal_entries je WHERE je.organization_id=r.organization_id AND je.source_type='schoolpay_payment')) AS "schoolPayEnabled" FROM school_fee_receipts r JOIN payments p ON p.id=r.payment_id AND p.organization_id=r.organization_id LEFT JOIN contacts c ON c.id=p.contact_id AND c.organization_id=p.organization_id JOIN school_students s ON s.id=r.student_id AND s.organization_id=r.organization_id LEFT JOIN school_classes cl ON cl.id=s.current_class_id AND cl.organization_id=s.organization_id LEFT JOIN school_streams st ON st.id=s.current_stream_id AND st.organization_id=s.organization_id LEFT JOIN users u ON u.id=r.created_by JOIN organizations o ON o.id=r.organization_id LEFT JOIN school_profiles sp ON sp.organization_id=r.organization_id WHERE r.id=$1 AND r.organization_id=$2`,[id,org])).rows[0];
   if(!row)throw new AppError(404,"FEE_RECEIPT_NOT_FOUND","School fee receipt not found");
   const [allocations,balance]=await Promise.all([
     runtime.db.query<Record<string,any>>(`SELECT pa.amount_minor::float8 AS "amountMinor",d.number AS "invoiceNumber",fc.name AS "feeCategoryName" FROM payment_allocations pa JOIN documents d ON d.id=pa.document_id AND d.organization_id=pa.organization_id LEFT JOIN school_student_fee_charges ch ON ch.document_id=d.id AND ch.organization_id=d.organization_id LEFT JOIN school_fee_categories fc ON fc.id=ch.fee_category_id AND fc.organization_id=ch.organization_id WHERE pa.payment_id=$1 AND pa.organization_id=$2 AND pa.reversed_at IS NULL ORDER BY pa.created_at,pa.id`,[row.paymentId,org]),
@@ -57,11 +57,13 @@ async function renderReceipt(source:Record<string,any>,copyLabel:string,verifyUr
     right(clean(source.receiptNumber,30),W-M,y,bold,12.5,dark);
     // Left column: details. Right column: QR + balance.
     const colR=W-M-118,top2=y-16;y=top2;
-    [["Payment date",source.paymentDate],["Reference",source.reference||source.paymentNumber],["Status",String(source.paymentStatus||"").toUpperCase()],["Received by",source.receivedBy||"Ledgerly"]].forEach(([k,v],i)=>{const x=M+(i%2)*170,yy=y-Math.floor(i/2)*26;page.drawText(String(k),{x,y:yy,font,size:6.8,color:muted});page.drawText(clean(v,30),{x,y:yy-11,font:bold,size:8.8,color:dark});});
+    // Three columns: the learner's class sits with the key receipt facts.
+    const klass=[source.className,source.streamName].filter(Boolean).join(" · ")||"—",colW=Math.floor((colR-M-18)/3);
+    [["Payment date",source.paymentDate],["Reference",source.reference||source.paymentNumber],["Class",klass],["Admission no.",source.admissionNumber||source.studentNumber||"—"],["Status",String(source.paymentStatus||"").toUpperCase()],["Received by",source.receivedBy||"Ledgerly"]].forEach(([k,v],i)=>{const x=M+(i%3)*colW,yy=y-Math.floor(i/3)*26;let value=clean(v,40);while(value.length>4&&bold.widthOfTextAtSize(value,8.8)>colW-8)value=`${value.slice(0,-4)}...`;page.drawText(String(k),{x,y:yy,font,size:6.8,color:muted});page.drawText(value,{x,y:yy-11,font:bold,size:8.8,color:k==="Class"?accent:dark});});
     y-=60;page.drawRectangle({x:M,y:y-38,width:colR-M-18,height:46,color:soft,borderColor:line,borderWidth:.6});
     page.drawText("RECEIVED FROM",{x:M+10,y:y-3,font:bold,size:6.5,color:muted});
     page.drawText(clean(source.payerName||source.studentName,48),{x:M+10,y:y-17,font:bold,size:10.5,color:dark});
-    page.drawText(clean([source.payerName&&source.payerName!==source.studentName?source.studentName:null,source.admissionNumber&&`Adm: ${source.admissionNumber}`,source.className,source.streamName].filter(Boolean).join("  ·  "),70),{x:M+10,y:y-30,font,size:7,color:muted});
+    page.drawText(clean([source.payerName&&source.payerName!==source.studentName?`For ${source.studentName}`:null,[source.className,source.streamName].filter(Boolean).join(" · ")].filter(Boolean).join("  ·  "),70),{x:M+10,y:y-30,font,size:7,color:muted});
     y-=56;const balX=M+Math.round((colR-M-18)/2)+8,balance=Number(source.balanceAfterMinor||0);
     page.drawText("AMOUNT RECEIVED",{x:M,y,font:bold,size:6.5,color:muted});
     page.drawText(money(source.amountMinor,source.currency),{x:M,y:y-22,font:bold,size:fit(money(source.amountMinor,source.currency),balX-M-12),color:accent});
@@ -74,7 +76,23 @@ async function renderReceipt(source:Record<string,any>,copyLabel:string,verifyUr
     page.drawImage(qr,{x:qx,y:qy,width:qrSize,height:qrSize});
     const scan="Scan to verify";page.drawText(scan,{x:qx+(qrSize-font.widthOfTextAtSize(scan,7))/2,y:qy-10,font,size:7,color:muted});
     // Footer
-    const fy=top-half+30;page.drawLine({start:{x:W-M-150,y:fy+14},end:{x:W-M,y:fy+14},thickness:.6,color:muted});right("Signature & stamp",W-M,fy+4,font,6.8,muted);
+    const fy=top-half+30;
+    // SchoolPay box: the learner's payment code for the next instalment, plus how to use it.
+    // A school can replace the wording with branding.schoolPayInstructions (string or lines).
+    const payCode=String(source.studentNumber||source.admissionNumber||"").trim();
+    if(source.schoolPayEnabled&&payCode){
+      const bx=M,by=fy+24,bw=W-M*2-170,bh=54,custom=branding.schoolPayInstructions;
+      const steps:string[]=Array.isArray(custom)?custom.map(String):typeof custom==="string"&&custom.trim()?custom.split(/\n+/):[
+        "Pay fees any time on MTN MoMo, Airtel Money, or at any bank or agent:",
+        "choose School Fees > SchoolPay and enter the payment code.",
+        "Keep the SchoolPay SMS as proof of payment.",
+      ];
+      page.drawRectangle({x:bx,y:by,width:bw,height:bh,color:rgb(.93,.97,1),borderColor:rgb(.62,.76,.93),borderWidth:.8});
+      page.drawText("PAY WITH SCHOOLPAY",{x:bx+10,y:by+bh-12,font:bold,size:6.5,color:rgb(.1,.33,.6)});
+      page.drawText("Payment code",{x:bx+10,y:by+bh-25,font,size:6.5,color:muted});
+      page.drawText(clean(payCode,20),{x:bx+10,y:by+10,font:bold,size:fit(payCode,112,15),color:dark});
+      steps.slice(0,4).forEach((line,i)=>page.drawText(clean(line,70),{x:bx+132,y:by+bh-13-i*10.5,font,size:6.6,color:dark}));
+    }page.drawLine({start:{x:W-M-150,y:fy+14},end:{x:W-M,y:fy+14},thickness:.6,color:muted});right("Signature & stamp",W-M,fy+4,font,6.8,muted);
     page.drawText(clean(source.motto||branding.footer||"Thank you for your payment.",70),{x:M,y:fy+4,font,size:7,color:muted});
   };
 

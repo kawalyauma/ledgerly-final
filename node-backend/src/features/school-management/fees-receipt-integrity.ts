@@ -5,6 +5,7 @@ import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { createId, requireScope } from "../core-identity/security.js";
 import { createPayment, postPayment } from "../payments/service.js";
+import { feeReceivableAccountId } from "./fee-accounts.js";
 
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const receipt=z.object({studentId:z.string(),bankAccountId:z.string(),controlAccountId:z.string(),paymentDate:date,amountMinor:z.number().int().positive(),reference:z.string().max(120).nullable().optional(),allocations:z.array(z.object({documentId:z.string(),amountMinor:z.number().int().positive()})).max(100).default([])});
@@ -18,11 +19,7 @@ export async function normalizeReceiptBody(runtime:Runtime,org:string,body:unkno
  if(!body||typeof body!=="object")return body;
  const b={...(body as Record<string,any>)};
  if(!b.bankAccountId&&typeof b.paymentMethodId==="string")b.bankAccountId=b.paymentMethodId;
- if(!b.controlAccountId){
-  const q=await runtime.db.query<{id:string}>(`SELECT id FROM accounts WHERE organization_id=$1 AND active AND allow_posting AND subtype IN ('school_fee_receivable','receivable') ORDER BY (subtype='school_fee_receivable') DESC, code LIMIT 1`,[org]);
-  if(!q.rows[0])throw new AppError(422,"FEE_ACCOUNTS_NOT_SET_UP","This school has no fees receivable account yet. Open School → Fees & billing → Accounting setup and choose one.");
-  b.controlAccountId=q.rows[0].id;
- }
+ if(!b.controlAccountId)b.controlAccountId=await feeReceivableAccountId(runtime,org,"receipt");
  if(!b.bankAccountId)throw new AppError(422,"PAYMENT_METHOD_REQUIRED","Choose how the money was received (cash, bank or mobile money).");
  const amount=Number(b.amountMinor);
  if(b.autoAllocate!==false&&(!Array.isArray(b.allocations)||!b.allocations.length)&&typeof b.studentId==="string"&&Number.isFinite(amount)&&amount>0){
@@ -36,6 +33,23 @@ export async function normalizeReceiptBody(runtime:Runtime,org:string,body:unkno
 }
 
 export function createSchoolFeeReceiptIntegrityRoutes(runtime:Runtime){const r=new Hono<AppEnv>();r.use('*',requireScope('school:read'));
+ // One learner's fee position, shown on the receipt form before money is taken.
+ r.get('/students/:id/balance',async c=>{const p=c.get('principal'),id=c.req.param('id');
+  // Transfers between receivable accounts (e.g. 1100 -> 1110) tag both legs with the student,
+  // so they are left out: they net to zero but would inflate "billed". Everything that is not a
+  // payment counts as a credit, so billed - paid - credited always equals the balance.
+  const q=await runtime.db.query<any>(`SELECT COALESCE(SUM(l.debit_minor),0)::float8 billed,
+     COALESCE(SUM(CASE WHEN j.source_type IN ('receipt','schoolpay_payment') THEN l.credit_minor ELSE 0 END),0)::float8 paid,
+     COALESCE(SUM(CASE WHEN j.source_type IN ('receipt','schoolpay_payment') THEN 0 ELSE l.credit_minor END),0)::float8 credited,
+     COALESCE(SUM(l.debit_minor-l.credit_minor),0)::float8 balance
+    FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+    JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
+    WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2 AND j.status='posted' AND j.source_type IS DISTINCT FROM 'school_fee_control_transfer'
+      AND (a.subtype='school_fee_receivable' OR (a.subtype='receivable' AND l.dimensions_json ? 'schoolStudentId'))`,[p.organizationId,id]);
+  const open=await runtime.db.query<any>(`SELECT COUNT(DISTINCT d.id)::int n FROM documents d JOIN school_student_fee_charges ch ON ch.document_id=d.id AND ch.organization_id=d.organization_id WHERE d.organization_id=$1 AND ch.student_id=$2 AND d.type='invoice' AND d.status IN ('open','partially_paid') AND d.total_minor>d.paid_minor`,[p.organizationId,id]);
+  const x=q.rows[0]??{};
+  return c.json({data:{studentId:id,billedMinor:Number(x.billed||0),paidMinor:Number(x.paid||0),creditedMinor:Number(x.credited||0),balanceMinor:Number(x.balance||0),openInvoices:Number(open.rows[0]?.n||0)}});
+ });
  r.post('/receipts',requireScope('school:write'),async c=>{const parsed=receipt.safeParse(await normalizeReceiptBody(runtime,c.get('principal').organizationId,await c.req.json().catch(()=>null)));if(!parsed.success)throw new AppError(422,'VALIDATION_ERROR','Invalid school fee receipt',parsed.error.flatten());const p=c.get('principal'),v=parsed.data,student=(await runtime.db.query<any>(`SELECT id,contact_id FROM school_students WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL`,[v.studentId,p.organizationId])).rows[0];if(!student?.contact_id)throw new AppError(404,'STUDENT_NOT_FOUND','Student not found or missing finance contact');const unique=new Set(v.allocations.map(x=>x.documentId));if(unique.size!==v.allocations.length)throw new AppError(422,'DUPLICATE_ALLOCATION','Each invoice may be allocated once per receipt');const allocated=v.allocations.reduce((n,x)=>n+x.amountMinor,0);if(allocated>v.amountMinor)throw new AppError(422,'OVER_ALLOCATION','Allocations exceed receipt amount',{amountMinor:v.amountMinor,allocatedMinor:allocated});for(const a of v.allocations){const q=await runtime.db.query<any>(`SELECT d.id,d.currency,d.total_minor,d.paid_minor FROM documents d JOIN school_student_fee_charges ch ON ch.document_id=d.id AND ch.organization_id=d.organization_id WHERE d.id=$1 AND d.organization_id=$2 AND ch.student_id=$3 AND d.type='invoice' AND d.contact_id=$4 AND d.status IN ('open','partially_paid') LIMIT 1`,[a.documentId,p.organizationId,v.studentId,student.contact_id]);if(!q.rowCount)throw new AppError(422,'INVALID_FEE_ALLOCATION','Allocation must target an open fee invoice for this student',{documentId:a.documentId});const d=q.rows[0],outstanding=Number(d.total_minor)-Number(d.paid_minor);if(a.amountMinor>outstanding)throw new AppError(422,'OVER_ALLOCATION','Allocation exceeds fee invoice balance',{documentId:a.documentId,outstandingMinor:outstanding});}
  const currency=v.allocations.length?String((await runtime.db.query(`SELECT currency FROM documents WHERE id=$1 AND organization_id=$2`,[v.allocations[0]!.documentId,p.organizationId])).rows[0]?.currency??'UGX'):'UGX';const number=`RCPT-${v.paymentDate.replaceAll('-','')}-${createId('n').slice(-8).toUpperCase()}`,payment=await createPayment(runtime,p.organizationId,p.userId,{type:'receipt',number,contactId:String(student.contact_id),bankAccountId:v.bankAccountId,controlAccountId:v.controlAccountId,paymentDate:v.paymentDate,currency,amountMinor:v.amountMinor,reference:v.reference??number},`school-fee:${p.organizationId}:${v.studentId}:${number}`);await postPayment(runtime,p.organizationId,p.userId,payment.id,v.allocations);const id=createId('sfr');await runtime.db.query(`INSERT INTO school_fee_receipts(id,organization_id,student_id,payment_id,receipt_number,amount_minor,payment_date,reference,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(organization_id,payment_id) DO NOTHING`,[id,p.organizationId,v.studentId,payment.id,number,v.amountMinor,v.paymentDate,v.reference??null,p.userId]);for(const a of v.allocations)await runtime.db.query(`SELECT ledgerly_recompute_school_fee_installments($1,$2)`,[p.organizationId,a.documentId]);const row=(await runtime.db.query<any>(`SELECT id,receipt_number FROM school_fee_receipts WHERE organization_id=$1 AND payment_id=$2`,[p.organizationId,payment.id])).rows[0];return c.json({data:{id:row?.id??id,receiptNumber:row?.receipt_number??number,paymentId:payment.id,amountMinor:v.amountMinor,allocatedMinor:allocated,unallocatedMinor:v.amountMinor-allocated}},201);});
  return r;}
