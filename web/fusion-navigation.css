@@ -1,0 +1,37 @@
+/* Scrollable module strip + per-module sub-navigation rows (loaded after the fusion layers). */
+/* Keep .module-strip sticky (fusion.css); sticky already contains the absolutely placed buttons. */
+.fusion-shell .scroll-row{display:flex;align-items:center;min-width:0}
+.fusion-shell .scroll-row:not(.module-strip){position:relative}
+.fusion-shell .scroll-row-track{display:flex;align-items:center;gap:inherit;flex:1;min-width:0;overflow-x:auto;overscroll-behavior-inline:contain;scroll-behavior:smooth;scrollbar-width:none}
+.fusion-shell .scroll-row-track::-webkit-scrollbar{display:none}
+.fusion-shell .scroll-row.module-strip{overflow:visible}
+.fusion-shell .scroll-row-btn{position:absolute;top:50%;transform:translateY(-50%);z-index:3;width:34px;height:34px;border-radius:50%;border:1px solid #cfd8dc;background:#fff;color:#1f2a2e;display:grid;place-items:center;box-shadow:0 4px 12px rgba(15,23,42,.14);cursor:pointer}
+.fusion-shell .scroll-row-btn:hover{background:#f3f7f5;border-color:#9fb2b8}
+.fusion-shell .scroll-row-btn.prev{left:6px}
+.fusion-shell .scroll-row-btn.next{right:6px}
+.fusion-shell .scroll-row-btn::before{content:"";position:absolute;top:-14px;bottom:-14px;width:44px;z-index:-1;pointer-events:none}
+.fusion-shell .scroll-row-btn.prev::before{left:-8px;background:linear-gradient(90deg,#fff 55%,rgba(255,255,255,0))}
+.fusion-shell .scroll-row-btn.next::before{right:-8px;background:linear-gradient(270deg,#fff 55%,rgba(255,255,255,0))}
+
+.fusion-shell .module-subnav{gap:6px;padding:8px 22px;background:#fbfcfc;border-bottom:1px solid var(--line-soft,#e7ecee)}
+.fusion-shell .module-subnav-2{background:#fff;padding-top:7px;padding-bottom:7px}
+.fusion-shell .module-subnav .scroll-row-btn{width:30px;height:30px}
+.fusion-shell .module-subnav .scroll-row-btn::before{background:linear-gradient(90deg,#fbfcfc 55%,rgba(251,252,252,0))}
+.fusion-shell .module-subnav .scroll-row-btn.next::before{background:linear-gradient(270deg,#fbfcfc 55%,rgba(251,252,252,0))}
+.fusion-shell .module-subnav-2 .scroll-row-btn::before{background:linear-gradient(90deg,#fff 55%,rgba(255,255,255,0))}
+.fusion-shell .module-subnav-2 .scroll-row-btn.next::before{background:linear-gradient(270deg,#fff 55%,rgba(255,255,255,0))}
+.fusion-shell .subnav-tab{flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border-radius:10px;border:1px solid transparent;background:transparent;color:#34403f;font-size:12.5px;font-weight:650;white-space:nowrap;cursor:pointer}
+.fusion-shell .subnav-tab svg{color:#5f6e70;flex:0 0 auto}
+.fusion-shell .subnav-tab:hover{background:#eef3f1}
+.fusion-shell .subnav-tab.active{background:var(--brand-soft,#e6f4ea);border-color:#a9d9b6;color:var(--brand-dark,#15693a)}
+.fusion-shell .subnav-tab.active svg{color:currentColor}
+.fusion-shell .subnav-chip{flex:0 0 auto;height:32px;padding:0 13px;border-radius:999px;border:1px solid #d7dfe2;background:#fff;color:#34403f;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
+.fusion-shell .subnav-chip:hover{border-color:#9fb2b8;background:#f8faf9}
+.fusion-shell .subnav-chip.active{background:#15693a;border-color:#15693a;color:#fff}
+.fusion-shell .subnav-tab:focus-visible,.fusion-shell .subnav-chip:focus-visible,.fusion-shell .scroll-row-btn:focus-visible{outline:2px solid #15693a;outline-offset:2px}
+
+@media(max-width:760px){
+  .fusion-shell .module-subnav{padding:7px 10px}
+  .fusion-shell .scroll-row-btn{width:30px;height:30px}
+}
+@media(prefers-reduced-motion:reduce){.fusion-shell .scroll-row-track{scroll-behavior:auto}}

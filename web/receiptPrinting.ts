@@ -30,3 +30,26 @@ export async function openReceiptPdf(receiptId:string,receiptNumber:string,purpo
     return request;
   }catch(error){popup?.close();throw error;}
 }
+
+const AUTO_PRINT_KEY="ledgerly.receipts.autoPrint";
+export const autoPrintEnabled=()=>{try{return localStorage.getItem(AUTO_PRINT_KEY)!=="off"}catch{return true}};
+export const setAutoPrintEnabled=(on:boolean)=>{try{localStorage.setItem(AUTO_PRINT_KEY,on?"on":"off")}catch{}};
+
+/**
+ * Print a freshly recorded receipt straight away: the A4 original + file copy is loaded into a
+ * hidden frame and handed to the browser's print dialog with the default printer selected.
+ * (Browsers never print silently; Chrome started with --kiosk-printing skips the dialog.)
+ */
+export async function autoPrintReceipt(receiptId:string,receiptNumber:string){
+  const request=await post<PrintRequest>(`/school/fees/receipts/${receiptId}/prints`,{purpose:"print"});
+  const blob=await fetchReceiptPdf(request.pdfPath),url=URL.createObjectURL(blob);
+  const frame=document.createElement("iframe");
+  frame.title=`Receipt ${receiptNumber}`;frame.style.cssText="position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  frame.src=url;document.body.appendChild(frame);
+  await new Promise<void>((resolve,reject)=>{
+    frame.onload=()=>{try{frame.contentWindow?.focus();frame.contentWindow?.print();resolve()}catch(e){reject(e)}};
+    setTimeout(()=>reject(new Error("The receipt took too long to load for printing.")),20_000);
+  }).catch(async()=>{frame.remove();URL.revokeObjectURL(url);await openReceiptPdf(receiptId,receiptNumber,"print")});
+  setTimeout(()=>{frame.remove();URL.revokeObjectURL(url)},120_000);
+  return request;
+}

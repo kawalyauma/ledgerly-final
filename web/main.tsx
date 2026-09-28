@@ -13,6 +13,7 @@ import "./fusion-business.css";
 import "./fusion-tools.css";
 import "./fusion-dashboard.css";
 import "./fusion-public.css";
+import "./fusion-navigation.css";
 
 installLegacyPrintBridge();
 installDynamicSchoolSelectors();

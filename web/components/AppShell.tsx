@@ -1,5 +1,5 @@
 import{useEffect,useMemo,useRef,useState,type ReactNode}from"react";
-import{Bell,ChevronDown,ChevronRight,Circle,FileBarChart,Home,LayoutGrid,LogOut,Menu,Plus,Search,Settings,ShieldCheck,Sparkles,Wallet,X}from"lucide-react";
+import{Bell,ChevronDown,ChevronLeft,ChevronRight,Circle,FileBarChart,Home,LayoutGrid,LogOut,Menu,Plus,Search,Settings,ShieldCheck,Sparkles,Wallet,X}from"lucide-react";
 import{get,post,can,type Principal,type Session}from"../api";
 import{useAuth}from"../auth";
 import{arrangeGroups,useNavigationSettings}from"../navigationSettings";
@@ -12,11 +12,29 @@ const visible=(xs:Item[],p:Principal|null):Item[]=>xs.filter(i=>allowed(i,p)).ma
 const flat=(xs:Item[]):Item[]=>xs.flatMap(i=>[i,...flat(i.children??[])]);
 const hit=(path:string,p:string)=>path===p||path.startsWith(`${p}/`);
 
+/** Leaf pages under an item; a branch whose own path isn't one of its pages gets an "Overview" leaf. */
+const leaves=(item:Item):Item[]=>{const kids=item.children??[];if(!kids.length)return[item];const inner=kids.flatMap(leaves);return inner.some(l=>l.path===item.path)?inner:[{label:"Overview",path:item.path,icon:item.icon},...inner]};
+const withOverview=(item:Item):Item[]=>{const kids=item.children??[];if(!kids.length)return kids;return flat(kids).some(k=>k.path===item.path)?kids:[{label:"Overview",path:item.path},...kids]};
+
+/** Horizontal row with ‹ › buttons that appear only while the row overflows. */
+function ScrollRow({className,label,children,watch}:{className:string;label:string;children:ReactNode;watch?:unknown}){
+ const track=useRef<HTMLDivElement>(null),[edges,setEdges]=useState({left:false,right:false});
+ const measure=()=>{const t=track.current;if(!t)return;setEdges({left:t.scrollLeft>4,right:t.scrollLeft+t.clientWidth<t.scrollWidth-4})};
+ useEffect(()=>{const t=track.current;if(!t)return;measure();const ro=new ResizeObserver(measure);ro.observe(t);t.addEventListener("scroll",measure,{passive:true});return()=>{ro.disconnect();t.removeEventListener("scroll",measure)}},[]);
+ useEffect(()=>{measure();track.current?.querySelector<HTMLElement>(".active")?.scrollIntoView({block:"nearest",inline:"nearest"})},[watch]);
+ const by=(dir:number)=>{const t=track.current;if(t)t.scrollBy({left:dir*Math.max(200,t.clientWidth*.7),behavior:"smooth"})};
+ return <nav className={`scroll-row ${className}`} aria-label={label}>
+  {edges.left&&<button className="scroll-row-btn prev" aria-label={`Scroll ${label} left`} onClick={()=>by(-1)}><ChevronLeft size={18}/></button>}
+  <div className="scroll-row-track" ref={track}>{children}</div>
+  {edges.right&&<button className="scroll-row-btn next" aria-label={`Scroll ${label} right`} onClick={()=>by(1)}><ChevronRight size={18}/></button>}
+ </nav>;
+}
+
 function Link({item,active,onGo,depth=0}:{item:Item;active:string;onGo:(p:string)=>void;depth?:number}){
- const kids=item.children??[],current=kids.length?hit(active,item.path):active===item.path,[open,setOpen]=useState(flat(kids).some(k=>hit(active,k.path)));
+ const kids=withOverview(item),current=kids.length?hit(active,item.path):active===item.path,[open,setOpen]=useState(flat(kids).some(k=>hit(active,k.path)));
  useEffect(()=>{if(current)setOpen(true)},[current]);const Icon=item.icon??Circle;
  if(!kids.length)return <button className={`nav-item depth-${depth} ${current?"active":""}`} aria-current={current?"page":undefined} onClick={()=>onGo(item.path)}><Icon size={17}/><span>{item.label}</span></button>;
- return <div className={`nav-branch ${current?"current":""}`}><button className={`nav-item depth-${depth}`} aria-expanded={open} onClick={()=>{setOpen(v=>!v);if(depth>0)onGo(item.path)}}><Icon size={17}/><span>{item.label}</span>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button>{open&&<div className="nav-branch-children">{kids.map(k=><Link key={`${k.path}-${k.label}`} item={k} active={active} onGo={onGo} depth={depth+1}/>)}</div>}</div>
+ return <div className={`nav-branch ${current?"current":""}`}><button className={`nav-item depth-${depth}`} aria-expanded={open} onClick={()=>setOpen(v=>!v)}><Icon size={17}/><span>{item.label}</span>{open?<ChevronDown size={14}/>:<ChevronRight size={14}/>}</button>{open&&<div className="nav-branch-children">{kids.map(k=><Link key={`${k.path}-${k.label}`} item={k} active={active} onGo={onGo} depth={depth+1}/>)}</div>}</div>
 }
 
 function MobileGroup({group,items,active,onGo}:{group:Group;items:Item[];active:string;onGo:(p:string)=>void}){
@@ -42,6 +60,10 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
  useEffect(()=>{if(!canChat){setChatUnread(0);return}const load=()=>get<Array<{unread_count?:number}>>("/work/chat/threads").then(x=>setChatUnread(x.reduce((n,t)=>n+Number(t.unread_count||0),0))).catch(()=>{});load();const timer=setInterval(load,15000);return()=>clearInterval(timer)},[principal,canChat]);
  const activeItem=entries.filter(x=>hit(active,x.item.path)).sort((a,b)=>b.item.path.length-a.item.path.length)[0]?.item.path??active;
  const activeGroup=groups.find(g=>flat(g.items).some(i=>hit(active,i.path)))?.group.key;
+ const activeEntry=groups.find(g=>g.group.key===activeGroup);
+ const subTabs=activeEntry&&(activeEntry.items.length>1||!!activeEntry.items[0]?.children?.length)?activeEntry.items:[];
+ const activeTab=subTabs.find(i=>flat([i]).some(x=>x.path===activeItem))??subTabs.filter(i=>hit(active,i.path)).sort((a,b)=>b.path.length-a.path.length)[0];
+ const subLeaves=activeTab?.children?.length?leaves(activeTab):[];
  const stripGroups=groups.filter(({group})=>!["Dashboard","Organization","System status","Billing"].includes(group.label));
  const selected=groups.find(g=>g.group.key===menu),currentOrg=orgs.find(o=>o.id===principal?.organizationId);
  const search=q.trim().toLowerCase()?entries.filter(({group,item})=>`${group.label} ${item.label}`.toLowerCase().includes(q.trim().toLowerCase())).slice(0,8):[];
@@ -61,7 +83,9 @@ export function AppShell({children,active,onNavigate}:{children:ReactNode;active
   </aside>
   <div className="workspace">
    <header className="topbar"><button className="menu-button" aria-label="Open navigation" aria-expanded={mobile} aria-controls="mobile-navigation" onClick={()=>setMobile(true)}><Menu size={20}/></button><div className="workspace-name"><span>Ledgerly</span>{orgs.length>1?<select aria-label="Active organization" disabled={switching} value={principal?.organizationId||""} onChange={e=>void switchOrg(e.target.value)}>{orgs.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select>:<strong>{currentOrg?.name||"Workspace"}</strong>}</div><div className="search-wrap"><label className="global-search"><Search size={17}/><input aria-label="Search workspace" ref={searchRef} value={q} onChange={e=>setQ(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();if(search[0])go(search[0].item.path);else askSearch()}}} placeholder={canAskAi?"Search, jump to, or ask a question":"Search or jump to a page"}/></label>{q.trim()&&<div className="search-results" role="listbox" aria-label="Workspace search results">{search.map(({group,item})=>{const Icon=item.icon??group.icon;return <button role="option" aria-selected={false} key={`${group.key}-${item.path}`} onClick={()=>go(item.path)}><Icon size={16}/><span><strong>{item.label}</strong><small>{group.label}</small></span><ChevronRight size={15}/></button>})}{canAskAi&&<button role="option" aria-selected={false} className="search-ask-ai" onClick={askSearch}><Sparkles size={16}/><span><strong>Ask Ledgerly AI</strong><small>{q.trim()}</small></span><ChevronRight size={15}/></button>}{!search.length&&!canAskAi&&<p>No matching page</p>}</div>}</div><div className="topbar__actions">{appGlobalActions.filter(a=>allowed(a as GlobalAction,principal)&&!!subscription&&moduleInPlan(a.moduleKey,subscription.plan)).map(a=>{const A=a.component;return <A key={a.key} activePath={active}/>})}{canChat&&<button className="icon-button app-chat-bell" aria-label={chatUnread?`Team chat, ${chatUnread} unread`:"Team chat"} onClick={()=>go("work/chats")}><Bell size={19}/>{chatUnread>0&&<b>{chatUnread>99?"99+":chatUnread}</b>}</button>}<div className="account-wrap"><button className="profile" aria-label="Account menu" aria-expanded={account} aria-controls="account-menu" onClick={()=>setAccount(v=>!v)}><span className="profile-avatar">{initials}</span><span className="profile-copy"><strong>{name}</strong><small>{principal?.role}</small></span><ChevronDown size={14}/></button>{account&&<div className="account-menu" id="account-menu" role="menu"><p><b>{name}</b><small>{principal?.role}</small></p><button role="menuitem" onClick={()=>go("billing")}><Wallet size={15}/> Plan &amp; usage</button>{isAdmin&&<button role="menuitem" onClick={()=>go("workspace-settings")}><LayoutGrid size={15}/> Modules &amp; sections</button>}{subscription?.isPlatformAdmin&&<button role="menuitem" onClick={()=>go("platform-admin")}><ShieldCheck size={15}/> Platform admin</button>}<button role="menuitem" onClick={logout}><LogOut size={15}/> Log out</button></div>}</div></div></header>
-   <nav className="module-strip">{stripGroups.map(({group,items})=>{const Icon=group.icon,open=menu===group.key;return <button key={group.key} className={`module-pill ${activeGroup===group.key?"active":""} ${open?"open":""}`} aria-expanded={items.length>1||!!items[0]?.children?.length?open:undefined} onClick={()=>{setQuick(false);setApps(false);if(items.length===1&&!items[0]!.children?.length)go(items[0]!.path);else setMenu(open?null:group.key!)}}><span><Icon size={17}/></span>{group.label}{(items.length>1||items[0]?.children?.length)&&<ChevronDown size={14}/>}</button>})}</nav>
+   <ScrollRow className="module-strip" label="Modules" watch={activeGroup}>{stripGroups.map(({group,items})=>{const Icon=group.icon,open=menu===group.key;return <button key={group.key} className={`module-pill ${activeGroup===group.key?"active":""} ${open?"open":""}`} aria-expanded={items.length>1||!!items[0]?.children?.length?open:undefined} onClick={()=>{setQuick(false);setApps(false);if(items.length===1&&!items[0]!.children?.length)go(items[0]!.path);else setMenu(open?null:group.key!)}}><span><Icon size={17}/></span>{group.label}{(items.length>1||items[0]?.children?.length)&&<ChevronDown size={14}/>}</button>})}</ScrollRow>
+   {subTabs.length>0&&<ScrollRow className="module-subnav" label={`${activeEntry!.group.label} pages`} watch={activeItem}>{subTabs.map(i=>{const Icon=i.icon??Circle,on=i===activeTab;return <button key={`${i.path}-${i.label}`} className={`subnav-tab ${on?"active":""}`} aria-current={on&&!i.children?.length?"page":undefined} onClick={()=>go(i.children?.length?leaves(i)[0]!.path:i.path)}><Icon size={15}/><span>{i.label}</span>{!!i.children?.length&&<ChevronDown size={13}/>}</button>})}</ScrollRow>}
+   {subLeaves.length>0&&<ScrollRow className="module-subnav module-subnav-2" label={`${activeTab!.label} pages`} watch={activeItem}>{subLeaves.map(l=><button key={`${l.path}-${l.label}`} className={`subnav-chip ${l.path===activeItem?"active":""}`} aria-current={l.path===activeItem?"page":undefined} onClick={()=>go(l.path)}>{l.label}</button>)}</ScrollRow>}
    {subscription?.status==="suspended"&&<div className="plan-suspended">This organization's Ledgerly subscription is suspended. <button onClick={()=>go("billing")}>View plan &amp; usage</button></div>}
    <main>{children}</main>
   </div>

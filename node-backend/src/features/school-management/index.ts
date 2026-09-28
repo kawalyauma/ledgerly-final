@@ -18,7 +18,7 @@ import { createSchoolFeeBillingIntegrityRoutes } from "./fees-billing.js";
 import { createSchoolFeeBillingWorkspaceRoutes } from "./fees-billing-workspace.js";
 import { createSchoolFeeReceiptIntegrityRoutes } from "./fees-receipt-integrity.js";
 import { createSchoolFeeExportRoutes } from "./fees-export.js";
-import { createSchoolReceiptPrintingRoutes } from "./receipt-printing.js";
+import { createSchoolReceiptPrintingRoutes, registerReceiptVerifyRoute } from "./receipt-printing.js";
 import { sweepSchoolFeeInstallments } from "./fees-jobs.js";
 import { createAttendanceLifecycleRoutes } from "./attendance-lifecycle.js";
 import { createAttendanceIntegrityRoutes } from "./attendance-integrity.js";
@@ -52,6 +52,7 @@ export const schoolFeature: BackendFeature = {
     app.route("/api/v1/school/files",createSchoolFileRoutes(runtime));
     app.route("/api/v1/school/fees",createSchoolFeeReceiptIntegrityRoutes(runtime));
     app.route("/api/v1/school/fees",createSchoolReceiptPrintingRoutes(runtime));
+    registerReceiptVerifyRoute(app,runtime);
     app.route("/api/v1/school/fees",createSchoolFeeBillingWorkspaceRoutes(runtime));
     app.route("/api/v1/school/fees",createSchoolFeeBillingIntegrityRoutes(runtime));
     app.route("/api/v1/school/fees",createSchoolFeeOperationRoutes(runtime));

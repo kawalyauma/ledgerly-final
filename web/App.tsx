@@ -4,6 +4,7 @@ import { can } from "./api";
 import { AppShell } from "./components/AppShell";
 import { AuthPage } from "./pages/AuthPages";
 import { LandingPage } from "./pages/LandingPage";
+import { ReceiptVerifyPage } from "./pages/ReceiptVerifyPage";
 import { Button, Card } from "./components/ui";
 import { appRoutes, routeSections } from "../modules/frontend-registry";
 import { currentHashPath, routeKeyOf } from "./navigation";
@@ -28,6 +29,8 @@ export function App() {
   const routeKey = appRoutes[routeKeyOf(activePath)] ? routeKeyOf(activePath) : defaultPath;
 
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }, [activePath]);
+  // Public: the QR code on printed receipts opens this for anyone, signed in or not.
+  if (routeKeyOf(path) === "verify-receipt") return <ReceiptVerifyPage token={path.split("/")[1] ?? ""}/>;
   if (!principal) {
     // Visitors see the marketing page; #login / #signup open the auth screens.
     const authMode = routeKeyOf(path) === "signup" ? "register" : routeKeyOf(path) === "login" ? "login" : null;
