@@ -89,3 +89,4 @@
   .ov-sections li{flex-wrap:wrap}.ov-sec-actions{width:100%;justify-content:flex-end}
   .ov-breakdown li{grid-template-columns:90px 1fr auto}
 }
+.ov-section-title{display:flex;align-items:center;gap:7px}.ov-shortcuts{margin-bottom:18px}.ov-shortcuts .ov-launch-card{min-height:92px}

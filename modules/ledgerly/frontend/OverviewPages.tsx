@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowRight, ArrowUp, Eye, EyeOff, LayoutGrid, RefreshCw, RotateCcw, Sparkles } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Clock3, Eye, EyeOff, LayoutGrid, RefreshCw, RotateCcw, Sparkles, Star } from "lucide-react";
 import { can, del, get, put, type Principal } from "../../../web/api";
 import { useAuth } from "../../../web/auth";
 import { Button, Notice, Spinner } from "../../../web/components/ui";
@@ -8,6 +8,7 @@ import { appNavigation } from "../../frontend-registry";
 import type { FrontendNavigationGroup, FrontendNavigationItem } from "../../frontend-types";
 import { arrangeGroups, editableSections, NAVIGATION_CHANGED, SCHOOL_DEFAULT_SECTIONS, useNavigationSettings, type SectionSetting } from "../../../web/navigationSettings";
 import "./overview.css";
+import { readWorkspaceShortcuts, WORKSPACE_SHORTCUTS_CHANGED, type WorkspaceShortcut } from "../../../web/workspaceShortcuts";
 
 type Point = { label: string; value: number };
 type Overview = {
@@ -156,6 +157,8 @@ export function WelcomePage() {
   const { org, name } = useIdentity(principal);
   const { data } = useOverview();
   const isAdmin = !!principal && ["owner", "admin"].includes(principal.role);
+  const [shortcuts,setShortcuts]=useState<{favorites:WorkspaceShortcut[];recent:WorkspaceShortcut[]}>({favorites:[],recent:[]});
+  useEffect(()=>{const load=()=>setShortcuts(readWorkspaceShortcuts(principal?.organizationId,principal?.userId));load();addEventListener(WORKSPACE_SHORTCUTS_CHANGED,load);return()=>removeEventListener(WORKSPACE_SHORTCUTS_CHANGED,load)},[principal?.organizationId,principal?.userId]);
   const hour = new Date().getHours(), greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const sections = useMemo(() => layout === undefined ? [] : arrangeGroups(appNavigation, layout)
     .map(g => ({ group: g, items: g.items.filter(i => allowedItem(i, principal)) })).filter(g => g.items.length), [layout, principal]);
@@ -174,6 +177,8 @@ export function WelcomePage() {
       {data.fees && <Tile label="Outstanding" value={money(data.fees.outstandingMinor)} tone={data.fees.outstandingMinor > 0 ? "bad" : undefined} />}
       {data.staff && <Tile label="Staff" value={fmtInt(data.staff.total)} />}
     </div>}
+    {!!shortcuts.favorites.length&&<><h2 className="ov-section-title"><Star size={17}/> My shortcuts</h2><div className="ov-launch ov-shortcuts">{shortcuts.favorites.slice(0,6).map(item=><button key={item.path} className="ov-launch-card" onClick={()=>{location.hash=item.path}}><span className="ov-launch-icon"><Star size={19}/></span><strong>{item.label}</strong><small>{item.group}</small></button>)}</div></>}
+    {!!shortcuts.recent.length&&<><h2 className="ov-section-title"><Clock3 size={17}/> Continue working</h2><div className="ov-launch ov-shortcuts">{shortcuts.recent.slice(0,4).map(item=><button key={item.path} className="ov-launch-card" onClick={()=>{location.hash=item.path}}><span className="ov-launch-icon"><Clock3 size={19}/></span><strong>{item.label}</strong><small>{item.group}</small></button>)}</div></>}
     <h2 className="ov-section-title">Your workspace</h2>
     <div className="ov-launch">
       {sections.map(({ group, items }) => { const Icon = group.icon; return <button key={group.key} className="ov-launch-card" onClick={() => { location.hash = items[0]!.path; }}>
