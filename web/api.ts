@@ -32,12 +32,22 @@ export async function postStream(path:string,body:unknown,extraHeaders?:HeadersI
 export const can=(p:Principal|null,s:string)=>!!p&&(p.role==="owner"||p.role==="admin"||p.scopes.includes(s));
 export async function downloadFile(path:string,filename:string){const response=await fetch(`/api/v1${path}`,{headers:{Authorization:`Bearer ${authStore.getAccess()||""}`}});if(!response.ok){const payload=await response.clone().json().catch(()=>({})) as {error?:{code?:string;message?:string;details?:unknown}};throw new ApiError(response.status,payload.error?.code||"DOWNLOAD_FAILED",payload.error?.message||`The file could not be downloaded (${response.status})`,payload.error?.details)}const blob=await response.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url)}
 
-export async function uploadFile<T>(path:string,file:File,purpose="document",retry=true):Promise<T>{
+export type UploadProgress={loaded:number;total:number;percent:number};
+export type UploadProgressHandler=(progress:UploadProgress)=>void;
+export async function uploadFile<T>(path:string,file:File,purpose="document",onProgress?:UploadProgressHandler,retry=true):Promise<T>{
   const form=new FormData();form.append("file",file);form.append("purpose",purpose);
-  const headers=new Headers();headers.set("Accept","application/json");const token=authStore.getAccess();if(token)headers.set("Authorization",`Bearer ${token}`);
-  let response:Response;try{response=await fetch(`/api/v1${path}`,{method:"POST",headers,body:form})}catch{throw new ApiError(0,"NETWORK_ERROR","Unable to reach the finance service. Check that the local backend is running and try again.")}
-  if(response.status===401&&retry&&authStore.getRefresh()&&await refresh())return uploadFile<T>(path,file,purpose,false);
-  const payload=await response.json().catch(()=>({})) as {data?:T;error?:{code?:string;message?:string;details?:unknown}}&T;
-  if(!response.ok)throw new ApiError(response.status,payload.error?.code||"UPLOAD_FAILED",payload.error?.message||`Upload failed (${response.status})`,payload.error?.details);
+  const response=await new Promise<{status:number;text:string}>((resolve,reject)=>{
+    const request=new XMLHttpRequest();request.open("POST",`/api/v1${path}`);request.setRequestHeader("Accept","application/json");
+    const token=authStore.getAccess();if(token)request.setRequestHeader("Authorization",`Bearer ${token}`);
+    request.upload.addEventListener("progress",event=>{if(!event.lengthComputable)return;const percent=Math.min(100,Math.round(event.loaded/event.total*100));onProgress?.({loaded:event.loaded,total:event.total,percent});});
+    request.addEventListener("load",()=>resolve({status:request.status,text:request.responseText}));
+    request.addEventListener("error",()=>reject(new ApiError(0,"NETWORK_ERROR","Unable to reach the finance service. Check that the local backend is running and try again.")));
+    request.addEventListener("abort",()=>reject(new ApiError(0,"UPLOAD_ABORTED","The upload was cancelled.")));
+    onProgress?.({loaded:0,total:file.size,percent:0});request.send(form);
+  });
+  if(response.status===401&&retry&&authStore.getRefresh()&&await refresh())return uploadFile<T>(path,file,purpose,onProgress,false);
+  let payload={} as {data?:T;error?:{code?:string;message?:string;details?:unknown}}&T;try{payload=JSON.parse(response.text||"{}")}catch{}
+  if(response.status<200||response.status>=300)throw new ApiError(response.status,payload.error?.code||"UPLOAD_FAILED",payload.error?.message||`Upload failed (${response.status})`,payload.error?.details);
+  onProgress?.({loaded:file.size,total:file.size,percent:100});
   return (payload.data??payload) as T;
 }

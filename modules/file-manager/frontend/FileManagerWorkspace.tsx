@@ -43,6 +43,7 @@ export function FileManagerWorkspace(){
   const [folders,setFolders]=useState<FolderRow[]>([]),[items,setItems]=useState<FileItem[]>([]),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false);
   const [query,setQuery]=useState(""),[source,setSource]=useState("all"),[status,setStatus]=useState<"active"|"archived"|"trashed">("active"),[folderId,setFolderId]=useState<string|null>(null);
   const [selected,setSelected]=useState<FileDetails|null>(null),[error,setError]=useState(""),[notice,setNotice]=useState("");
+  const [uploadProgress,setUploadProgress]=useState<{name:string;percent:number;current:number;total:number}|null>(null);
   const [newFolderOpen,setNewFolderOpen]=useState(false),[newFolderName,setNewFolderName]=useState("");
   const [dropActive,setDropActive]=useState(false),[previewUrl,setPreviewUrl]=useState<string|null>(null),[previewMime,setPreviewMime]=useState("");
   const uploadRef=useRef<HTMLInputElement>(null),versionRef=useRef<HTMLInputElement>(null);
@@ -70,7 +71,7 @@ export function FileManagerWorkspace(){
   }
   async function uploadFiles(files:FileList|File[]){
     const list=Array.from(files);if(!list.length)return;setBusy(true);setError("");let complete=0;
-    try{for(const file of list){const created=await uploadFile<FileItem>("/files/upload",file,"document");if(folderId)await patch(`/files/items/${created.id}`,{folderId});complete++}setNotice(`${complete} file${complete===1?"":"s"} saved to Documents & Files.`);await load(false)}catch(e){setError(`${complete?`${complete} saved. `:""}${errorText(e)}`);await load(false)}finally{setBusy(false);if(uploadRef.current)uploadRef.current.value=""}
+    try{for(const [index,file] of list.entries()){setUploadProgress({name:file.name,percent:0,current:index+1,total:list.length});const created=await uploadFile<FileItem>("/files/upload",file,"document",progress=>setUploadProgress({name:file.name,percent:progress.percent,current:index+1,total:list.length}));if(folderId)await patch(`/files/items/${created.id}`,{folderId});complete++}setNotice(`${complete} file${complete===1?"":"s"} saved to Documents & Files.`);await load(false)}catch(e){setError(`${complete?`${complete} saved. `:""}${errorText(e)}`);await load(false)}finally{setUploadProgress(null);setBusy(false);if(uploadRef.current)uploadRef.current.value=""}
   }
   async function syncSystem(){
     setBusy(true);setError("");try{const r=await post<{imported:number;aiGenerated:number;schoolFiles:number;scannerFiles:number}>("/files/sync-system",{});setNotice(r.imported?`Added ${r.imported} existing system document${r.imported===1?"":"s"} to the library.`:"Library is already synchronized with existing system documents.");await load(false)}catch(e){setError(errorText(e))}finally{setBusy(false)}
@@ -85,7 +86,7 @@ export function FileManagerWorkspace(){
     if(!selected)return;setBusy(true);setError("");try{await post(`/files/items/${selected.id}/restore`,{});setNotice("Document restored.");setSelected(await get<FileDetails>(`/files/items/${selected.id}`));await load(false)}catch(e){setError(errorText(e))}finally{setBusy(false)}
   }
   async function addVersion(file:File){
-    if(!selected)return;setBusy(true);setError("");try{await uploadFile(`/files/items/${selected.id}/versions`,file,"version");setSelected(await get<FileDetails>(`/files/items/${selected.id}`));setNotice("New file version saved. Earlier versions are still available.");await load(false)}catch(e){setError(errorText(e))}finally{setBusy(false);if(versionRef.current)versionRef.current.value=""}
+    if(!selected)return;setBusy(true);setError("");setUploadProgress({name:file.name,percent:0,current:1,total:1});try{await uploadFile(`/files/items/${selected.id}/versions`,file,"version",progress=>setUploadProgress({name:file.name,percent:progress.percent,current:1,total:1}));setSelected(await get<FileDetails>(`/files/items/${selected.id}`));setNotice("New file version saved. Earlier versions are still available.");await load(false)}catch(e){setError(errorText(e))}finally{setUploadProgress(null);setBusy(false);if(versionRef.current)versionRef.current.value=""}
   }
   async function showPreview(){
     if(!selected)return;setBusy(true);setError("");try{closePreview();const path=`/files/items/${selected.id}/content${selected.hasPreview?"?preview=1":""}`,blob=await authorizedBlob(path),url=URL.createObjectURL(blob);setPreviewMime(blob.type||selected.previewMimeType||selected.mimeType);setPreviewUrl(url)}catch(e){setError(errorText(e))}finally{setBusy(false)}
@@ -103,6 +104,7 @@ export function FileManagerWorkspace(){
     </header>
 
     {(error||notice)&&<div className={classNames("fm-banner",error?"fm-banner-error":"fm-banner-ok")} role="status"><span>{error||notice}</span><button aria-label="Dismiss message" onClick={()=>{setError("");setNotice("")}}><X size={16}/></button></div>}
+    {uploadProgress&&<div className="fm-banner" role="status" aria-live="polite"><span><b>Uploading {uploadProgress.current} of {uploadProgress.total}: {uploadProgress.name}</b> · {uploadProgress.percent<100?`${uploadProgress.percent}%`:`Processing…`} <progress max="100" value={uploadProgress.percent}/></span></div>}
 
     <section className="fm-stats">
       <div><strong>{summary.totalFiles}</strong><span>Catalogued files</span></div>
