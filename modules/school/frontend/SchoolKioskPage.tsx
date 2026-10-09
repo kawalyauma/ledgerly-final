@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CalendarDays, CircleDollarSign, Clock3, GraduationCap, HeartHandshake, Maximize, RefreshCw, School, ShieldCheck, UserCheck, Users } from "lucide-react";
-import { errorText, get } from "../../../web/api";
+import { api, errorText } from "../../../web/api";
 import "./school-kiosk.css";
 
 type R = Record<string, any>;
@@ -8,6 +8,11 @@ type R = Record<string, any>;
 const n = (value: unknown) => Number(value || 0);
 const percent = (part: unknown, total: unknown) => n(total) ? Math.round(n(part) * 100 / n(total)) : 0;
 const words = (value: unknown) => String(value ?? "").replaceAll("_", " ");
+
+function termDate(value: unknown) {
+  const date = new Date(`${String(value ?? "").slice(0, 10)}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString("en-UG", { day: "numeric", month: "short", year: "numeric" });
+}
 
 function money(value: unknown, currency = "UGX") {
   return new Intl.NumberFormat("en-UG", { style: "currency", currency, maximumFractionDigits: currency === "UGX" ? 0 : 2 }).format(n(value) / 100);
@@ -32,7 +37,7 @@ export function SchoolKioskPage() {
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
-    try { setSummary(await get<R>("/school/kiosk/summary")); setError(""); }
+    try { setSummary(await api<R>("/school/kiosk/summary", { cache: "no-store" })); setError(""); }
     catch (reason) { setError(errorText(reason)); }
     finally { setLoading(false); }
   }, []);
@@ -92,7 +97,7 @@ export function SchoolKioskPage() {
       <article className="kiosk-panel kiosk-panel--period">
         <div className="kiosk-panel__head"><div><small>Academic calendar</small><h2>{summary?.period?.term || "Current term not set"}</h2></div><CalendarDays/></div>
         <p className="kiosk-year">{summary?.period?.academicYear || "Academic year not configured"}</p>
-        <div className="kiosk-term-dates"><span><small>Term opens</small><b>{summary?.period?.termStartsOn ? new Date(`${summary.period.termStartsOn}T00:00:00`).toLocaleDateString("en-UG", { day: "numeric", month: "short" }) : "—"}</b></span><i/><span><small>Term closes</small><b>{summary?.period?.termEndsOn ? new Date(`${summary.period.termEndsOn}T00:00:00`).toLocaleDateString("en-UG", { day: "numeric", month: "short" }) : "—"}</b></span></div>
+        <div className="kiosk-term-dates"><span><small>Term opens</small><b>{termDate(summary?.period?.termStartsOn)}</b></span><i/><span><small>Term closes</small><b>{termDate(summary?.period?.termEndsOn)}</b></span></div>
       </article>
     </section>
 
