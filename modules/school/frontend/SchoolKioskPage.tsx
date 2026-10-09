@@ -87,8 +87,7 @@ function FeeTrend({ days, currency }: { days: R[]; currency: string }) {
       const amount = n(day.amountMinor), isToday = index === days.length - 1, date = new Date(`${day.day}T00:00:00`);
       const label = isToday || (day === peak && amount > 0);
       return <div key={day.day} className={`kiosk-trend__col${isToday ? " is-today" : ""}`} title={`${date.toDateString()}: ${money(amount, currency)} · ${n(day.receiptCount)} receipts`}>
-        {label && <span className="kiosk-trend__value">{money(amount, currency, true)}</span>}
-        <em style={{ height: `${Math.max(amount ? 3 : 0, amount * 100 / max)}%`, ["--d" as string]: `${index * 45}ms` }}/>
+        <em style={{ height: `${Math.max(amount ? 3 : 0, amount * 100 / max)}%`, ["--d" as string]: `${index * 45}ms` }}>{label && <span className="kiosk-trend__value">{money(amount, currency, true)}</span>}</em>
         <small>{isToday ? "Today" : date.toLocaleDateString("en-UG", { weekday: "narrow" })}</small>
       </div>;
     })}
