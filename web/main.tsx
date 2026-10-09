@@ -5,6 +5,7 @@ import { AuthProvider } from "./auth";
 import { installDynamicSchoolSelectors } from "./dynamicSchoolSelectors";
 import { installLegacyPrintBridge } from "./printing";
 import { installJournalReversalGuard } from "./reversalGuard";
+import { SchoolKioskApp } from "../modules/school/frontend/SchoolKioskPage";
 import "./styles.css";
 import "./theme.css";
 import "./fusion.css";
@@ -19,4 +20,6 @@ installLegacyPrintBridge();
 installDynamicSchoolSelectors();
 installJournalReversalGuard();
 
-createRoot(document.getElementById("root")!).render(<React.StrictMode><AuthProvider><App /></AuthProvider></React.StrictMode>);
+// #kiosk is an unattended wall display signed in with a display-only key, so it skips the app shell and login.
+const isKiosk = /^#kiosk(=|$)/.test(window.location.hash);
+createRoot(document.getElementById("root")!).render(<React.StrictMode>{isKiosk ? <SchoolKioskApp /> : <AuthProvider><App /></AuthProvider>}</React.StrictMode>);
