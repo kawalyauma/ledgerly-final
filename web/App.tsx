@@ -45,6 +45,14 @@ export function App() {
   const inPlan = !subscription || sectionInPlan(section, subscription.plan);
   const suspended = subscription?.status === "suspended" && !OPEN_WHEN_SUSPENDED.has(routeKey);
 
+  // Kiosk is intentionally chrome-free: the display is read-only and designed for a TV/monitor.
+  if (routeKey === "schoolkiosk") {
+    if (!allowed) return <PermissionDenied fallback={defaultPath}/>;
+    if (suspended) return <Suspended/>;
+    if (!inPlan) return <UpgradeRequired needed={planName(requiredPlan(section!))} current={subscription!.planName}/>;
+    return <View key={routeKey}/>;
+  }
+
   return <AppShell active={activePath} onNavigate={next => { location.hash = next; }}>
     {!allowed ? <PermissionDenied fallback={defaultPath}/>
       : suspended ? <Suspended/>

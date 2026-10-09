@@ -1,8 +1,9 @@
-import { BarChart3, BriefcaseBusiness, CircleDollarSign, ClipboardCheck, FileSpreadsheet, Gavel, GraduationCap, KeyRound, LayoutDashboard, School, Settings2, Smartphone, TrendingUp, Users, WalletCards } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, CircleDollarSign, ClipboardCheck, FileSpreadsheet, Gavel, GraduationCap, KeyRound, LayoutDashboard, Monitor, School, Settings2, Smartphone, TrendingUp, Users, WalletCards } from "lucide-react";
 import type { FrontendModuleDefinition } from "../../frontend-types";
 import { SchoolManagementPage } from "./SchoolManagementPages";
 import { SchoolPayPage } from "./SchoolPayPage";
 import { MobilePinAccessPage } from "./MobilePinAccessPage";
+import { SchoolKioskPage } from "./SchoolKioskPage";
 
 const moduleDefinition: FrontendModuleDefinition = {
   key: "school-management",
@@ -13,6 +14,7 @@ const moduleDefinition: FrontendModuleDefinition = {
     school: { scope: "school:read", view: SchoolManagementPage },
     schoolpins: { scope: "school:write", view: MobilePinAccessPage },
     schoolpay: { scope: "school:read", view: SchoolPayPage },
+    schoolkiosk: { scope: "school:read", view: SchoolKioskPage },
   },
   navigation: [
     {
@@ -21,6 +23,7 @@ const moduleDefinition: FrontendModuleDefinition = {
       order: 20,
       items: [
         { label: "Overview", path: "school", scope: "school:read", icon: LayoutDashboard },
+        { label: "Kiosk dashboard", path: "schoolkiosk", scope: "school:read", icon: Monitor },
         { label: "Students", path: "school/students", scope: "school:read", icon: GraduationCap },
         { label: "Admissions", path: "school/admissions", scope: "school:read", icon: ClipboardCheck },
         { label: "Staff & teachers", path: "school/staff", scope: "school:read", icon: BriefcaseBusiness },
