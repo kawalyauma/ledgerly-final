@@ -11,6 +11,7 @@ import { coverage, recordTeaching, requestStudentSummary, studentOverview, teach
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
 import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished, writeUntil } from "./schemes.js";
 import { lessonPrintHtml } from "./print.js";
+import { me, search } from "./me.js";
 import { postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
 import { codedFigureRow, figureExamItem, getFigure, labelFigure, labelingImage, requestFigure } from "./figures.js";
 import { codedSpecSchema } from "./figures-coded.js";
@@ -48,6 +49,13 @@ export function createLearningRoutes(runtime: Runtime) {
   const org = (c: { get(key: "principal"): { organizationId: string } }) => c.get("principal").organizationId;
 
   /* Engine: provider switch, pause/stop, daily limit, and the step queue. */
+  /* Ledgerly Academics app: my day and one search box. */
+  r.get("/me", read, async c => c.json({ data: await me(runtime, c.get("principal")) }));
+  r.get("/search", read, async c => {
+    const f = parse(z.object({ q: z.string().trim().min(2).max(100) }), c.req.query());
+    return c.json({ data: await search(runtime, org(c), f.q) });
+  });
+
   r.get("/engine", read, async c => {
     const o = org(c);
     const [settings, queue, today] = await Promise.all([
