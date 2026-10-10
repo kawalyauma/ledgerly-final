@@ -5,18 +5,22 @@
     <application
         android:allowBackup="false"
         android:icon="@drawable/ic_launcher"
-        android:label="Ledgerly Scanner"
+        android:label="Ledgerly Academics"
         android:supportsRtl="true"
         android:theme="@style/Theme.LedgerlyScanner">
         <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="document_ui" />
-        <activity android:name=".LoginActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".MainActivity" />
-        <activity android:name=".NewBatchActivity" />
-        <activity android:name=".BatchActivity" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

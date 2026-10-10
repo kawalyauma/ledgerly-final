@@ -34,11 +34,11 @@ class Api(private val context: Context) {
         val res = send(Request.Builder().url("$baseUrl/auth/login").post(body.toString().toRequestBody(json)).build(), auth = false)
         saveTokens(res.getJSONObject("data"))
         prefs.edit().putString("user", identifier).apply()
-        val ctx = get("/api/v1/learn/captures/context")
-        prefs.edit().putString("school", ctx.optString("school", "")).apply()
+        val ctx = runCatching { get("/api/v1/learn/captures/context") }.getOrNull()
+        prefs.edit().putString("school", ctx?.optString("school", "") ?: "").apply()
     }
 
-    fun logout() = prefs.edit().remove("access").remove("refresh").remove("school").remove("user").apply()
+    fun logout() = prefs.edit().remove("access").remove("refresh").remove("school").remove("user").remove("me").apply()
 
     private fun saveTokens(d: JSONObject) {
         prefs.edit().putString("access", d.optString("accessToken")).putString("refresh", d.optString("refreshToken")).apply()
@@ -69,6 +69,29 @@ class Api(private val context: Context) {
     }
 
     fun get(path: String): JSONObject = send(Request.Builder().url("$baseUrl$path").get().build()).getJSONObject("data")
+    /** The "data" member as whatever it is (object or array), for screens that read lists. */
+    fun data(path: String): Any = send(Request.Builder().url("$baseUrl$path").get().build()).get("data")
+    fun list(path: String): org.json.JSONArray = data(path) as org.json.JSONArray
+    fun put(path: String, body: JSONObject): JSONObject = send(Request.Builder().url("$baseUrl$path").put(body.toString().toRequestBody(json)).build()).getJSONObject("data")
+    val accessToken get() = prefs.getString("access", "") ?: ""
+    /** Raw bytes (Word files, images), refreshing the token once if it expired. */
+    fun bytes(path: String, retried: Boolean = false): ByteArray {
+        val req = Request.Builder().url("$baseUrl$path").header("Authorization", "Bearer $accessToken").get().build()
+        http.newCall(req).execute().use { res ->
+            if (res.code == 401 && !retried && refresh()) return bytes(path, true)
+            if (!res.isSuccessful) throw ApiException(res.code, "Download failed (${res.code})")
+            return res.body!!.bytes()
+        }
+    }
+    /** Client used for images: adds the sign-in token and refreshes it when it expires. */
+    val imageClient: OkHttpClient by lazy {
+        http.newBuilder().addInterceptor { chain ->
+            val first = chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $accessToken").build())
+            if (first.code == 401 && synchronized(this) { refresh() }) {
+                first.close(); chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $accessToken").build())
+            } else first
+        }.build()
+    }
     fun post(path: String, body: JSONObject): JSONObject = send(Request.Builder().url("$baseUrl$path").post(body.toString().toRequestBody(json)).build()).getJSONObject("data")
 
     fun uploadPage(batchId: String, clientPageId: String, seq: Int, studentId: String?, file: File): JSONObject {

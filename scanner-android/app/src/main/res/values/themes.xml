@@ -2,7 +2,8 @@
     <style name="Theme.LedgerlyScanner" parent="Theme.Material3.Light.NoActionBar">
         <item name="colorPrimary">#1D5FD1</item>
         <item name="colorOnPrimary">#FFFFFF</item>
-        <item name="android:statusBarColor">#123D8A</item>
-        <item name="android:windowBackground">#F6F8FB</item>
+        <item name="android:statusBarColor">#F5F8FD</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">#F5F8FD</item>
     </style>
 </resources>

@@ -16,7 +16,7 @@ export async function me(runtime: Runtime, p: AuthPrincipal) {
   const [user, school, term, staff] = await Promise.all([
     runtime.db.query(`SELECT display_name AS name,email FROM users WHERE id=$1`, [p.userId]),
     runtime.db.query(`SELECT name FROM organizations WHERE id=$1`, [o]),
-    runtime.db.query(`SELECT id,name,starts_on::text AS "startsOn",ends_on::text AS "endsOn",GREATEST(1,(($2::date-starts_on)/7)+1)::int AS week
+    runtime.db.query(`SELECT id,name,starts_on::text AS "startsOn",ends_on::text AS "endsOn",CASE WHEN $2::date BETWEEN starts_on AND ends_on THEN (($2::date-starts_on)/7)+1 END::int AS week,($2::date BETWEEN starts_on AND ends_on) AS "inTerm"
                         FROM school_terms WHERE organization_id=$1 ORDER BY ($2::date BETWEEN starts_on AND ends_on) DESC,is_current DESC,starts_on DESC LIMIT 1`, [o, today]),
     runtime.db.query(`SELECT id,concat_ws(' ',first_name,last_name) AS name,is_teacher AS "isTeacher" FROM school_staff_profiles
                        WHERE organization_id=$1 AND user_id=$2 AND deleted_at IS NULL ORDER BY active DESC LIMIT 1`, [o, p.userId]),
@@ -84,7 +84,7 @@ export async function search(runtime: Runtime, organizationId: string, q: string
     runtime.db.query(
       `SELECT l.id,l.title,l.subtopic,l.week,l.status,c.name AS "className",s.name AS subject,sc.id AS "schemeId"
          FROM lrn_lessons l JOIN lrn_schemes sc ON sc.id=l.scheme_id JOIN school_classes c ON c.id=sc.class_id JOIN school_subjects s ON s.id=sc.subject_id
-        WHERE sc.organization_id=$1 AND sc.status<>'archived' AND (l.title ILIKE $2 OR l.subtopic ILIKE $2 OR l.notes ILIKE $2)
+        WHERE sc.organization_id=$1 AND sc.status<>'archived' AND (l.title ILIKE $2 OR l.subtopic ILIKE $2 OR l.notes_markdown ILIKE $2)
         ORDER BY (l.title ILIKE $2) DESC,l.seq LIMIT 8`, [organizationId, like]),
     runtime.db.query(
       `SELECT st.id,concat_ws(' ',st.first_name,st.middle_name,st.last_name) AS name,st.admission_number AS "admissionNumber",c.name AS "className"
