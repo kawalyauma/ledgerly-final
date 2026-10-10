@@ -63,6 +63,14 @@ export async function teachingAt(runtime: Runtime, organizationId: string, input
           AND (ev.taught_on < $2::date OR ev.starts_at IS NULL OR ev.starts_at <= $3::time)
         ORDER BY ev.class_id,ev.subject_id,ev.taught_on DESC,ev.starts_at DESC NULLS LAST,ev.created_at DESC)
      SELECT c.id AS "classId",c.name AS "className",
+            (SELECT json_build_object('subject',ps.name,'topic',pp.topic,'subtopic',pp.subtopic,'part',pp.lesson_part,'parts',pp.lesson_parts,
+                    'startsAt',to_char(pp.starts_at,'HH24:MI'),'endsAt',to_char(pp.ends_at,'HH24:MI'),'status',pp.status,'lessonId',pp.lesson_id)
+               FROM lrn_period_plan pp JOIN lrn_timetables tt ON tt.id=pp.timetable_id AND tt.status='published' JOIN school_subjects ps ON ps.id=pp.subject_id
+              WHERE pp.organization_id=$1 AND pp.class_id=c.id AND pp.plan_date=$2::date AND $3::time >= pp.starts_at AND $3::time < pp.ends_at LIMIT 1) AS "plannedNow",
+            (SELECT json_build_object('subject',ps.name,'topic',pp.topic,'subtopic',pp.subtopic,'part',pp.lesson_part,'parts',pp.lesson_parts,
+                    'startsAt',to_char(pp.starts_at,'HH24:MI'),'endsAt',to_char(pp.ends_at,'HH24:MI'),'lessonId',pp.lesson_id)
+               FROM lrn_period_plan pp JOIN lrn_timetables tt ON tt.id=pp.timetable_id AND tt.status='published' JOIN school_subjects ps ON ps.id=pp.subject_id
+              WHERE pp.organization_id=$1 AND pp.class_id=c.id AND pp.plan_date=$2::date AND pp.starts_at > $3::time ORDER BY pp.starts_at LIMIT 1) AS "plannedNext",
             ns.subject_id AS "nowSubjectId",nsub.name AS "nowSubject",to_char(ns.starts_at,'HH24:MI') AS "nowStarts",to_char(ns.ends_at,'HH24:MI') AS "nowEnds",
             COALESCE(json_agg(json_build_object(
               'subjectId',l.subject_id,'subject',sub.name,'topic',l.topic,'subtopic',l.subtopic,'taughtOn',l.taught_on,'evidence',l.evidence,

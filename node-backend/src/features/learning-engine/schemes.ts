@@ -6,6 +6,7 @@ import { ulibtech } from "../school-management/ulibtech.js";
 import { enqueueTask, onTaskFailed, registerTaskHandler, type TaskContext } from "./engine.js";
 import { addQuestion, COGNITIVE_LEVELS, QUESTION_KINDS } from "./questions.js";
 import { quoteAppearsIn } from "./signature.js";
+import { sanitizeSvg } from "./svg.js";
 import { formatPassages, ingestResource, openingPassages, relevantPassages, type Passage } from "./sources.js";
 
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
@@ -148,6 +149,7 @@ const outlineReply = z.object({
       title: z.string().min(1).max(300),
       subtopic: z.string().max(300).nullish(),
       week: z.number().int().min(1).max(20).nullish(),
+      periods: z.number().int().min(1).max(10).nullish(),
       objectives: z.array(z.string().max(500)).max(10).default([]),
       sourcePassageIds: ids,
     })).max(60),
@@ -169,12 +171,14 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
     prompt: [
       `Task: draft the OUTLINE of a scheme of work for ${scheme.subjectName}, ${scheme.className}, ${scheme.termName}.`,
       `The term has ${scheme.weeks} teaching weeks with ${scheme.periodsPerWeek} periods a week (at most ${scheme.weeks * scheme.periodsPerWeek} lessons).`,
-      "Take the themes, topics, subtopics and their order from the passages below (they come from Ugandan schemes of work, lesson plans and notes in the school e-library).",
+      "You are composing the SCHOOL'S OWN scheme. The passages below (Ugandan curricula, schemes of work, lesson plans, notes and past papers from the school e-library) are reference material:",
+      "combine them — follow the curriculum's order and coverage where present, use the reference schemes for week-by-week pacing, and the notes and past papers for what each subtopic must cover. Do not copy one reference scheme blindly.",
+      "Give each lesson the number of timetable periods it needs (periods), taken from the reference schemes' period columns where shown (e.g. 'PD 1-2' = 2), otherwise judged from its content.",
       `Use this term's part of the material (${scheme.termName}) when the passages cover several terms.`,
       "Do NOT write lesson content yet. Each unit and lesson must cite the passage ids it comes from in sourcePassageIds.",
       "",
       "Reply shape:",
-      `{"title":string,"summary":string,"units":[{"title":string,"theme":string|null,"weekFrom":int|null,"weekTo":int|null,"competences":string|null,"sourcePassageIds":[string],"lessons":[{"title":string,"subtopic":string|null,"week":int|null,"objectives":[string],"sourcePassageIds":[string]}]}],"gaps":[string]}`,
+      `{"title":string,"summary":string,"units":[{"title":string,"theme":string|null,"weekFrom":int|null,"weekTo":int|null,"competences":string|null,"sourcePassageIds":[string],"lessons":[{"title":string,"subtopic":string|null,"week":int|null,"periods":int,"objectives":[string],"sourcePassageIds":[string]}]}],"gaps":[string]}`,
       "",
       "<passages>",
       formatPassages(passages),
@@ -183,8 +187,8 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   }));
   // Keep only what is traceable to the passages we supplied.
   const cite = (list: string[]) => list.filter(id => allowed.has(id));
-  const maxLessons = scheme.weeks * scheme.periodsPerWeek;
-  let lessonSeq = 0, dropped = 0;
+  const maxPeriods = scheme.weeks * scheme.periodsPerWeek;
+  let lessonSeq = 0, dropped = 0, periodsUsed = 0;
   const client = await runtime.db.connect();
   try {
     await client.query("BEGIN");
@@ -199,12 +203,14 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
         `INSERT INTO lrn_units(id,organization_id,scheme_id,seq,title,theme,week_from,week_to,competences,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [unitId, task.organizationId, scheme.id, u + 1, unit.title, unit.theme ?? null, unit.weekFrom ?? null, unit.weekTo ?? null, unit.competences ?? null, unitCites]);
       for (const lesson of lessons) {
-        if (lessonSeq >= maxLessons) { dropped += 1; continue; }
+        const periods = lesson.periods ?? 1;
+        if (periodsUsed + periods > maxPeriods) { dropped += 1; continue; }
         lessonSeq += 1;
+        periodsUsed += periods;
         await client.query(
-          `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,title,subtopic,objectives,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10)`,
+          `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,periods,title,subtopic,objectives,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$11,$7,$8,$9::jsonb,$10)`,
           [createId("lles"), task.organizationId, scheme.id, unitId, lessonSeq, lesson.week ?? unit.weekFrom ?? null, lesson.title, lesson.subtopic ?? null,
-            JSON.stringify(lesson.objectives), cite(lesson.sourcePassageIds).length ? cite(lesson.sourcePassageIds) : unitCites]);
+            JSON.stringify(lesson.objectives), cite(lesson.sourcePassageIds).length ? cite(lesson.sourcePassageIds) : unitCites, periods]);
       }
     }
     if (!lessonSeq) throw new Error("The outline had no lessons that trace back to the e-library passages.");
@@ -220,7 +226,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   }
   await queueNextLesson(runtime, task.organizationId, scheme.id, task.requestedBy);
   passages = [];
-  return { units: reply.units.length, lessons: lessonSeq, droppedUncited: dropped, gaps: reply.gaps };
+  return { units: reply.units.length, lessons: lessonSeq, periods: periodsUsed, droppedUncitedOrOverTerm: dropped, gaps: reply.gaps };
 });
 
 /** Lessons are written strictly one after another: each finished lesson queues the next pending one. */
@@ -243,6 +249,31 @@ const lessonReply = z.object({
   lifeSkills: z.string().max(2000).nullish(),
   assessment: z.string().max(4000).nullish(),
   sourcePassageIds: ids,
+  lessonPlan: z.object({
+    competences: z.array(z.string().max(500)).max(8).default([]),
+    languageCompetence: z.string().max(500).nullish(),
+    objectives: z.array(z.string().max(500)).max(8).default([]),
+    priorKnowledge: z.string().max(1000).nullish(),
+    methods: z.array(z.string().max(200)).max(10).default([]),
+    materials: z.array(z.string().max(200)).max(15).default([]),
+    references: z.array(z.string().max(300)).max(8).default([]),
+    steps: z.array(z.object({
+      stage: z.string().max(80),
+      minutes: z.number().int().min(1).max(120).nullish(),
+      teacherActivity: z.string().max(2000),
+      learnerActivity: z.string().max(2000),
+    })).min(1).max(10),
+    assessment: z.string().max(2000).nullish(),
+    homework: z.string().max(1000).nullish(),
+    lifeSkills: z.array(z.string().max(120)).max(8).default([]),
+  }).nullish(),
+  diagrams: z.array(z.object({
+    key: z.string().regex(/^[a-z0-9-]{1,40}$/),
+    title: z.string().min(1).max(200),
+    caption: z.string().max(500).nullish(),
+    svg: z.string().max(60000),
+    sourcePassageId: z.string().max(80).nullish(),
+  })).max(4).default([]),
   activities: z.array(z.object({
     question: z.string().min(2).max(2000),
     answer: z.string().max(2000).nullish(),
@@ -262,10 +293,10 @@ const lessonReply = z.object({
 registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const { runtime, task, settings } = ctx;
   const lesson = await runtime.db.query<{
-    id: string; schemeId: string; seq: number; title: string; subtopic: string | null; objectives: string[]; sourceChunkIds: string[]; status: string;
+    id: string; schemeId: string; seq: number; periods: number; title: string; subtopic: string | null; objectives: string[]; sourceChunkIds: string[]; status: string;
     unitTitle: string; theme: string | null;
   }>(
-    `SELECT l.id,l.scheme_id AS "schemeId",l.seq,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,u.title AS "unitTitle",u.theme
+    `SELECT l.id,l.scheme_id AS "schemeId",l.seq,l.periods,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,u.title AS "unitTitle",u.theme
        FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.id=$1 AND l.organization_id=$2`, [task.subjectRef, task.organizationId]);
   const l = lesson.rows[0];
   if (!l) return { skipped: "lesson no longer exists" };
@@ -289,9 +320,12 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   if (!passages.length) throw new Error("No e-library passages cover this lesson.");
   const byId = new Map(passages.map(p => [p.id, p]));
 
+  const periodLength = await runtime.db.query<{ minutes: number }>(
+    `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
+  const minutes = (periodLength.rows[0]?.minutes ?? 40) * (l.periods ?? 1);
   const reply = lessonReply.parse(await ctx.ai({
     prompt: [
-      `Task: write lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}.`,
+      `Task: write lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}. It takes ${l.periods ?? 1} period(s), ${minutes} minutes in total.`,
       `Unit: ${l.unitTitle}${l.theme ? ` (theme: ${l.theme})` : ""}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
       l.objectives?.length ? `Objectives: ${l.objectives.join("; ")}` : "",
       "",
@@ -302,10 +336,18 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       "  For each one set sourcePassageId and sourceQuote = the question's exact words copied from that passage, so it can be verified.",
       "  Give answer only when the passage gives it or it is plain arithmetic; otherwise null. concept = the subtopic it tests, skill = what the learner does (e.g. 'identify', 'compute', 'explain').",
       "  kind is one of: " + QUESTION_KINDS.join(", ") + ". cognitiveLevel is one of: " + COGNITIVE_LEVELS.join(", ") + ".",
+      `- lessonPlan: a SAMPLE LESSON PLAN in the Ugandan format for the whole ${minutes} minutes: competences (subject and language competence), objectives, prior knowledge, methods, materials, references (the passage sources),`,
+      "  and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes and both teacher and learner activities, plus assessment, homework and life skills. The minutes must add up to the lesson time.",
+      "  Its content (facts, examples, activities) must come from the passages; the plan's structure and timing are yours.",
+      "- diagrams: up to 3 clear teaching diagrams for things the passages describe that are best shown visually (parts of a plant, the water cycle, a map sketch, a number line, a bar graph, a table of values...).",
+      "  Draw each as a self-contained SVG: viewBox about 0 0 640 400, white or no background, simple shapes, strong outlines, readable labels (font-size 14 or more), arrows via <marker>.",
+      "  No scripts, images, links, CSS or external fonts. Label only what the passages name. key is a short slug; put [[diagram:key]] in the notes where each diagram belongs; sourcePassageId is the passage it depicts.",
       "- sourcePassageIds: every passage id you used.",
       "",
       "Reply shape:",
-      `{"notes":string,"methods":string|null,"materials":string|null,"lifeSkills":string|null,"assessment":string|null,"sourcePassageIds":[string],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"sourcePassageId":string,"sourceQuote":string}],"gaps":[string]}`,
+      `{"notes":string,"methods":string|null,"materials":string|null,"lifeSkills":string|null,"assessment":string|null,"sourcePassageIds":[string],` +
+      `"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]},` +
+      `"diagrams":[{"key":string,"title":string,"caption":string|null,"svg":string,"sourcePassageId":string|null}],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"sourcePassageId":string,"sourceQuote":string}],"gaps":[string]}`,
       "",
       "<passages>",
       formatPassages(passages),
@@ -315,13 +357,22 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
 
   const usedIds = reply.sourcePassageIds.filter(id => byId.has(id));
   if (!usedIds.length) throw new Error("The lesson notes did not cite any of the supplied passages.");
-  let added = 0, rejected = 0;
+  let added = 0, rejected = 0, diagrams = 0, diagramsRejected = 0;
   const client = await runtime.db.connect();
   try {
     await client.query("BEGIN");
     await client.query(
-      `UPDATE lrn_lessons SET notes_markdown=$2,methods=$3,materials=$4,life_skills=$5,assessment=$6,source_chunk_ids=$7,status='written',error=NULL,written_at=CURRENT_TIMESTAMP WHERE id=$1`,
-      [l.id, reply.notes, reply.methods ?? null, reply.materials ?? null, reply.lifeSkills ?? null, reply.assessment ?? null, usedIds]);
+      `UPDATE lrn_lessons SET notes_markdown=$2,methods=$3,materials=$4,life_skills=$5,assessment=$6,source_chunk_ids=$7,lesson_plan=$8::jsonb,status='written',error=NULL,written_at=CURRENT_TIMESTAMP WHERE id=$1`,
+      [l.id, reply.notes, reply.methods ?? null, reply.materials ?? null, reply.lifeSkills ?? null, reply.assessment ?? null, usedIds, reply.lessonPlan ? JSON.stringify(reply.lessonPlan) : null]);
+    await client.query("DELETE FROM lrn_lesson_assets WHERE lesson_id=$1", [l.id]);
+    for (const d of reply.diagrams) {
+      const svg = sanitizeSvg(d.svg);
+      if (!svg) { diagramsRejected += 1; continue; }
+      await client.query(
+        `INSERT INTO lrn_lesson_assets(id,organization_id,lesson_id,kind,asset_key,title,caption,svg,source_chunk_id) VALUES($1,$2,$3,'diagram',$4,$5,$6,$7,$8) ON CONFLICT(lesson_id,asset_key) DO NOTHING`,
+        [createId("lasset"), task.organizationId, l.id, d.key, d.title, d.caption ?? null, svg, d.sourcePassageId && byId.has(d.sourcePassageId) ? d.sourcePassageId : null]);
+      diagrams += 1;
+    }
     for (const a of reply.activities) {
       const passage = byId.get(a.sourcePassageId);
       // Only questions whose wording is really in the cited passage go into the bank.
@@ -342,7 +393,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     client.release();
   }
   await queueNextLesson(runtime, task.organizationId, scheme.id, task.requestedBy);
-  return { lesson: l.seq, passages: passages.length, questionsAdded: added, questionsRejected: rejected, gaps: reply.gaps };
+  return { lesson: l.seq, passages: passages.length, lessonPlan: Boolean(reply.lessonPlan), diagrams, diagramsRejected, questionsAdded: added, questionsRejected: rejected, gaps: reply.gaps };
 });
 
 onTaskFailed("scheme.source", async (runtime, task, message) => {
@@ -369,7 +420,7 @@ export async function getScheme(runtime: Runtime, organizationId: string, id: st
   const [units, lessons, sources, tasks] = await Promise.all([
     runtime.db.query(`SELECT id,seq,title,theme,week_from AS "weekFrom",week_to AS "weekTo",competences FROM lrn_units WHERE scheme_id=$1 ORDER BY seq`, [id]),
     runtime.db.query(
-      `SELECT l.id,l.unit_id AS "unitId",l.seq,l.week,l.title,l.subtopic,l.objectives,l.status,l.error,l.written_at AS "writtenAt",
+      `SELECT l.id,l.unit_id AS "unitId",l.seq,l.week,l.periods,l.title,l.subtopic,l.objectives,l.status,l.error,l.written_at AS "writtenAt",
               (SELECT count(*)::int FROM lrn_questions q WHERE q.lesson_id=l.id) AS questions
          FROM lrn_lessons l WHERE l.scheme_id=$1 ORDER BY l.seq`, [id]),
     runtime.db.query(
@@ -391,9 +442,12 @@ export async function getLesson(runtime: Runtime, organizationId: string, id: st
   const citations = await runtime.db.query(
     `SELECT c.id AS "passageId",s.title,s.page_url AS "pageUrl",c.seq+1 AS part FROM lrn_source_chunks c JOIN lrn_sources s ON s.id=c.source_id WHERE c.id=ANY($1::text[])`,
     [l.source_chunk_ids]);
+  const assets = await runtime.db.query(
+    `SELECT id,kind,asset_key AS key,title,caption FROM lrn_lesson_assets WHERE lesson_id=$1 ORDER BY created_at`, [id]);
   return {
-    id: l.id, schemeId: l.scheme_id, unit: l.unit_title, seq: l.seq, week: l.week, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
-    notes: l.notes_markdown, methods: l.methods, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
+    id: l.id, schemeId: l.scheme_id, unit: l.unit_title, seq: l.seq, week: l.week, periods: l.periods, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
+    notes: l.notes_markdown, lessonPlan: l.lesson_plan, methods: l.methods, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
+    diagrams: assets.rows.map((a: { id: string }) => ({ ...a, url: `/api/v1/learn/lessons/${id}/assets/${a.id}.svg` })),
     status: l.status, error: l.error, writtenAt: l.written_at, citations: citations.rows,
   };
 }

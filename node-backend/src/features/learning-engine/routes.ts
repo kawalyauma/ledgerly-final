@@ -4,11 +4,17 @@ import { AppError } from "../../http/errors.js";
 import type { AppEnv } from "../../http/types.js";
 import type { Runtime } from "../../runtime.js";
 import { ulibtech } from "../school-management/ulibtech.js";
+import { createId } from "../core-identity/security.js";
 import { addPage, assignPageStudent, createBatch, createBatchSchema, getBatch, getPage, pageImage, submitBatch } from "./captures.js";
 import { enqueueTask, getSettings, updateSettings } from "./engine.js";
 import { coverage, recordTeaching, requestStudentSummary, studentOverview, teachingAt, teachingEventSchema, timeline } from "./insights.js";
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
 import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished } from "./schemes.js";
+import { lessonPrintHtml } from "./print.js";
+import {
+  bellSchema, buildPeriodPlan, dayOffSchema, editSlot, generateBell, generateSchema, generateTimetable, getTimetable, getTimetableSettings, listBell, listLoads,
+  listPlan, loadsFromSchemes, loadsSchema, publishTimetable, replaceBell, saveLoads, saveTimetableSettings, setPlanStatus, settingsSchema, slotEditSchema,
+} from "./timetable.js";
 
 /** Owners and admins pass; everyone else needs one of the listed scopes. */
 function anyScope(...scopes: string[]): MiddlewareHandler<AppEnv> {
@@ -245,6 +251,106 @@ export function createLearningRoutes(runtime: Runtime) {
   r.post("/students/:id/summary", write, async c => {
     const p = c.get("principal");
     return c.json({ data: await requestStudentSummary(runtime, p.organizationId, p.userId, c.req.param("id")) }, 202);
+  });
+
+  /* Lesson output: printable plan + notes, and diagram images. */
+  r.get("/lessons/:id/print", read, async c => {
+    const html = await lessonPrintHtml(runtime, org(c), c.req.param("id"));
+    return c.html(html, 200, { "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'" });
+  });
+  r.get("/lessons/:id/assets/:assetId{.+\\.svg}", read, async c => {
+    const row = await runtime.db.query<{ svg: string }>(`SELECT svg FROM lrn_lesson_assets WHERE id=$1 AND lesson_id=$2 AND organization_id=$3`,
+      [c.req.param("assetId").replace(/\.svg$/, ""), c.req.param("id"), org(c)]);
+    if (!row.rows[0]) throw new AppError(404, "NOT_FOUND", "Diagram not found");
+    return new Response(row.rows[0].svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", "Cache-Control": "private, max-age=3600" } });
+  });
+
+  /* Timetable settings, bell, fixed activities, days off. */
+  r.get("/timetable/settings", read, async c => c.json({ data: { settings: await getTimetableSettings(runtime, org(c)), bell: await listBell(runtime, org(c)) } }));
+  r.put("/timetable/settings", write, async c => {
+    const p = c.get("principal");
+    const settings = await saveTimetableSettings(runtime, p.organizationId, p.userId, parse(settingsSchema, await body(c), "Check the timetable settings"));
+    const bell = c.req.query("keepBell") === "1" ? await listBell(runtime, p.organizationId) : await generateBell(runtime, p.organizationId);
+    return c.json({ data: { settings, bell } });
+  });
+  r.put("/timetable/bell", write, async c => {
+    await replaceBell(runtime, org(c), parse(bellSchema, await body(c), "Check the bell schedule"));
+    return c.json({ data: await listBell(runtime, org(c)) });
+  });
+  r.get("/timetable/fixed", read, async c => c.json({ data: (await runtime.db.query(
+    `SELECT f.id,f.class_id AS "classId",f.weekday,f.bell_period_id AS "bellPeriodId",f.label FROM lrn_timetable_fixed f WHERE f.organization_id=$1 ORDER BY weekday`, [org(c)])).rows }));
+  r.post("/timetable/fixed", write, async c => {
+    const v = parse(z.object({ classId: id.nullish(), weekday: z.number().int().min(1).max(7), bellPeriodId: id, label: z.string().trim().min(1).max(60) }), await body(c));
+    const row = await runtime.db.query(
+      `INSERT INTO lrn_timetable_fixed(id,organization_id,class_id,weekday,bell_period_id,label)
+       SELECT $1,$2,$3,$4,$5,$6 WHERE EXISTS (SELECT 1 FROM lrn_bell_periods WHERE id=$5 AND organization_id=$2)
+          AND ($3::text IS NULL OR EXISTS (SELECT 1 FROM school_classes WHERE id=$3 AND organization_id=$2))
+       ON CONFLICT(organization_id,class_id,weekday,bell_period_id) DO UPDATE SET label=EXCLUDED.label RETURNING id`,
+      [createId("lfix"), org(c), v.classId ?? null, v.weekday, v.bellPeriodId, v.label]);
+    if (!row.rowCount) throw new AppError(404, "NOT_FOUND", "Bell period or class not found");
+    return c.json({ data: row.rows[0] }, 201);
+  });
+  r.delete("/timetable/fixed/:id", write, async c => {
+    await runtime.db.query(`DELETE FROM lrn_timetable_fixed WHERE id=$1 AND organization_id=$2`, [c.req.param("id"), org(c)]);
+    return c.body(null, 204);
+  });
+  r.get("/timetable/days-off", read, async c => c.json({ data: (await runtime.db.query(
+    `SELECT id,day::text,class_id AS "classId",label FROM lrn_days_off WHERE organization_id=$1 AND day >= CURRENT_DATE - 365 ORDER BY day`, [org(c)])).rows }));
+  r.post("/timetable/days-off", write, async c => {
+    const v = parse(dayOffSchema, await body(c), "Check the day off");
+    const row = await runtime.db.query(
+      `INSERT INTO lrn_days_off(id,organization_id,day,class_id,label) SELECT $1,$2,$3,$4,$5
+        WHERE $4::text IS NULL OR EXISTS (SELECT 1 FROM school_classes WHERE id=$4 AND organization_id=$2)
+       ON CONFLICT(organization_id,day,class_id) DO UPDATE SET label=EXCLUDED.label RETURNING id`, [createId("loff"), org(c), v.day, v.classId ?? null, v.label]);
+    // Re-plan published timetables from that day so its lessons move forward.
+    const tts = await runtime.db.query<{ id: string }>(`SELECT id FROM lrn_timetables WHERE organization_id=$1 AND status='published'`, [org(c)]);
+    for (const t of tts.rows) await buildPeriodPlan(runtime, org(c), { timetableId: t.id, from: v.day, classId: v.classId ?? undefined }).catch(() => undefined);
+    return c.json({ data: row.rows[0] ?? null }, 201);
+  });
+  r.delete("/timetable/days-off/:id", write, async c => {
+    const row = await runtime.db.query<{ day: string }>(`DELETE FROM lrn_days_off WHERE id=$1 AND organization_id=$2 RETURNING day::text`, [c.req.param("id"), org(c)]);
+    const tts = await runtime.db.query<{ id: string }>(`SELECT id FROM lrn_timetables WHERE organization_id=$1 AND status='published'`, [org(c)]);
+    if (row.rows[0]) for (const t of tts.rows) await buildPeriodPlan(runtime, org(c), { timetableId: t.id, from: row.rows[0].day }).catch(() => undefined);
+    return c.body(null, 204);
+  });
+
+  /* Subject loads (periods per week, teacher, doubles). */
+  r.get("/timetable/loads", read, async c => {
+    const f = parse(z.object({ termId: id, classId: id.optional() }), c.req.query());
+    return c.json({ data: await listLoads(runtime, org(c), f.termId, f.classId) });
+  });
+  r.put("/timetable/loads", write, async c => c.json({ data: await saveLoads(runtime, org(c), parse(loadsSchema, await body(c), "Check the subject loads")) }));
+  r.post("/timetable/loads/prefill", write, async c => {
+    const v = parse(z.object({ termId: id }), await body(c));
+    return c.json({ data: await loadsFromSchemes(runtime, org(c), v.termId) });
+  });
+
+  /* Timetables. */
+  r.get("/timetables", read, async c => c.json({ data: (await runtime.db.query(
+    `SELECT t.id,t.name,t.status,tr.name AS "termName",t.term_id AS "termId",t.created_at AS "createdAt",t.published_at AS "publishedAt",
+            jsonb_array_length(COALESCE(t.report->'unplaced','[]'::jsonb)) AS unplaced
+       FROM lrn_timetables t JOIN school_terms tr ON tr.id=t.term_id WHERE t.organization_id=$1 AND t.status<>'archived' ORDER BY t.created_at DESC`, [org(c)])).rows }));
+  r.post("/timetables/generate", write, async c => {
+    const p = c.get("principal");
+    return c.json({ data: await generateTimetable(runtime, p.organizationId, p.userId, parse(generateSchema, await body(c), "Check the timetable request")) }, 201);
+  });
+  r.get("/timetables/:id", read, async c => c.json({ data: await getTimetable(runtime, org(c), c.req.param("id"), c.req.query("classId") || undefined) }));
+  r.put("/timetables/:id/slot", write, async c => c.json({ data: await editSlot(runtime, org(c), c.req.param("id"), parse(slotEditSchema, await body(c), "Check the timetable cell")) }));
+  r.post("/timetables/:id/publish", write, async c => { const p = c.get("principal"); return c.json({ data: await publishTimetable(runtime, p.organizationId, p.userId, c.req.param("id")) }); });
+  r.post("/timetables/:id/replan", write, async c => {
+    const v = parse(z.object({ from: day.optional(), classId: id.optional() }), await body(c));
+    return c.json({ data: await buildPeriodPlan(runtime, org(c), { timetableId: c.req.param("id"), ...v }) });
+  });
+
+  /* Period plan: which lesson and subtopic each class gets in each period. */
+  r.get("/plan", read, async c => {
+    const f = parse(z.object({ classId: id.optional(), teacherStaffId: id.optional(), from: day, to: day }), c.req.query());
+    if ((Date.parse(f.to) - Date.parse(f.from)) / 86400000 > 120) throw new AppError(422, "RANGE_TOO_LONG", "Ask for at most 120 days at a time");
+    return c.json({ data: await listPlan(runtime, org(c), f) });
+  });
+  r.post("/plan/:id/status", write, async c => {
+    const v = parse(z.object({ status: z.enum(["taught", "missed", "planned"]) }), await body(c));
+    return c.json({ data: await setPlanStatus(runtime, org(c), c.req.param("id"), v.status) });
   });
 
   return r;
