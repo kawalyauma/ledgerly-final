@@ -72,6 +72,37 @@
   .week .sci{background:#f1eafd;border-color:#d9c6f6}
   .week .brk{background:repeating-linear-gradient(45deg,#f6f8fb,#f6f8fb 6px,#eef1f5 6px,#eef1f5 12px);color:var(--muted);text-align:center}
   .week small{display:block;color:var(--muted)}
+  /* phone mock-ups (Ledgerly Academics app) */
+  .phones{display:flex;gap:18px;overflow-x:auto;padding:18px 4px 10px;margin-top:8px;background:linear-gradient(180deg,#eaf1fd,#f6f8fb);border-radius:18px}
+  .phone{flex:0 0 250px;border-radius:34px;background:#0f1724;padding:9px;box-shadow:0 14px 30px rgba(29,95,209,.18)}
+  .scr{position:relative;background:#f7f9fd;border-radius:26px;padding:14px 12px 64px;min-height:520px;font-size:11.5px;line-height:1.35;overflow:hidden}
+  .scr small{display:block;color:var(--muted);font-size:10.5px}
+  .ph-top{display:flex;align-items:center;gap:6px;margin-bottom:10px}.ph-top b{flex:1;font-size:13px}
+  .logo{background:var(--brand);color:#fff;border-radius:8px;padding:2px 5px}
+  .hello{display:flex;gap:8px;align-items:center;margin-bottom:9px}.av{font-size:24px;background:#e8f0fd;border-radius:50%;width:38px;height:38px;display:flex;align-items:center;justify-content:center}
+  .search{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 10px;color:var(--muted);margin-bottom:10px}
+  .feat{background:linear-gradient(135deg,#1d5fd1,#3b7cf0 55%,#7a3fd1);color:#fff;border-radius:16px;padding:12px;margin-bottom:10px}
+  .feat small{color:#dbe6ff;letter-spacing:.04em}.feat b{display:block;font-size:17px;line-height:1.2;margin:4px 0}.feat span{display:block;opacity:.9}
+  .feat i{display:inline-block;margin-top:8px;background:#fff;color:var(--brand);font-style:normal;font-weight:700;border-radius:10px;padding:5px 9px}
+  .row-h{display:flex;justify-content:space-between;margin:8px 0 6px}.row-h a{color:var(--brand);font-weight:600}
+  .chips{display:flex;justify-content:space-between}.chips span{display:flex;flex-direction:column;align-items:center;font-size:10px;gap:3px}
+  .chips em{font-style:normal;width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:17px}
+  .qa{display:grid;grid-template-columns:1fr 1fr;gap:6px}.qa span{background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;font-weight:600}
+  .tabs{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-around;background:#fff;border-top:1px solid var(--line);padding:6px 4px 8px;text-align:center;font-size:9.5px;color:var(--muted)}
+  .tabs b{color:var(--brand)}
+  .pic{background:#fff;border:1px solid var(--line);border-radius:14px;height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:52px;margin-bottom:8px}
+  .ttl{font-size:14px}.mut{margin-bottom:8px}
+  .seg{display:flex;gap:10px;border-bottom:1px solid var(--line);margin:8px 0;padding-bottom:5px;color:var(--muted)}.seg b{color:var(--brand);border-bottom:2px solid var(--brand)}
+  .prog{display:flex;gap:9px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:14px;padding:9px;margin-bottom:6px}
+  .ring{width:42px;height:42px;border-radius:50%;border:4px solid var(--brand);border-right-color:#dbe5f7;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:10.5px;flex:none}
+  .ring.g{border-color:#127a4a;border-left-color:#d8efe2}
+  .les{list-style:none;padding:0;margin:4px 0}.les li{position:relative;padding:6px 6px 6px 26px;border-bottom:1px solid #edf1f6;font-weight:600}
+  .les li:before{position:absolute;left:2px;top:6px;width:17px;height:17px;border-radius:50%;font-size:10px;display:flex;align-items:center;justify-content:center}
+  .les li.ok:before{content:"✓";background:#127a4a;color:#fff}.les li.cur:before{content:"▶";background:var(--brand);color:#fff}.les li.lk:before{content:"🔒";background:#eef2f7}.les li.wk:before{content:"!";background:#fdf3e1;color:#9a5b00}
+  .les li.cur{color:var(--brand)}
+  .cta{position:absolute;left:12px;right:12px;bottom:12px;background:var(--brand);color:#fff;text-align:center;font-weight:700;border-radius:14px;padding:10px}
+  .stats{display:flex;justify-content:space-around;background:#fff;border:1px solid var(--line);border-radius:14px;padding:8px;text-align:center;margin-bottom:8px;color:var(--muted);font-size:10px}.stats b{display:block;color:var(--ink);font-size:15px}
+  .note{background:#fdf3e1;border-radius:12px;padding:8px;margin-bottom:6px}
   footer{max-width:1080px;margin:0 auto;padding:24px 16px 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
   @media (max-width:560px){main{padding:4px 12px 48px}.card{padding:15px}}
 </style>
@@ -86,7 +117,7 @@
 </header>
 <nav><div class="wrap">
   <a href="#overview">Overview</a><a href="#architecture">Architecture</a><a href="#principles">Principles</a><a href="#brain">AI brain</a>
-  <a href="#schemes">Schemes</a><a href="#timetable">Timetable</a><a href="#bank">Question bank</a><a href="#scanner">Scanner</a>
+  <a href="#schemes">Schemes</a><a href="#timetable">Timetable</a><a href="#bank">Question bank</a><a href="#scanner">Scanner</a><a href="#app">Mobile app</a>
   <a href="#tracking">Teaching tracker</a><a href="#learners">Learners</a><a href="#usage">Usage</a><a href="#data">Data</a>
   <a href="#security">Security</a><a href="#status">Status</a><a href="#questions">Open questions</a>
 </div></nav>
@@ -234,13 +265,84 @@
 </section>
 
 <section id="scanner">
-  <h2>Scanner app <span class="tag t-plan">App planned</span><span class="tag t-built">Backend built</span><small>Fast batch scanning of books, then automatic reading</small></h2>
+  <h2>Scanner app <span class="tag t-built">App built</span><span class="tag t-built">Backend built</span><small>Fast batch scanning of books, then automatic reading</small></h2>
   <ol class="steps">
     <li><b>Start a batch</b>Choose the type (learners' exercise books, lesson plan book, exam scripts, teacher notes), the class, the subject and the date.</li>
     <li><b>Scan quickly</b>Point the phone at each page. The app detects the page edges, crops, straightens and sharpens it, and captures automatically when steady. You can tap a learner's name before their pages, or let the AI read the name on the page.</li>
     <li><b>Works offline</b>Pages queue on the phone and upload when the connection is good. Re-sending a page never creates a duplicate, and the same image scanned twice is detected.</li>
     <li class="ai"><b>AI reads each page</b>It records the page type, learner's name and date, topic, each question with the learner's answer and the teacher's tick or cross, corrections, handwriting, spelling mistakes, language, presentation and teacher comments. Only what is visible is recorded; unreadable words are marked as illegible.</li>
     <li><b>Records update</b>The learner is matched to the class list, the questions join the bank, answers and observations join the learner's profile, and the topic joins the teaching timeline. Pages with an unclear name go to a short review list.</li>
+  </ol>
+</section>
+
+<section id="app">
+  <h2>Ledgerly Academics app <span class="tag t-plan">Building</span><span class="tag t-built">Scanner built</span><span class="tag t-built">Backend built</span><small>The scanner grows into one phone app for teachers, the DOS and the head teacher</small></h2>
+  <p class="lead">The Android scanner app becomes <b>Ledgerly Academics</b>. Scanning stays as one tab. Around it come the lessons, timetable, question bank, learners and Ledgerly AI. The design follows the agreed reference: white cards on a soft blue background, one bold blue featured card, round icon chips, progress rings and a five-tab bar at the bottom.</p>
+
+  <div class="phones">
+    <div class="phone"><div class="scr">
+      <div class="ph-top"><span class="logo">🎓</span><b>Ledgerly Academics</b><span class="bell">🔔</span></div>
+      <div class="hello"><span class="av">👩🏾‍🏫</span><div><b>Good morning, Sarah 👋</b><small>Tuesday · Week 3 · Term 1</small></div></div>
+      <div class="search">🔍 Search lessons, learners, questions…</div>
+      <div class="feat"><small>NOW · P5 BLUE · 10:20–11:00</small><b>Science<br>Poultry: feathers</b><span>Lesson 4 of 12 · notes &amp; 2 drawings ready</span><i>Open lesson →</i></div>
+      <div class="row-h"><b>Today</b><a>Timetable</a></div>
+      <div class="chips"><span><em style="background:#e8f0fd">📘</em>P4 Eng</span><span><em style="background:#e5f5ec">🧮</em>P5 Math</span><span><em style="background:#f1eafd">🔬</em>P5 Sci</span><span><em style="background:#fdf3e1">🌍</em>P6 SST</span></div>
+      <div class="row-h"><b>Quick actions</b></div>
+      <div class="qa"><span>📷 Scan books</span><span>✅ Lesson taught</span><span>📝 Practice set</span><span>✨ Ask AI</span></div>
+      <div class="tabs"><b>🏠<br>Home</b><span>📚<br>Lessons</span><span>📷<br>Scan</span><span>❓<br>Bank</span><span>🧒<br>Learners</span></div>
+    </div></div>
+    <div class="phone"><div class="scr">
+      <div class="ph-top"><span>‹</span><b>P5 Science · Term 1</b><span>⋯</span></div>
+      <div class="pic">🐓<small>External parts of a domestic fowl</small></div>
+      <b class="ttl">Keeping Poultry</b><small class="mut">Scheme by Ledgerly AI · from 6 e-library sources</small>
+      <div class="seg"><b>Lessons</b><span>Notes</span><span>Questions</span><span>Print</span></div>
+      <div class="prog"><span class="ring">33%</span><div><b>Scheme progress</b><small>4 of 12 lessons taught · on track</small></div></div>
+      <ol class="les"><li class="ok">Meaning of poultry keeping<small>Taught Mon</small></li><li class="ok">External parts of a fowl<small>Taught Tue</small></li><li class="ok">Cock and hen compared<small>Taught Wed</small></li><li class="cur">Feathers<small>Today · 2 periods</small></li><li class="lk">Poultry housing<small>Thu</small></li></ol>
+      <div class="cta">Mark lesson as taught ✓</div>
+    </div></div>
+    <div class="phone"><div class="scr">
+      <div class="ph-top"><span>‹</span><b>Learner</b><span>⚙️</span></div>
+      <div class="hello"><span class="av">🧒🏾</span><div><b>Brian Ssemwanga</b><small>P5 Blue · ADM 0412</small></div></div>
+      <div class="stats"><span><b>38</b>pages read</span><span><b>72%</b>accuracy</span><span><b>5</b>skills mastered</span></div>
+      <div class="note">🏆 <b>Improving!</b> Handwriting moved from fair to good this month.</div>
+      <div class="seg"><b>Overview</b><span>Writing</span><span>Subjects</span></div>
+      <div class="prog"><span class="ring g">6/8</span><div><b>Work marked this week</b><small>6 books scanned · 2 missing</small></div></div>
+      <div class="row-h"><b>Needs help with</b></div>
+      <ol class="les"><li class="wk">Carrying in addition<small>Math · 48%</small></li><li class="wk">Spelling: "feather", "beak"<small>English · seen 4 times</small></li></ol>
+      <div class="cta">Make a practice set →</div>
+    </div></div>
+  </div>
+
+  <h3 style="margin-top:26px">Screens</h3>
+  <div class="scroll"><table>
+    <tr><th>Tab / screen</th><th>What it shows and does</th><th>Who</th><th>Backend</th></tr>
+    <tr><td><b>Home</b></td><td>Greeting, search, the <b>Now teaching</b> card (class, subject, subtopic, period), today's periods as chips, quick actions, alerts (lagging subjects, scans waiting for review).</td><td>All</td><td><span class="tag t-built">Built</span><code>/teaching/now</code> <code>/plan</code></td></tr>
+    <tr><td><b>Lessons</b></td><td>My classes and subjects → scheme → lesson list with ticks, today and upcoming (like the course page in the reference). Lesson page: notes, black-and-white drawings, activities, print or share the Word file. <b>Mark as taught</b> updates the tracker.</td><td>Teacher, DOS</td><td><span class="tag t-built">Built</span><code>/schemes</code> <code>/lessons/:id</code> <code>/plan/:id/status</code> <code>/teaching/events</code></td></tr>
+    <tr><td><b>Timetable</b></td><td>My week, the class week, the subtopic in every period, days off. The DOS can generate, adjust a slot and publish.</td><td>Teacher, DOS</td><td><span class="tag t-built">Built</span><code>/timetables</code> <code>/plan</code></td></tr>
+    <tr><td><b>Scan</b></td><td>Today's scanner: batches, ML Kit page capture, offline queue, then the AI reads each page. Plus the <b>review list</b> for unclear names.</td><td>Teacher, operator</td><td><span class="tag t-built">Built</span><code>/captures/*</code></td></tr>
+    <tr><td><b>Question bank</b></td><td>Search per class and term, grouped questions, alternatives, <b>photograph a question to find similar ones</b>, build a practice set (PDF/Word). Labelling quizzes from the image library (letters A, B, C with an answer key).</td><td>Teacher, DOS</td><td><span class="tag t-built">Built</span><code>/questions/*</code> <code>/figures/*</code></td></tr>
+    <tr><td><b>Learners</b></td><td>Class list → learner overview: writing (handwriting, spelling, language, presentation), accuracy per subject, weaknesses, achievements, the AI summary, and a practice set for weak skills.</td><td>Teacher, head</td><td><span class="tag t-built">Built</span><code>/students/:id/overview</code> <code>/students/:id/summary</code></td></tr>
+    <tr><td><b>Coverage</b> (DOS)</td><td>Every class and subject: taught against planned, who is behind, one-tap re-plan.</td><td>DOS, head</td><td><span class="tag t-built">Built</span><code>/teaching/coverage</code> <code>/timetables/:id/replan</code></td></tr>
+    <tr><td><b>Schemes &amp; AI</b> (DOS)</td><td>Order a scheme, write the next weeks, publish, post to notesug.com. Engine status, pause/stop, Claude ⇄ Codex.</td><td>DOS, admin</td><td><span class="tag t-built">Built</span><code>/schemes/*</code> <code>/engine</code></td></tr>
+    <tr><td><b>Ask Ledgerly AI</b></td><td>Chat from anywhere: "What is P4 learning now?", "10 questions like 23 + 45", "How is Aisha doing?".</td><td>All</td><td><span class="tag t-built">Built</span>Ledgerly AI chat</td></tr>
+    <tr><td><b>Profile</b></td><td>My classes and subjects, lessons taught this term, scans sent, a weekly ring, offline storage, sign out.</td><td>All</td><td><span class="tag t-plan">To add</span><code>/learn/me</code></td></tr>
+  </table></div>
+
+  <h3 style="margin-top:22px">How it is built</h3>
+  <div class="grid">
+    <div class="card"><h3>One app, one sign-in</h3><ul><li>Same Ledgerly login as the scanner. Tabs and actions follow the user's role: the DOS sees Coverage and Schemes, a teacher sees their own classes.</li><li>Same app ID, so phones with the scanner <b>update in place</b> and keep unsent pages.</li></ul></div>
+    <div class="card"><h3>Native Android, modern UI</h3><ul><li>Kotlin with <b>Jetpack Compose</b> and Material 3, using the reference style: Ledgerly blue <code>#1D5FD1</code>, white 16 px cards, a gradient featured card, round icon chips and progress rings.</li><li>The scanner's capture, offline store and upload worker are kept as they are.</li></ul></div>
+    <div class="card"><h3>Works on weak connections</h3><ul><li>Today's lessons, notes, drawings and timetable are cached for offline reading.</li><li>"Lesson taught" ticks and scans queue offline and send later.</li><li>Images are loaded small first. Files are kept in NexDrive.</li></ul></div>
+    <div class="card"><h3>Small backend additions</h3><ul><li><code>GET /learn/me</code>: my classes, subjects, today's periods and counts for Home and Profile.</li><li><code>GET /learn/search</code>: one search across lessons, learners and questions.</li><li>Later: push notifications (a period starting, a scheme ready, scans to review).</li></ul></div>
+  </div>
+
+  <h3 style="margin-top:22px">Build order</h3>
+  <ol class="steps">
+    <li><b>1 · Shell and design</b>Compose theme, the five-tab bar, the new sign-in, Home with Now teaching, and Profile. The scanner moves in as the Scan tab. <code>/learn/me</code> added.</li>
+    <li><b>2 · Lessons and timetable</b>Classes → scheme → lesson list → lesson page with notes, drawings, print and share. Mark as taught. My week.</li>
+    <li><b>3 · Question bank</b>Search, groups, alternatives, photo-compare, practice sets, labelling quizzes from the image library.</li>
+    <li><b>4 · Learners and AI</b>Learner overview, summary, weak-skill practice. Ask Ledgerly AI. DOS coverage and schemes.</li>
+    <li><b>5 · Offline and release</b>Caching, notifications, testing on the school phones, signed APK and an install link.</li>
   </ol>
 </section>
 
@@ -269,7 +371,7 @@
     <tr><td><b>Owner / admin</b></td><td>Switch Claude ⇄ Codex, start, pause or stop the engine, set usage limits, see the AI's work history.</td><td>Ledgerly AI dashboard</td></tr>
     <tr><td><b>Director of Studies</b></td><td>Order schemes for each class and subject, review and publish them, build and publish the timetable, watch coverage and lagging classes, handle the scan review list.</td><td>Academics · Schemes, Timetable, Coverage</td></tr>
     <tr><td><b>Teacher</b></td><td>See the week's plan (subtopic per period), read lesson notes, record a lesson taught, get questions and alternatives, print practice sets, view their learners.</td><td>Academics · My lessons, Question bank</td></tr>
-    <tr><td><b>Scanner operator</b></td><td>Scan books in batches after lessons or tests, tag names when needed, resolve unclear names.</td><td>Scanner app</td></tr>
+    <tr><td><b>Scanner operator</b></td><td>Scan books in batches after lessons or tests, tag names when needed, resolve unclear names.</td><td>Ledgerly Academics app · Scan</td></tr>
     <tr><td><b>Head teacher</b></td><td>Learner overviews and summaries, class progress, teaching against the plan.</td><td>Learners, Kiosk, Ledgerly AI chat</td></tr>
     <tr><td><b>Anyone with Ledgerly AI</b></td><td>Ask in chat: "Create the P5 Science scheme for term 1", "What is P4 learning now?", "How is Aisha doing in English?", "Give me 10 questions like 23 + 45".</td><td>Ledgerly AI chat</td></tr>
   </table></div>
