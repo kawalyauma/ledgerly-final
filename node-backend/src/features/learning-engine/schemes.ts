@@ -132,6 +132,9 @@ async function pickFromCatalog(library: ReturnType<typeof ulibtech>, classSlug: 
     let n = 0;
     for (const item of ranked) {
       if (n >= count) break;
+      // Catalogue class tags are sometimes wrong: a book whose title names other classes only is not ours.
+      const named = classesInTitle(item.title);
+      if (named.length && scope.cls && !named.some(c => c.level === scope.cls!.level && c.no === scope.cls!.no)) continue;
       if (termScore(item) < 0 || seen.some(x => same(x, item))) continue;
       seen.push(item);
       picked.push({ slug: item.slug, role: /curricul/i.test(item.title) ? "curriculum" : ROLE_BY_TYPE[type] ?? "reference", title: item.title });
