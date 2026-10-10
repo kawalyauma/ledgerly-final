@@ -12,6 +12,8 @@ import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet }
 import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished, writeUntil } from "./schemes.js";
 import { lessonPrintHtml } from "./print.js";
 import { postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
+import { codedFigureRow, figureExamItem, getFigure, labelFigure, labelingImage, requestFigure } from "./figures.js";
+import { codedSpecSchema } from "./figures-coded.js";
 import {
   bellSchema, buildPeriodPlan, dayOffSchema, editSlot, generateBell, generateSchema, generateTimetable, getTimetable, getTimetableSettings, listBell, listLoads,
   listPlan, loadsFromSchemes, loadsSchema, publishTimetable, replaceBell, saveLoads, saveTimetableSettings, setPlanStatus, settingsSchema, slotEditSchema,
@@ -62,6 +64,8 @@ export function createLearningRoutes(runtime: Runtime) {
       state: z.enum(["running", "paused", "stopped"]).optional(),
       dailyTaskLimit: z.number().int().min(0).max(5000).optional(),
       maxPromptChars: z.number().int().min(8000).max(200000).optional(),
+      imageGeneration: z.boolean().optional(),
+      dailyImageLimit: z.number().int().min(0).max(1000).optional(),
     }), await body(c));
     const p = c.get("principal");
     return c.json({ data: await updateSettings(runtime, p.organizationId, p.userId, v) });
@@ -302,6 +306,56 @@ export function createLearningRoutes(runtime: Runtime) {
     if (!row.rows[0]) throw new AppError(404, "NOT_FOUND", "Diagram not found");
     if (c.req.query("format") === "png") return new Response(Buffer.from(svgToPng(row.rows[0].svg).png), { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=3600" } });
     return new Response(row.rows[0].svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", "Cache-Control": "private, max-age=3600" } });
+  });
+
+  /* Figure library: drawings stored once (unlabelled + part positions), labelled on demand, reused everywhere. */
+  r.get("/figures", read, async c => {
+    const f = parse(z.object({ q: z.string().max(200).optional(), kind: z.string().max(20).optional(), ...paging }), c.req.query());
+    const rows = await runtime.db.query(
+      `SELECT id,title,concept_key AS "conceptKey",subject,kind,status,uses,jsonb_array_length(anchors) AS parts,created_at AS "createdAt"
+         FROM lrn_figures WHERE (shared OR organization_id=$1) AND status<>'retired' AND ($2::text IS NULL OR title ILIKE '%'||$2||'%' OR concept_key % $2)
+          AND ($3::text IS NULL OR kind=$3) ORDER BY uses DESC,created_at DESC LIMIT $4 OFFSET $5`,
+      [org(c), f.q ?? null, f.kind ?? null, f.pageSize, (f.page - 1) * f.pageSize]);
+    return c.json({ data: rows.rows });
+  });
+  r.get("/figures/:id", read, async c => {
+    const fig = await getFigure(runtime, c.req.param("id"));
+    const labelings = await runtime.db.query(`SELECT id,mode,answer_key AS "answerKey",created_at AS "createdAt" FROM lrn_figure_labelings WHERE figure_id=$1 ORDER BY created_at DESC LIMIT 50`, [fig.id]);
+    return c.json({ data: { ...fig, svg: undefined, baseImageUrl: `/api/v1/learn/figures/${fig.id}/base.png`, labelings: labelings.rows } });
+  });
+  r.get("/figures/:id/base.png", read, async c => {
+    const fig = await getFigure(runtime, c.req.param("id"));
+    const bytes = fig.baseKey ? await runtime.storage.get(fig.baseKey) : fig.svg ? svgToPng(fig.svg).png : null;
+    if (!bytes) throw new AppError(404, "NOT_FOUND", "This figure has no image yet");
+    return new Response(Buffer.from(bytes), { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=86400" } });
+  });
+  r.post("/figures/request", write, async c => {
+    const v = parse(z.object({ concept: z.string().trim().min(3).max(300), title: z.string().trim().min(1).max(200), parts: z.array(z.string().min(1).max(80)).max(20).default([]),
+      subject: z.string().max(80).optional(), level: z.string().max(40).optional(), style: z.string().max(400).optional() }), await body(c));
+    const p = c.get("principal");
+    const got = await requestFigure(runtime, p.organizationId, p.userId, v);
+    return c.json({ data: { ...got, figure: got.figure ? { id: got.figure.id, status: got.figure.status, title: got.figure.title } : null } }, got.reused ? 200 : 202);
+  });
+  r.post("/figures/coded", write, async c => {
+    const spec = parse(codedSpecSchema, await body(c), "Check the figure details");
+    const fig = await codedFigureRow(runtime, org(c), spec);
+    return c.json({ data: { id: fig.id, title: fig.title, parts: fig.anchors.map(a => a.name), baseImageUrl: `/api/v1/learn/figures/${fig.id}/base.png` } });
+  });
+  r.post("/figures/:id/labelings", read, async c => {
+    const v = parse(z.object({ mode: z.enum(["names", "letters", "blank", "custom"]), parts: z.array(z.string().max(80)).max(30).optional(),
+      texts: z.record(z.string(), z.string().max(60)).optional(), seed: z.number().int().min(1).max(1e9).optional(), title: z.string().max(120).nullish() }), await body(c));
+    const l = await labelFigure(runtime, c.req.param("id"), v);
+    return c.json({ data: { id: l.id, answerKey: l.answerKey, imageUrl: `/api/v1/learn/figures/labelings/${l.id}.png` } });
+  });
+  r.post("/figures/:id/exam-item", read, async c => {
+    const v = parse(z.object({ count: z.number().int().min(1).max(12).default(4), seed: z.number().int().min(1).max(1e9).default(() => Math.floor(Math.random() * 1e9) + 2),
+      parts: z.array(z.string().max(80)).max(30).optional(), mode: z.enum(["letters", "blank"]).optional() }), await body(c));
+    return c.json({ data: await figureExamItem(runtime, c.req.param("id"), v) });
+  });
+  r.get("/figures/labelings/:file{.+\\.png}", read, async c => {
+    const bytes = await labelingImage(runtime, c.req.param("file").replace(/\.png$/, ""));
+    if (!bytes) throw new AppError(404, "NOT_FOUND", "Image not found");
+    return new Response(Buffer.from(bytes), { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=86400" } });
   });
 
   /* Timetable settings, bell, fixed activities, days off. */

@@ -7,6 +7,8 @@ import { enqueueTask, onTaskFailed, registerTaskHandler, type TaskContext, parse
 import { addQuestion, COGNITIVE_LEVELS, QUESTION_KINDS } from "./questions.js";
 import { quoteAppearsIn } from "./signature.js";
 import { sanitizeSvg } from "./svg.js";
+import { codedFigureRow, labelFigure, requestFigure } from "./figures.js";
+import { codedSpecSchema } from "./figures-coded.js";
 import { classesInTitle, formatPassages, ingestResource, openingPassages, parseTerm, relevantPassages, type Passage, type Scope } from "./sources.js";
 
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
@@ -329,7 +331,12 @@ const lessonReply = z.object({
     key: z.string().regex(/^[a-z0-9-]{1,40}$/),
     title: z.string().min(1).max(200),
     caption: z.string().max(500).nullish(),
-    svg: z.string().max(60000),
+    /** "illustration": a realistic drawing from the figure library (generated once, reused); "coded": exact code-drawn figure; "svg": simple schematic. */
+    method: z.enum(["illustration", "coded", "svg"]).default("svg"),
+    concept: z.string().max(300).nullish(),
+    parts: z.array(z.string().min(1).max(80)).max(20).default([]),
+    coded: z.unknown().optional(),
+    svg: z.string().max(60000).nullish(),
     sourcePassageId: z.string().max(80).nullish(),
   })).max(4).default([]),
   activities: z.array(z.object({
@@ -397,19 +404,23 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       `- lessonPlan: a SAMPLE LESSON PLAN in the Ugandan format for the whole ${minutes} minutes: competences (subject and language competence), objectives, prior knowledge, methods, materials, references (the passage sources),`,
       "  and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes and both teacher and learner activities, plus assessment, homework and life skills. The minutes must add up to the lesson time.",
       "  Its content (facts, examples, activities) must come from the passages; the plan's structure and timing are yours.",
-      "- diagrams: up to 3 teaching DRAWINGS of things the passages describe that learners must see: e.g. parts of a flower or the human eye, the water cycle, a lever, a food chain, a map sketch,",
-      "  apparatus for an experiment, a number line, fractions as shaded shapes, a bar graph of given data. Draw the real object or process, the way a teacher draws it on the chalkboard.",
-      "  NEVER draw a table, list or text box as a diagram — tables belong in the notes as Markdown tables. Skip diagrams when nothing in the lesson is visual.",
-      "  Each is a self-contained SVG: viewBox=\"0 0 640 420\", white background rect first, outlined shapes (stroke #222, stroke-width 2-3) with soft fills, curved <path>s for organic shapes,",
-      "  labels with font-size 16-18 placed outside the shape and joined to the part by a thin leader <line>, arrows via <marker> for processes, a title text at the top.",
-      "  Keep every element inside the viewBox, leave margins, avoid overlapping labels. No scripts, images, links, CSS or external fonts.",
-      "  Label only the parts the passages name. key is a short slug; put [[diagram:key]] on its own line in the notes where it belongs; sourcePassageId is the passage it depicts.",
+      "- diagrams: up to 3 teaching pictures of things the passages describe that learners must SEE. Skip them when nothing in the lesson is visual.",
+      "  NEVER make a table, list or text box into a diagram; tables belong in the notes as Markdown tables. Choose a method per picture:",
+      "  * method \"illustration\" for real things: animals, plants, body parts and organs, tools, apparatus, objects, scenes (e.g. the external parts of a domestic fowl, a beehive, a flower).",
+      "    Give concept = a precise description of what to draw (e.g. 'side view of a domestic hen, full body') and parts = the exact part names from the passages to label. No svg. Ledgerly draws it once and reuses it.",
+      "  * method \"coded\" for exact maths pictures, with coded = one of:",
+      "    {\"type\":\"shape\",\"shape\":\"circle|square|rectangle|triangle|right-triangle|equilateral-triangle|isosceles-triangle|parallelogram|rhombus|trapezium|kite|pentagon|hexagon|octagon\"}",
+      "    {\"type\":\"fraction\",\"shape\":\"circle|bar\",\"numerator\":3,\"denominator\":4}   {\"type\":\"number-line\",\"from\":0,\"to\":10,\"step\":1,\"marks\":[3,7]}",
+      "    {\"type\":\"clock\",\"hour\":3,\"minute\":30}   {\"type\":\"bar-chart\",\"title\":\"...\",\"yLabel\":\"...\",\"bars\":[{\"label\":\"Mon\",\"value\":4}]} (only with data given in the passages)",
+      "  * method \"svg\" for simple schematics only (cycles, food chains, flow of a process): a self-contained SVG, viewBox=\"0 0 640 420\", white background, outlined shapes,",
+      "    labels font-size 16-18 joined by leader lines, arrows via <marker>, a title at the top, nothing outside the viewBox. No scripts, images, links, CSS or external fonts.",
+      "  Label only parts the passages name. key is a short slug; put [[diagram:key]] on its own line in the notes where it belongs; sourcePassageId is the passage it depicts.",
       "- sourcePassageIds: every passage id you used.",
       "",
       "Reply shape:",
       `{"notes":string,"methods":string|null,"materials":string|null,"lifeSkills":string|null,"assessment":string|null,"sourcePassageIds":[string],` +
       `"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]},` +
-      `"diagrams":[{"key":string,"title":string,"caption":string|null,"svg":string,"sourcePassageId":string|null}],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"sourcePassageId":string,"sourceQuote":string}],"gaps":[string]}`,
+      `"diagrams":[{"key":string,"title":string,"caption":string|null,"method":"illustration"|"coded"|"svg","concept":string|null,"parts":[string],"coded":object|null,"svg":string|null,"sourcePassageId":string|null}],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"sourcePassageId":string,"sourceQuote":string}],"gaps":[string]}`,
       "",
       "<passages>",
       formatPassages(passages),
@@ -419,7 +430,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
 
   const usedIds = reply.sourcePassageIds.filter(id => byId.has(id));
   if (!usedIds.length) throw new Error("The lesson notes did not cite any of the supplied passages.");
-  let added = 0, rejected = 0, diagrams = 0, diagramsRejected = 0;
+  let added = 0, rejected = 0, diagrams = 0, diagramsRejected = 0, reusedFigures = 0, queuedFigures = 0;
   const client = await runtime.db.connect();
   try {
     await client.query("BEGIN");
@@ -428,11 +439,33 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       [l.id, reply.notes, reply.methods ?? null, reply.materials ?? null, reply.lifeSkills ?? null, reply.assessment ?? null, usedIds, reply.lessonPlan ? JSON.stringify(reply.lessonPlan) : null]);
     await client.query("DELETE FROM lrn_lesson_assets WHERE lesson_id=$1", [l.id]);
     for (const d of reply.diagrams) {
-      const svg = sanitizeSvg(d.svg);
-      if (!svg) { diagramsRejected += 1; continue; }
+      const source = d.sourcePassageId && byId.has(d.sourcePassageId) ? d.sourcePassageId : null;
+      let svg: string | null = null, figureId: string | null = null, labelingId: string | null = null;
+      if (d.method === "coded") {
+        const spec = codedSpecSchema.safeParse(d.coded);
+        if (!spec.success) { diagramsRejected += 1; continue; }
+        const fig = await codedFigureRow(runtime, task.organizationId, spec.data);
+        figureId = fig.id;
+        if (d.parts.length) labelingId = (await labelFigure(runtime, fig.id, { mode: "names", parts: d.parts }).catch(() => null))?.id ?? null;
+        if (!labelingId) svg = fig.svg;
+      } else if (d.method === "illustration" && d.concept) {
+        const got = await requestFigure(runtime, task.organizationId, task.requestedBy, {
+          concept: d.concept, title: d.title, parts: d.parts, subject: scheme.subjectName, level: scheme.className.replace(/\s+\d{4}$/, ""),
+        });
+        if (got.figure) {
+          figureId = got.figure.id;
+          if (got.figure.status === "ready") labelingId = (await labelFigure(runtime, got.figure.id, { mode: "names", parts: d.parts }).catch(() => null))?.id ?? null;
+          if (got.reused) reusedFigures += 1; else queuedFigures += 1;
+        } else if (d.svg) svg = sanitizeSvg(d.svg);
+        if (!figureId && !svg) { diagramsRejected += 1; continue; }
+      } else {
+        svg = d.svg ? sanitizeSvg(d.svg) : null;
+        if (!svg) { diagramsRejected += 1; continue; }
+      }
       await client.query(
-        `INSERT INTO lrn_lesson_assets(id,organization_id,lesson_id,kind,asset_key,title,caption,svg,source_chunk_id) VALUES($1,$2,$3,'diagram',$4,$5,$6,$7,$8) ON CONFLICT(lesson_id,asset_key) DO NOTHING`,
-        [createId("lasset"), task.organizationId, l.id, d.key, d.title, d.caption ?? null, svg, d.sourcePassageId && byId.has(d.sourcePassageId) ? d.sourcePassageId : null]);
+        `INSERT INTO lrn_lesson_assets(id,organization_id,lesson_id,kind,asset_key,title,caption,svg,source_chunk_id,figure_id,labeling_id,parts)
+         VALUES($1,$2,$3,'diagram',$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(lesson_id,asset_key) DO NOTHING`,
+        [createId("lasset"), task.organizationId, l.id, d.key, d.title, d.caption ?? null, svg, source, figureId, labelingId, d.parts]);
       diagrams += 1;
     }
     for (const a of reply.activities) {
@@ -455,7 +488,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     client.release();
   }
   await queueNextLesson(runtime, task.organizationId, scheme.id, task.requestedBy);
-  return { lesson: l.seq, passages: passages.length, lessonPlan: Boolean(reply.lessonPlan), diagrams, diagramsRejected, questionsAdded: added, questionsRejected: rejected, gaps: reply.gaps };
+  return { lesson: l.seq, passages: passages.length, lessonPlan: Boolean(reply.lessonPlan), diagrams, diagramsRejected, reusedFigures, queuedFigures, questionsAdded: added, questionsRejected: rejected, gaps: reply.gaps };
 });
 
 onTaskFailed("scheme.source", async (runtime, task, message) => {

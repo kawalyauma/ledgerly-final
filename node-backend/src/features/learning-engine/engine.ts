@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Runtime } from "../../runtime.js";
 import { createId } from "../core-identity/security.js";
@@ -6,12 +6,13 @@ import { getLedgerlyAiFoundationService } from "../ledgerly-ai/runtime-service.j
 
 export type EngineProvider = "codex" | "claude-code";
 export type EngineState = "running" | "paused" | "stopped";
-export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "page.analyze" | "student.summary";
+export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "page.analyze" | "student.summary" | "figure.generate";
 /** Steps that do not call the AI (and so do not count towards the daily limit). */
 const LOCAL_KINDS = new Set<TaskKind>(["scheme.source"]);
 
 export type EngineSettings = {
   provider: EngineProvider; visionProvider: "codex"; state: EngineState; dailyTaskLimit: number; maxPromptChars: number;
+  imageGeneration: boolean; dailyImageLimit: number;
 };
 
 export type ClaimedTask = {
@@ -24,6 +25,8 @@ export type TaskContext = {
   settings: EngineSettings;
   /** Runs one bounded AI step and returns the parsed JSON object it produced. */
   ai(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }>; vision?: boolean }): Promise<Record<string, unknown>>;
+  /** A Codex step that may create files (e.g. a generated image) in /outputs; returns its reply text and the files. */
+  aiWithFiles(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }> }): Promise<{ text: string; files: Array<{ name: string; bytes: Uint8Array }> }>;
   enqueue(kind: TaskKind, subjectRef: string, options?: { priority?: number }): Promise<void>;
 };
 
@@ -33,20 +36,22 @@ export function registerTaskHandler(kind: TaskKind, handler: Handler) { handlers
 
 export async function getSettings(runtime: Runtime, organizationId: string): Promise<EngineSettings> {
   const row = await runtime.db.query<EngineSettings>(
-    `SELECT provider,vision_provider AS "visionProvider",state,daily_task_limit AS "dailyTaskLimit",max_prompt_chars AS "maxPromptChars"
+    `SELECT provider,vision_provider AS "visionProvider",state,daily_task_limit AS "dailyTaskLimit",max_prompt_chars AS "maxPromptChars",
+            image_generation AS "imageGeneration",daily_image_limit AS "dailyImageLimit"
        FROM lrn_engine_settings WHERE organization_id=$1`, [organizationId]);
-  return row.rows[0] ?? { provider: "codex", visionProvider: "codex", state: "running", dailyTaskLimit: 200, maxPromptChars: 40000 };
+  return row.rows[0] ?? { provider: "codex", visionProvider: "codex", state: "running", dailyTaskLimit: 200, maxPromptChars: 40000, imageGeneration: true, dailyImageLimit: 40 };
 }
 
 export async function updateSettings(runtime: Runtime, organizationId: string, userId: string, patch: Partial<EngineSettings>) {
   const current = await getSettings(runtime, organizationId);
   const next = { ...current, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as EngineSettings;
   await runtime.db.query(
-    `INSERT INTO lrn_engine_settings(organization_id,provider,vision_provider,state,daily_task_limit,max_prompt_chars,updated_by,updated_at)
-     VALUES($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
+    `INSERT INTO lrn_engine_settings(organization_id,provider,vision_provider,state,daily_task_limit,max_prompt_chars,image_generation,daily_image_limit,updated_by,updated_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_TIMESTAMP)
      ON CONFLICT(organization_id) DO UPDATE SET provider=EXCLUDED.provider,vision_provider=EXCLUDED.vision_provider,state=EXCLUDED.state,
-       daily_task_limit=EXCLUDED.daily_task_limit,max_prompt_chars=EXCLUDED.max_prompt_chars,updated_by=EXCLUDED.updated_by,updated_at=CURRENT_TIMESTAMP`,
-    [organizationId, next.provider, next.visionProvider, next.state, next.dailyTaskLimit, next.maxPromptChars, userId]);
+       daily_task_limit=EXCLUDED.daily_task_limit,max_prompt_chars=EXCLUDED.max_prompt_chars,image_generation=EXCLUDED.image_generation,
+       daily_image_limit=EXCLUDED.daily_image_limit,updated_by=EXCLUDED.updated_by,updated_at=CURRENT_TIMESTAMP`,
+    [organizationId, next.provider, next.visionProvider, next.state, next.dailyTaskLimit, next.maxPromptChars, next.imageGeneration, next.dailyImageLimit, userId]);
   if (next.state === "stopped") {
     // Stop also interrupts the step in progress; queued steps stay queued and resume when the engine is started again.
     const running = await runtime.db.query<{ id: string }>(`SELECT id FROM lrn_ai_tasks WHERE organization_id=$1 AND status='running'`, [organizationId]);
@@ -152,6 +157,38 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
         meter.durationMs += result.durationMs;
         meter.usage.push(result.usage ?? null);
         return parseJsonReply(result.text);
+      } finally {
+        await rm(root, { recursive: true, force: true }).catch(() => undefined);
+      }
+    },
+    async aiWithFiles(input) {
+      const root = path.join(ai.config.LEDGERLY_AI_WORK_ROOT, "learning", `${task.id}-f${meter.usage.length}`);
+      const attachmentRoot = path.join(root, "attachments"), outputRoot = path.join(root, "outputs");
+      await Promise.all([mkdir(attachmentRoot, { recursive: true, mode: 0o777 }), mkdir(outputRoot, { recursive: true, mode: 0o777 })]);
+      const imagePaths: string[] = [];
+      for (const [index, image] of (input.images ?? []).entries()) {
+        const target = path.join(attachmentRoot, `${index + 1}-${image.name.replace(/[^a-zA-Z0-9._-]+/g, "-")}`);
+        await writeFile(target, image.bytes, { mode: 0o644 });
+        imagePaths.push(target);
+      }
+      try {
+        const result = await ai.providers.execute({
+          id: task.id, organizationId: task.organizationId, userId: task.requestedBy ?? "system:learning-engine",
+          correlationId: `lrn:${task.id}`, prompt: input.prompt, taskKind: "analysis", sandbox: "read-only",
+          workspacePath: path.join(root, "workspace"), attachmentRoot, outputRoot, imagePaths,
+          providerOverride: "codex", timeoutMs: 15 * 60_000,
+        });
+        meter.provider = result.provider;
+        meter.promptChars += input.prompt.length;
+        meter.durationMs += result.durationMs;
+        meter.usage.push(result.usage ?? null);
+        const files: Array<{ name: string; bytes: Uint8Array }> = [];
+        for (const name of await readdir(outputRoot).catch(() => [] as string[])) {
+          const full = path.join(outputRoot, name);
+          const info = await stat(full);
+          if (info.isFile() && info.size > 0 && info.size < 25 * 1024 * 1024) files.push({ name, bytes: new Uint8Array(await readFile(full)) });
+        }
+        return { text: result.text, files };
       } finally {
         await rm(root, { recursive: true, force: true }).catch(() => undefined);
       }

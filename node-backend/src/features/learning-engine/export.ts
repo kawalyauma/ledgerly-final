@@ -62,9 +62,13 @@ function table(header: string[], rows: string[][], widths?: number[]) {
   });
 }
 
-function diagramBlock(svg: string, title: string, caption: string | null, maxWidthPx = 600): Paragraph[] {
+function pngSize(png: Uint8Array) { const b = Buffer.from(png); return { width: b.readUInt32BE(16), height: b.readUInt32BE(20) }; }
+
+/** A lesson diagram: a labelled figure-library image (PNG) or a schematic SVG; a placeholder while a drawing is still being made. */
+function diagramBlock(a: { svg: string | null; png?: Uint8Array | null; pending?: boolean }, title: string, caption: string | null, maxWidthPx = 600): Paragraph[] {
+  if (!a.svg && !a.png) return [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `[${title}: drawing in progress]`, italics: true, color: "5B6878" })] })];
   try {
-    const img = svgToPng(svg);
+    const img = a.png ? { png: a.png, ...pngSize(a.png) } : svgToPng(a.svg!);
     const w = Math.min(maxWidthPx, img.width), h = Math.round(img.height * (w / img.width));
     return [
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 120 }, children: [new ImageRun({ type: "png", data: img.png, transformation: { width: w, height: h } })] }),
@@ -122,9 +126,11 @@ export async function loadSchemeForExport(runtime: Runtime, organizationId: stri
             u.title AS unit,u.theme,u.competences
        FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.scheme_id=$1 AND ($2::int IS NULL OR COALESCE(l.week,1) <= $2) ORDER BY l.seq`,
     [schemeId, untilWeek ?? null])).rows;
-  const assets = (await runtime.db.query<{ lessonId: string; key: string; title: string; caption: string | null; svg: string }>(
-    `SELECT lesson_id AS "lessonId",asset_key AS key,title,caption,svg FROM lrn_lesson_assets WHERE lesson_id=ANY($1::text[]) ORDER BY created_at`,
+  const assetRows = (await runtime.db.query<{ lessonId: string; key: string; title: string; caption: string | null; svg: string | null; pngKey: string | null }>(
+    `SELECT a.lesson_id AS "lessonId",a.asset_key AS key,a.title,a.caption,a.svg,lb.png_key AS "pngKey"
+       FROM lrn_lesson_assets a LEFT JOIN lrn_figure_labelings lb ON lb.id=a.labeling_id WHERE a.lesson_id=ANY($1::text[]) ORDER BY a.created_at`,
     [lessons.map(l => l.id)])).rows;
+  const assets = await Promise.all(assetRows.map(async a => ({ ...a, png: a.pngKey ? await runtime.storage.get(a.pngKey) : null })));
   const questions = (await runtime.db.query<{ lessonId: string; stem: string; answer: string | null }>(
     `SELECT lesson_id AS "lessonId",stem,answer FROM lrn_questions WHERE lesson_id=ANY($1::text[]) AND status='active' ORDER BY created_at`,
     [lessons.map(l => l.id)])).rows;
@@ -168,7 +174,7 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
     const p = l.plan;
     const mine = assets.filter(a => a.lessonId === l.id);
     const used = new Set<string>();
-    const fig = (key: string) => { const a = mine.find(x => x.key === key); if (!a) return []; used.add(key); return diagramBlock(a.svg, a.title, a.caption); };
+    const fig = (key: string) => { const a = mine.find(x => x.key === key); if (!a) return []; used.add(key); return diagramBlock(a, a.title, a.caption); };
     const children: Array<Paragraph | Table> = [
       new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(`Lesson ${l.seq}: ${l.title}`)] }),
       new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: `${scheme.subjectName} · ${scheme.className} · ${scheme.termName} · Week ${l.week ?? "-"} · ${l.periods} period(s) · ${l.unit}${l.subtopic ? ` › ${l.subtopic}` : ""}`, color: "5B6878", size: 18 })] }),
@@ -192,7 +198,7 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
       children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, pageBreakBefore: Boolean(p), children: [new TextRun("Lesson notes")] }));
       children.push(...markdownToDocx(l.notes, fig));
     }
-    for (const a of mine.filter(x => !used.has(x.key))) children.push(...diagramBlock(a.svg, a.title, a.caption));
+    for (const a of mine.filter(x => !used.has(x.key))) children.push(...diagramBlock(a, a.title, a.caption));
     const qs = questions.filter(q => q.lessonId === l.id);
     if (qs.length) {
       children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun("Activity")] }));

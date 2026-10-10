@@ -44,8 +44,10 @@ export async function lessonPrintHtml(runtime: Runtime, organizationId: string, 
        FROM lrn_schemes sc JOIN school_subjects s ON s.id=sc.subject_id JOIN school_classes c ON c.id=sc.class_id JOIN school_terms t ON t.id=sc.term_id WHERE sc.id=$1`,
     [String(l.schemeId), organizationId]);
   const m = meta.rows[0];
-  const assets = await runtime.db.query<{ key: string; title: string; caption: string | null; svg: string }>(
-    `SELECT asset_key AS key,title,caption,svg FROM lrn_lesson_assets WHERE lesson_id=$1`, [lessonId]);
+  const assetRows = await runtime.db.query<{ key: string; title: string; caption: string | null; svg: string | null; pngKey: string | null }>(
+    `SELECT a.asset_key AS key,a.title,a.caption,a.svg,lb.png_key AS "pngKey" FROM lrn_lesson_assets a
+       LEFT JOIN lrn_figure_labelings lb ON lb.id=a.labeling_id WHERE a.lesson_id=$1`, [lessonId]);
+  const assets = { rows: await Promise.all(assetRows.rows.map(async a => ({ ...a, png: a.pngKey ? await runtime.storage.get(a.pngKey) : null }))) };
   const byKey = new Map(assets.rows.map(a => [a.key, a]));
   const used = new Set<string>();
   // Sanitised SVG is embedded as an <img> data URI so it renders as a picture and can never run anything.
@@ -53,7 +55,9 @@ export async function lessonPrintHtml(runtime: Runtime, organizationId: string, 
     const a = byKey.get(key);
     if (!a) return "";
     used.add(key);
-    return `<figure><img alt="${esc(a.title)}" src="data:image/svg+xml;base64,${Buffer.from(a.svg).toString("base64")}"><figcaption><b>${esc(a.title)}</b>${a.caption ? ` — ${esc(a.caption)}` : ""}</figcaption></figure>`;
+    const src = a.png ? `data:image/png;base64,${Buffer.from(a.png).toString("base64")}` : a.svg ? `data:image/svg+xml;base64,${Buffer.from(a.svg).toString("base64")}` : null;
+    if (!src) return `<figure><figcaption><i>${esc(a.title)}: drawing in progress</i></figcaption></figure>`;
+    return `<figure><img alt="${esc(a.title)}" src="${src}"><figcaption><b>${esc(a.title)}</b>${a.caption ? ` — ${esc(a.caption)}` : ""}</figcaption></figure>`;
   };
   const notes = l.notes ? markdownToHtml(String(l.notes), figure) : "<p><i>Notes not written yet.</i></p>";
   const extra = assets.rows.filter(a => !used.has(a.key)).map(a => figure(a.key)).join("");
