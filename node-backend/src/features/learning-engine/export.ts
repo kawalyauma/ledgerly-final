@@ -110,7 +110,10 @@ function markdownToDocx(md: string, diagram: (key: string) => Paragraph[]): Arra
 const list = (items?: string[]) => (items?.length ? items : ["—"]).map(t => new Paragraph({ children: [new TextRun("•  "), ...runs(t)], indent: { left: 360, hanging: 260 } }));
 const label = (text: string) => new Paragraph({ spacing: { before: 140, after: 40 }, children: [new TextRun({ text, bold: true, color: "123D8A" })] });
 
-export async function loadSchemeForExport(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number) {
+/** What to put in a download: which parts, and which lessons (whole term, up to a week, one week, or one lesson). */
+export type ExportOptions = { parts?: { scheme: boolean; plans: boolean; notes: boolean }; week?: number; lessonId?: string };
+
+export async function loadSchemeForExport(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number, opts: ExportOptions = {}) {
   const s = await runtime.db.query<{
     id: string; title: string; summary: string | null; weeks: number; periodsPerWeek: number; className: string; subjectName: string; termName: string;
     school: string; library: { classSlug: string | null; subjectSlug: string | null; termSlug: string | null }; writeUntilWeek: number | null;
@@ -124,8 +127,10 @@ export async function loadSchemeForExport(runtime: Runtime, organizationId: stri
   const lessons = (await runtime.db.query<LessonRow>(
     `SELECT l.id,l.seq,l.week,l.periods,l.title,l.subtopic,l.objectives,l.status,l.notes_markdown AS notes,l.lesson_plan AS plan,l.methods,l.materials,
             u.title AS unit,u.theme,u.competences
-       FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.scheme_id=$1 AND ($2::int IS NULL OR COALESCE(l.week,1) <= $2) ORDER BY l.seq`,
-    [schemeId, untilWeek ?? null])).rows;
+       FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.scheme_id=$1 AND ($2::int IS NULL OR COALESCE(l.week,1) <= $2)
+        AND ($3::int IS NULL OR COALESCE(l.week,1) = $3) AND ($4::text IS NULL OR l.id = $4) ORDER BY l.seq`,
+    [schemeId, untilWeek ?? null, opts.week ?? null, opts.lessonId ?? null])).rows;
+  if (opts.lessonId && !lessons.length) throw new AppError(404, "NOT_FOUND", "Lesson not found in this scheme");
   const assetRows = (await runtime.db.query<{ lessonId: string; key: string; title: string; caption: string | null; svg: string | null; pngKey: string | null }>(
     `SELECT a.lesson_id AS "lessonId",a.asset_key AS key,a.title,a.caption,a.svg,lb.png_key AS "pngKey"
        FROM lrn_lesson_assets a LEFT JOIN lrn_figure_labelings lb ON lb.id=a.labeling_id WHERE a.lesson_id=ANY($1::text[]) ORDER BY a.created_at`,
@@ -140,12 +145,13 @@ export async function loadSchemeForExport(runtime: Runtime, organizationId: stri
 }
 
 /** The scheme as a Word document: scheme of work table, then a lesson plan and learner notes (with diagrams) per lesson. */
-export async function schemeDocx(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number, publicCopy = false) {
-  const { scheme, lessons, assets, questions, sources } = await loadSchemeForExport(runtime, organizationId, schemeId, untilWeek);
-  const weeksLabel = untilWeek ? (untilWeek === 1 ? "Week 1" : `Weeks 1–${untilWeek}`) : "Whole term";
+export async function schemeDocx(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number, publicCopy = false, opts: ExportOptions = {}) {
+  const { scheme, lessons, assets, questions, sources } = await loadSchemeForExport(runtime, organizationId, schemeId, untilWeek, opts);
+  const parts = opts.parts ?? { scheme: true, plans: true, notes: true };
+  const weeksLabel = opts.lessonId ? `Lesson ${lessons[0]!.seq}` : opts.week ? `Week ${opts.week}` : untilWeek ? (untilWeek === 1 ? "Week 1" : `Weeks 1–${untilWeek}`) : "Whole term";
   const sections: ISectionOptions[] = [];
 
-  sections.push({
+  if (parts.scheme) sections.push({
     properties: { page: { size: { orientation: PageOrientation.LANDSCAPE }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
     children: [
       new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: publicCopy ? "NOTESUG.COM · PREPARED BY LEDGERLY AI" : scheme.school.toUpperCase(), bold: true, size: 28 })] }),
@@ -170,8 +176,8 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
     ],
   });
 
-  for (const l of lessons.filter(x => x.notes || x.plan)) {
-    const p = l.plan;
+  for (const l of lessons.filter(x => (parts.notes && x.notes) || (parts.plans && x.plan))) {
+    const p = parts.plans ? l.plan : null;
     const mine = assets.filter(a => a.lessonId === l.id);
     const used = new Set<string>();
     const fig = (key: string) => { const a = mine.find(x => x.key === key); if (!a) return []; used.add(key); return diagramBlock(a, a.title, a.caption); };
@@ -194,20 +200,20 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
       if (p.lifeSkills?.length) children.push(label("Life skills and values"), ...list(p.lifeSkills));
       if (p.references?.length) children.push(label("References"), ...list(p.references));
     }
-    if (l.notes) {
+    if (l.notes && parts.notes) {
       children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, pageBreakBefore: Boolean(p), children: [new TextRun("Lesson notes")] }));
       children.push(...markdownToDocx(l.notes, fig));
     }
-    for (const a of mine.filter(x => !used.has(x.key))) children.push(...diagramBlock(a, a.title, a.caption));
+    if (parts.notes) for (const a of mine.filter(x => !used.has(x.key))) children.push(...diagramBlock(a, a.title, a.caption));
     const qs = questions.filter(q => q.lessonId === l.id);
-    if (qs.length) {
+    if (qs.length && parts.notes) {
       children.push(new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun("Activity")] }));
       qs.forEach((q, i) => children.push(new Paragraph({ children: [new TextRun(`${i + 1}.  `), ...runs(q.stem)], indent: { left: 360, hanging: 300 }, spacing: { after: 60 } })));
     }
     sections.push({ properties: { page: { margin: { top: 1000, bottom: 1000, left: 1000, right: 1000 } } }, children });
   }
 
-  sections.push({
+  if (sections.length) sections.push({
     properties: { page: { margin: { top: 1000, bottom: 1000, left: 1000, right: 1000 } } },
     children: [
       new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun("Sources")] }),
@@ -222,7 +228,9 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
     sections,
   });
   const bytes = new Uint8Array(await Packer.toBuffer(doc));
-  const name = `${scheme.subjectName} ${scheme.className} ${scheme.termName} ${weeksLabel} scheme lesson plans notes`.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  if (!sections.length) throw new AppError(409, "NOTHING_TO_EXPORT", parts.plans && !parts.notes ? "No lesson plans written for these lessons yet" : "Nothing written for these lessons yet");
+  const what = parts.scheme && parts.plans && parts.notes ? "scheme lesson plans notes" : [parts.scheme && "scheme", parts.plans && "lesson plans", parts.notes && "notes"].filter(Boolean).join(" ");
+  const name = `${scheme.subjectName} ${scheme.className} ${scheme.termName} ${weeksLabel} ${what}`.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
   return { bytes, fileName: `${name}.docx`, scheme, lessons, weeksLabel };
 }
 
@@ -255,4 +263,22 @@ export async function postSchemeToLibrary(runtime: Runtime, organizationId: stri
     `INSERT INTO lrn_library_posts(id,organization_id,scheme_id,kind,weeks,external_slug,page_url,status,posted_by) VALUES($1,$2,$3,'lesson_pack',$4,$5,$6,$7,$8)`,
     [createId("lpost"), organizationId, schemeId, doc.weeksLabel, posted.slug, posted.pageUrl, posted.status, userId]);
   return { slug: posted.slug, url: posted.pageUrl, status: posted.status, lessons: written };
+}
+
+/** Word → PDF with LibreOffice (installed in the server image), so the PDF matches the Word file, drawings and tables included. */
+export async function docxToPdf(docx: Uint8Array): Promise<Uint8Array> {
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const dir = await mkdtemp(join(tmpdir(), "lrn-pdf-"));
+  try {
+    await writeFile(join(dir, "doc.docx"), docx);
+    await new Promise<void>((resolve, reject) => execFile("soffice",
+      [`-env:UserInstallation=file://${dir}/profile`, "--headless", "--norestore", "--convert-to", "pdf", "--outdir", dir, join(dir, "doc.docx")],
+      { timeout: 180_000 }, err => err ? reject(new AppError(500, "PDF_FAILED", `Could not make the PDF: ${err.message}`)) : resolve()));
+    return new Uint8Array(await readFile(join(dir, "doc.pdf")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }

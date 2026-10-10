@@ -62,7 +62,7 @@ export async function me(runtime: Runtime, p: AuthPrincipal) {
     can: {
       write: has(p, "learning:write", "school:write"),
       capture: has(p, "learning:capture", "learning:write", "school:write"),
-      manage: p.role === "owner" || p.role === "admin" || has(p, "learning:admin", "school:write"),
+      manage: p.role === "owner" || p.role === "admin" || has(p, "learning:admin", "learning:dos"),
       admin: p.role === "owner" || has(p, "learning:admin"),
     },
     classes, subjects, allClasses: !mine,

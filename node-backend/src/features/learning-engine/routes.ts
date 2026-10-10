@@ -9,10 +9,10 @@ import { addPage, assignPageStudent, createBatch, createBatchSchema, getBatch, g
 import { enqueueTask, getSettings, updateSettings } from "./engine.js";
 import { coverage, recordTeaching, requestStudentSummary, studentOverview, teachingAt, teachingEventSchema, timeline } from "./insights.js";
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
-import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished, writeUntil } from "./schemes.js";
+import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, requestWeek, setPublished, writeUntil } from "./schemes.js";
 import { lessonPrintHtml } from "./print.js";
 import { me, search } from "./me.js";
-import { postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
+import { docxToPdf, postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
 import { codedFigureRow, figureExamItem, getFigure, labelFigure, labelingImage, requestFigure } from "./figures.js";
 import { codedSpecSchema } from "./figures-coded.js";
 import {
@@ -33,6 +33,8 @@ const read = anyScope("learning:read", "school:read");
 const write = anyScope("learning:write", "school:write");
 const capture = anyScope("learning:capture", "learning:write", "school:write");
 const admin = anyScope("learning:admin");
+/** Director of Studies: owners, admins and anyone given learning:admin or learning:dos. Only they start schemes, notes and plans. */
+const dos = anyScope("learning:admin", "learning:dos");
 
 function parse<T extends z.ZodTypeAny>(schema: T, value: unknown, message = "Check the request"): z.infer<T> {
   const parsed = schema.safeParse(value);
@@ -124,13 +126,13 @@ export function createLearningRoutes(runtime: Runtime) {
       [org(c), f.classId ?? null, f.subjectId ?? null, f.termId ?? null, f.status ?? null]);
     return c.json({ data: rows.rows });
   });
-  r.post("/schemes", write, async c => {
+  r.post("/schemes", dos, async c => {
     const v = parse(createSchemeSchema, await body(c), "Check the scheme details");
     const p = c.get("principal");
     return c.json({ data: await createScheme(runtime, p.organizationId, p.userId, v) }, 202);
   });
   r.get("/schemes/:id", read, async c => c.json({ data: await getScheme(runtime, org(c), c.req.param("id")) }));
-  r.post("/schemes/:id/regenerate", write, async c => {
+  r.post("/schemes/:id/regenerate", dos, async c => {
     const v = parse(z.object({ what: z.enum(["sources", "outline", "failed_lessons"]) }), await body(c));
     const p = c.get("principal");
     return c.json({ data: await regenerate(runtime, p.organizationId, p.userId, c.req.param("id"), v.what) }, 202);
@@ -143,6 +145,21 @@ export function createLearningRoutes(runtime: Runtime) {
       "Content-Disposition": `attachment; filename="${doc.fileName}"`,
     } });
   });
+  /** Download: format docx|pdf; parts any of scheme,plans,notes (default all); one week, up to a week, or one lesson. */
+  r.get("/schemes/:id/export", read, async c => {
+    const f = parse(z.object({ format: z.enum(["docx", "pdf"]).default("docx"), parts: z.string().max(40).optional(),
+      week: z.coerce.number().int().min(1).max(20).optional(), untilWeek: z.coerce.number().int().min(1).max(20).optional(), lessonId: id.optional() }), c.req.query());
+    const wanted = new Set((f.parts ?? "scheme,plans,notes").split(",").map(x => x.trim()));
+    const parts = { scheme: wanted.has("scheme"), plans: wanted.has("plans"), notes: wanted.has("notes") };
+    if (!parts.scheme && !parts.plans && !parts.notes) throw new AppError(422, "VALIDATION_ERROR", "Choose at least one of scheme, plans, notes");
+    const doc = await schemeDocx(runtime, org(c), c.req.param("id"), f.untilWeek, false, { parts, week: f.week, lessonId: f.lessonId });
+    const pdf = f.format === "pdf";
+    const bytes = pdf ? await docxToPdf(doc.bytes) : doc.bytes;
+    const fileName = pdf ? doc.fileName.replace(/\.docx$/, ".pdf") : doc.fileName;
+    return new Response(Buffer.from(bytes), { headers: {
+      "Content-Type": pdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Disposition": `attachment; filename="${fileName}"`, "Cache-Control": "no-store" } });
+  });
   r.post("/schemes/:id/library", write, async c => {
     const v = parse(z.object({ untilWeek: z.number().int().min(1).max(20).optional() }), await body(c));
     const p = c.get("principal");
@@ -151,14 +168,21 @@ export function createLearningRoutes(runtime: Runtime) {
   r.get("/schemes/:id/library", read, async c => c.json({ data: (await runtime.db.query(
     `SELECT external_slug AS slug,page_url AS url,weeks,status,created_at AS "createdAt" FROM lrn_library_posts WHERE scheme_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,
     [c.req.param("id"), org(c)])).rows }));
-  r.post("/schemes/:id/write", write, async c => {
+  /** Week by week: notes first, then the lesson plans for that week. */
+  r.post("/schemes/:id/weeks/:week/:what", dos, async c => {
+    const week = Number(c.req.param("week")), what = c.req.param("what");
+    if (!Number.isInteger(week) || week < 1 || week > 20 || (what !== "notes" && what !== "plans")) throw new AppError(422, "VALIDATION_ERROR", "Use /weeks/<1-20>/notes or /plans");
+    const p = c.get("principal");
+    return c.json({ data: await requestWeek(runtime, p.organizationId, p.userId, c.req.param("id"), week, what) }, 202);
+  });
+  r.post("/schemes/:id/write", dos, async c => {
     const v = parse(z.object({ untilWeek: z.number().int().min(1).max(20).nullable() }), await body(c));
     const p = c.get("principal");
     return c.json({ data: await writeUntil(runtime, p.organizationId, p.userId, c.req.param("id"), v.untilWeek) }, 202);
   });
-  r.post("/schemes/:id/publish", write, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), true) }); });
-  r.post("/schemes/:id/unpublish", write, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), false) }); });
-  r.delete("/schemes/:id", write, async c => {
+  r.post("/schemes/:id/publish", dos, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), true) }); });
+  r.post("/schemes/:id/unpublish", dos, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), false) }); });
+  r.delete("/schemes/:id", dos, async c => {
     await runtime.db.query(`UPDATE lrn_ai_tasks SET status='cancelled',finished_at=CURRENT_TIMESTAMP WHERE organization_id=$1 AND status IN ('queued','running')
       AND (subject_ref=$2 OR subject_ref IN (SELECT id FROM lrn_lessons WHERE scheme_id=$2))`, [org(c), c.req.param("id")]);
     const row = await runtime.db.query(`UPDATE lrn_schemes SET status='archived',updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2 RETURNING id`, [c.req.param("id"), org(c)]);
@@ -166,7 +190,7 @@ export function createLearningRoutes(runtime: Runtime) {
     return c.json({ data: { id: c.req.param("id"), status: "archived" } });
   });
   r.get("/lessons/:id", read, async c => c.json({ data: await getLesson(runtime, org(c), c.req.param("id")) }));
-  r.post("/lessons/:id/rewrite", write, async c => {
+  r.post("/lessons/:id/rewrite", dos, async c => {
     const row = await runtime.db.query(`UPDATE lrn_lessons SET status='pending',error=NULL WHERE id=$1 AND organization_id=$2 RETURNING id`, [c.req.param("id"), org(c)]);
     if (!row.rowCount) throw new AppError(404, "NOT_FOUND", "Lesson not found");
     await enqueueTask(runtime, org(c), "lesson.write", c.req.param("id"), { priority: 40, requestedBy: c.get("principal").userId });

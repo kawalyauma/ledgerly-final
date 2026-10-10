@@ -38,8 +38,9 @@ export const createSchemeSchema = z.object({
   classId: z.string().min(1).max(160),
   subjectId: z.string().min(1).max(160),
   title: z.string().trim().max(300).optional(),
-  weeks: z.number().int().min(1).max(20).default(12),
-  periodsPerWeek: z.number().int().min(1).max(20).default(5),
+  // School rule: a term scheme is 10 teaching weeks, one period a day Monday to Friday. Other values are ignored.
+  weeks: z.number().int().min(1).max(20).optional(),
+  periodsPerWeek: z.number().int().min(1).max(20).optional(),
   /** Write lesson notes/plans only up to this week for now (the outline always covers the whole term). */
   writeUntilWeek: z.number().int().min(1).max(20).optional(),
   /** Override the e-library class/subject/term mapping, or name the exact resources to use. */
@@ -49,6 +50,11 @@ export const createSchemeSchema = z.object({
   }).default({}),
 });
 
+/** A term scheme: 10 teaching weeks, one lesson (one period) a day, Monday to Friday = 50 lessons. */
+export const TERM_WEEKS = 10, DAYS_PER_WEEK = 5;
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+export const dayName = (period: number | null) => DAY_NAMES[((period ?? 1) - 1) % 5] ?? "Monday";
+
 export async function createScheme(runtime: Runtime, organizationId: string, userId: string, input: z.infer<typeof createSchemeSchema>) {
   const refs = await runtime.db.query<{ className: string; subjectName: string; termName: string; academicYearId: string | null }>(
     `SELECT c.name AS "className",s.name AS "subjectName",t.name AS "termName",t.academic_year_id AS "academicYearId"
@@ -57,6 +63,11 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
     [input.classId, input.subjectId, input.termId, organizationId]);
   const ref = refs.rows[0];
   if (!ref) throw new AppError(404, "NOT_FOUND", "Class, subject or term not found in this school");
+  // One scheme per class, subject and term. Archive or delete the old one to make a new one.
+  const existing = await runtime.db.query<{ id: string; status: string }>(
+    `SELECT id,status FROM lrn_schemes WHERE organization_id=$1 AND term_id=$2 AND class_id=$3 AND subject_id=$4 AND status NOT IN ('archived','failed') LIMIT 1`,
+    [organizationId, input.termId, input.classId, input.subjectId]);
+  if (existing.rows[0]) throw new AppError(409, "SCHEME_EXISTS", `${ref.subjectName} for ${ref.className}, ${ref.termName} already has a scheme`, { schemeId: existing.rows[0].id });
   const termNumber = /(\d)/.exec(ref.termName)?.[1] ?? Object.entries(WORDS).find(([w]) => ref.termName.toLowerCase().includes(w))?.[1];
   const library = {
     classSlug: input.library.classSlug ?? libraryClassSlug(ref.className),
@@ -69,7 +80,7 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
     `INSERT INTO lrn_schemes(id,organization_id,academic_year_id,term_id,class_id,subject_id,title,library_filters,weeks,periods_per_week,status,created_by,write_until_week)
      VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,'sourcing',$11,$12)`,
     [id, organizationId, ref.academicYearId, input.termId, input.classId, input.subjectId,
-      input.title || `${ref.subjectName} · ${ref.className} · ${ref.termName}`, JSON.stringify(library), input.weeks, input.periodsPerWeek, userId, input.writeUntilWeek ?? null]);
+      input.title || `${ref.subjectName} · ${ref.className} · ${ref.termName}`, JSON.stringify(library), TERM_WEEKS, DAYS_PER_WEEK, userId, input.writeUntilWeek ?? 0]);
   await enqueueTask(runtime, organizationId, "scheme.source", id, { priority: 10, requestedBy: userId });
   return { id, status: "sourcing", library };
 }
@@ -228,10 +239,10 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   const reply = parseLenient(outlineReply, await ctx.ai({
     prompt: [
       `Task: draft the OUTLINE of a scheme of work for ${scheme.subjectName}, ${scheme.className}, ${scheme.termName}.`,
-      `The term has ${scheme.weeks} teaching weeks with ${scheme.periodsPerWeek} periods a week (at most ${scheme.weeks * scheme.periodsPerWeek} lessons).`,
+      `The term has ${scheme.weeks} teaching weeks and the subject is taught ONE period a day, Monday to Friday: ${scheme.periodsPerWeek} lessons a week, exactly ${scheme.weeks * scheme.periodsPerWeek} lessons in total.`,
+      `Every lesson is one period. Give exactly ${scheme.weeks * scheme.periodsPerWeek} lessons in teaching order (lesson 1 = week 1 Monday, lesson 6 = week 2 Monday, ...); split big subtopics over several lessons and use revision or assessment lessons where the material runs short.`,
       "You are composing the SCHOOL'S OWN scheme. The passages below (Ugandan curricula, schemes of work, lesson plans, notes and past papers from the school e-library) are reference material:",
       "combine them — follow the curriculum's order and coverage where present, use the reference schemes for week-by-week pacing, and the notes and past papers for what each subtopic must cover. Do not copy one reference scheme blindly.",
-      "Give each lesson the number of timetable periods it needs (periods), taken from the reference schemes' period columns where shown (e.g. 'PD 1-2' = 2), otherwise judged from its content.",
       `Use this term's part of the material (${scheme.termName}) when the passages cover several terms.`,
       "Do NOT write lesson content yet. Each unit and lesson must cite the passage ids it comes from in sourcePassageIds.",
       "",
@@ -261,17 +272,18 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
         `INSERT INTO lrn_units(id,organization_id,scheme_id,seq,title,theme,week_from,week_to,competences,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
         [unitId, task.organizationId, scheme.id, u + 1, unit.title, unit.theme ?? null, unit.weekFrom ?? null, unit.weekTo ?? null, unit.competences ?? null, unitCites]);
       for (const lesson of lessons) {
-        const periods = lesson.periods ?? 1;
+        const periods = 1; // one period a day
         if (periodsUsed + periods > maxPeriods) { dropped += 1; continue; }
         lessonSeq += 1;
         periodsUsed += periods;
         await client.query(
-          `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,periods,title,subtopic,objectives,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$11,$7,$8,$9::jsonb,$10)`,
-          [createId("lles"), task.organizationId, scheme.id, unitId, lessonSeq, lesson.week ?? unit.weekFrom ?? null, lesson.title, lesson.subtopic ?? null,
-            JSON.stringify(lesson.objectives), cite(lesson.sourcePassageIds).length ? cite(lesson.sourcePassageIds) : unitCites, periods]);
+          `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,periods,title,subtopic,objectives,source_chunk_ids,period) VALUES($1,$2,$3,$4,$5,$6,$11,$7,$8,$9::jsonb,$10,$12)`,
+          [createId("lles"), task.organizationId, scheme.id, unitId, lessonSeq, Math.floor((lessonSeq - 1) / scheme.periodsPerWeek) + 1, lesson.title, lesson.subtopic ?? null,
+            JSON.stringify(lesson.objectives), cite(lesson.sourcePassageIds).length ? cite(lesson.sourcePassageIds) : unitCites, periods, ((lessonSeq - 1) % scheme.periodsPerWeek) + 1]);
       }
     }
     if (!lessonSeq) throw new Error("The outline had no lessons that trace back to the e-library passages.");
+    await client.query(`UPDATE lrn_units u SET week_from=x.f,week_to=x.t FROM (SELECT unit_id,min(week) AS f,max(week) AS t FROM lrn_lessons WHERE scheme_id=$1 GROUP BY unit_id) x WHERE x.unit_id=u.id`, [scheme.id]);
     await client.query(
       `UPDATE lrn_schemes SET status='writing',summary=$2,title=COALESCE(NULLIF($3,''),title),error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
       [scheme.id, reply.summary ?? null, reply.title ?? ""]);
@@ -291,7 +303,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
 export async function queueNextLesson(runtime: Runtime, organizationId: string, schemeId: string, requestedBy: string | null) {
   const next = await runtime.db.query<{ id: string; seq: number }>(
     `SELECT l.id,l.seq FROM lrn_lessons l JOIN lrn_schemes sc ON sc.id=l.scheme_id
-      WHERE l.scheme_id=$1 AND l.status='pending' AND (sc.write_until_week IS NULL OR COALESCE(l.week,1) <= sc.write_until_week)
+      WHERE l.scheme_id=$1 AND l.status='pending' AND (l.notes_requested OR sc.write_until_week IS NULL OR COALESCE(l.week,1) <= sc.write_until_week)
       ORDER BY l.seq LIMIT 1`, [schemeId]);
   if (!next.rows[0]) {
     await runtime.db.query(
@@ -401,9 +413,6 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       "  For each one set sourcePassageId and sourceQuote = the question's exact words copied from that passage, so it can be verified.",
       "  Give answer only when the passage gives it or it is plain arithmetic; otherwise null. concept = the subtopic it tests, skill = what the learner does (e.g. 'identify', 'compute', 'explain').",
       "  kind is one of: " + QUESTION_KINDS.join(", ") + ". cognitiveLevel is one of: " + COGNITIVE_LEVELS.join(", ") + ".",
-      `- lessonPlan: a SAMPLE LESSON PLAN in the Ugandan format for the whole ${minutes} minutes: competences (subject and language competence), objectives, prior knowledge, methods, materials, references (the passage sources),`,
-      "  and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes and both teacher and learner activities, plus assessment, homework and life skills. The minutes must add up to the lesson time.",
-      "  Its content (facts, examples, activities) must come from the passages; the plan's structure and timing are yours.",
       "- diagrams: up to 3 teaching pictures of things the passages describe that learners must SEE. Skip them when nothing in the lesson is visual.",
       "  NEVER make a table, list or text box into a diagram; tables belong in the notes as Markdown tables. Choose a method per picture:",
       "  * method \"illustration\" for real things: animals, plants, body parts and organs, tools, apparatus, objects, scenes (e.g. the external parts of a domestic fowl, a beehive, a flower).",
@@ -422,7 +431,6 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       "",
       "Reply shape:",
       `{"notes":string,"methods":string|null,"materials":string|null,"lifeSkills":string|null,"assessment":string|null,"sourcePassageIds":[string],` +
-      `"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]},` +
       `"diagrams":[{"key":string,"title":string,"caption":string|null,"method":"illustration"|"coded"|"svg","concept":string|null,"parts":[string],"coded":object|null,"svg":string|null,"sourcePassageId":string|null}],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"sourcePassageId":string,"sourceQuote":string}],"gaps":[string]}`,
       "",
       "<passages>",
@@ -438,7 +446,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   try {
     await client.query("BEGIN");
     await client.query(
-      `UPDATE lrn_lessons SET notes_markdown=$2,methods=$3,materials=$4,life_skills=$5,assessment=$6,source_chunk_ids=$7,lesson_plan=$8::jsonb,status='written',error=NULL,written_at=CURRENT_TIMESTAMP WHERE id=$1`,
+      `UPDATE lrn_lessons SET notes_markdown=$2,methods=$3,materials=$4,life_skills=$5,assessment=$6,source_chunk_ids=$7,lesson_plan=COALESCE($8::jsonb,lesson_plan),status='written',error=NULL,written_at=CURRENT_TIMESTAMP WHERE id=$1`,
       [l.id, reply.notes, reply.methods ?? null, reply.materials ?? null, reply.lifeSkills ?? null, reply.assessment ?? null, usedIds, reply.lessonPlan ? JSON.stringify(reply.lessonPlan) : null]);
     await client.query("DELETE FROM lrn_lesson_assets WHERE lesson_id=$1", [l.id]);
     for (const d of reply.diagrams) {
@@ -500,6 +508,82 @@ onTaskFailed("scheme.source", async (runtime, task, message) => {
 onTaskFailed("scheme.outline", async (runtime, task, message) => {
   await runtime.db.query(`UPDATE lrn_schemes SET status='failed',error=$2,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [task.subjectRef, message]);
 });
+/** The DOS asks for one week at a time: first its notes, then its lesson plans (plans are written from the notes). */
+export async function requestWeek(runtime: Runtime, organizationId: string, userId: string, schemeId: string, week: number, what: "notes" | "plans") {
+  const sc = await runtime.db.query<{ status: string }>(`SELECT status FROM lrn_schemes WHERE id=$1 AND organization_id=$2`, [schemeId, organizationId]);
+  if (!sc.rows[0]) throw new AppError(404, "NOT_FOUND", "Scheme not found");
+  if (["draft", "sourcing", "outlining"].includes(sc.rows[0].status)) throw new AppError(409, "OUTLINE_NOT_READY", "The scheme outline is still being written");
+  if (what === "notes") {
+    const r = await runtime.db.query(`UPDATE lrn_lessons SET notes_requested=true,status=CASE WHEN status='failed' THEN 'pending' ELSE status END,error=NULL
+      WHERE scheme_id=$1 AND week=$2 AND status IN ('pending','failed') RETURNING id`, [schemeId, week]);
+    if (r.rowCount) await runtime.db.query(`UPDATE lrn_schemes SET status=CASE WHEN status IN ('review','published') THEN status ELSE 'writing' END,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [schemeId]);
+    await queueNextLesson(runtime, organizationId, schemeId, userId);
+    return { week, what, queued: r.rowCount ?? 0 };
+  }
+  const missing = await runtime.db.query(`SELECT 1 FROM lrn_lessons WHERE scheme_id=$1 AND week=$2 AND status NOT IN ('written','reviewed')`, [schemeId, week]);
+  if (missing.rowCount) throw new AppError(409, "NOTES_FIRST", `Write the notes for week ${week} first; the plans are made from them`);
+  const r = await runtime.db.query(`UPDATE lrn_lessons SET plan_status='requested',plan_error=NULL WHERE scheme_id=$1 AND week=$2 AND plan_status IN ('none','failed') RETURNING id`, [schemeId, week]);
+  await queueNextPlan(runtime, organizationId, schemeId, userId);
+  return { week, what, queued: r.rowCount ?? 0 };
+}
+
+export async function queueNextPlan(runtime: Runtime, organizationId: string, schemeId: string, requestedBy: string | null) {
+  const next = await runtime.db.query<{ id: string; seq: number }>(
+    `SELECT id,seq FROM lrn_lessons WHERE scheme_id=$1 AND plan_status='requested' AND status IN ('written','reviewed') ORDER BY seq LIMIT 1`, [schemeId]);
+  if (!next.rows[0]) return null;
+  await enqueueTask(runtime, organizationId, "lesson.plan", next.rows[0].id, { priority: 60 + Math.min(next.rows[0].seq, 39), requestedBy });
+  return next.rows[0].id;
+}
+
+const planReply = z.object({ lessonPlan: lessonReply.shape.lessonPlan.unwrap().unwrap() });
+
+/** The lesson plan for one lesson, written from its notes (no new passages needed, so it is a small step). */
+registerTaskHandler("lesson.plan", async (ctx: TaskContext) => {
+  const { runtime, task } = ctx;
+  const row = await runtime.db.query<{ id: string; schemeId: string; seq: number; week: number | null; period: number | null; title: string; subtopic: string | null;
+    objectives: string[]; notes: string | null; methods: string | null; materials: string | null; unit: string; planStatus: string }>(
+    `SELECT l.id,l.scheme_id AS "schemeId",l.seq,l.week,l.period,l.title,l.subtopic,l.objectives,l.notes_markdown AS notes,l.methods,l.materials,u.title AS unit,l.plan_status AS "planStatus"
+       FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.id=$1 AND l.organization_id=$2`, [task.subjectRef, task.organizationId]);
+  const l = row.rows[0];
+  if (!l) return { skipped: "lesson no longer exists" };
+  const scheme = await loadScheme(runtime, task.organizationId, l.schemeId);
+  if (l.planStatus === "written" || !l.notes) { await queueNextPlan(runtime, task.organizationId, scheme.id, task.requestedBy); return { skipped: l.notes ? "already planned" : "no notes" }; }
+  await runtime.db.query(`UPDATE lrn_lessons SET plan_status='writing' WHERE id=$1`, [l.id]);
+  const sources = await runtime.db.query<{ title: string }>(
+    `SELECT DISTINCT s.title FROM lrn_source_chunks c JOIN lrn_sources s ON s.id=c.source_id
+      WHERE c.id IN (SELECT jsonb_array_elements_text(to_jsonb(source_chunk_ids)) FROM lrn_lessons WHERE id=$1)`, [l.id]).catch(() => ({ rows: [] as Array<{ title: string }> }));
+  const periodLength = await runtime.db.query<{ minutes: number }>(
+    `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
+  const minutes = periodLength.rows[0]?.minutes ?? 40;
+  const reply = parseLenient(planReply, await ctx.ai({
+    prompt: [
+      `Task: write the LESSON PLAN for lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}: week ${l.week ?? 1}, ${dayName(l.period)}, one period of ${minutes} minutes.`,
+      `Unit: ${l.unit}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
+      l.objectives?.length ? `Objectives: ${l.objectives.join("; ")}` : "",
+      "Use the Ugandan lesson plan format: competences (subject and language competence), objectives, prior knowledge, methods, materials, references,",
+      `and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes adding up to ${minutes}, and both the teacher's and the learners' activity, plus assessment, homework and life skills.`,
+      "The content (facts, examples, questions) must come from the lesson notes below; the structure and timing are yours. References are the source titles listed.",
+      "",
+      "Reply shape:",
+      `{"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]}}`,
+      "",
+      `Sources: ${sources.rows.map(s => s.title).join("; ") || "the school e-library"}`,
+      l.methods ? `Methods suggested by the sources: ${l.methods}` : "",
+      l.materials ? `Materials suggested by the sources: ${l.materials}` : "",
+      "<notes>", l.notes.replace(/\[\[diagram:[^\]]+\]\]/g, "[diagram]"), "</notes>",
+    ].filter(Boolean).join("\n"),
+  }));
+  await runtime.db.query(`UPDATE lrn_lessons SET lesson_plan=$2::jsonb,plan_status='written',plan_error=NULL WHERE id=$1`, [l.id, JSON.stringify(reply.lessonPlan)]);
+  await queueNextPlan(runtime, task.organizationId, scheme.id, task.requestedBy);
+  return { steps: reply.lessonPlan.steps.length };
+});
+
+onTaskFailed("lesson.plan", async (runtime, task, message) => {
+  const row = await runtime.db.query<{ schemeId: string }>(
+    `UPDATE lrn_lessons SET plan_status='failed',plan_error=$2 WHERE id=$1 RETURNING scheme_id AS "schemeId"`, [task.subjectRef, message]);
+  if (row.rows[0]) await queueNextPlan(runtime, task.organizationId, row.rows[0].schemeId, task.requestedBy);
+});
+
 onTaskFailed("lesson.write", async (runtime, task, message) => {
   // One lesson failing must not stall the rest of the scheme.
   const row = await runtime.db.query<{ schemeId: string }>(
@@ -518,7 +602,8 @@ export async function getScheme(runtime: Runtime, organizationId: string, id: st
   const [units, lessons, sources, tasks] = await Promise.all([
     runtime.db.query(`SELECT id,seq,title,theme,week_from AS "weekFrom",week_to AS "weekTo",competences FROM lrn_units WHERE scheme_id=$1 ORDER BY seq`, [id]),
     runtime.db.query(
-      `SELECT l.id,l.unit_id AS "unitId",l.seq,l.week,l.periods,l.title,l.subtopic,l.objectives,l.status,l.error,l.written_at AS "writtenAt",
+      `SELECT l.id,l.unit_id AS "unitId",l.seq,l.week,l.period AS day,l.periods,l.title,l.subtopic,l.objectives,l.status,l.error,l.written_at AS "writtenAt",
+              l.notes_requested AS "notesRequested",l.plan_status AS "planStatus",l.plan_error AS "planError",
               (SELECT count(*)::int FROM lrn_questions q WHERE q.lesson_id=l.id) AS questions
          FROM lrn_lessons l WHERE l.scheme_id=$1 ORDER BY l.seq`, [id]),
     runtime.db.query(
@@ -546,7 +631,7 @@ export async function getLesson(runtime: Runtime, organizationId: string, id: st
     id: l.id, schemeId: l.scheme_id, unit: l.unit_title, seq: l.seq, week: l.week, periods: l.periods, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
     notes: l.notes_markdown, lessonPlan: l.lesson_plan, methods: l.methods, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
     diagrams: assets.rows.map((a: { id: string }) => ({ ...a, url: `/api/v1/learn/lessons/${id}/assets/${a.id}.svg` })),
-    status: l.status, error: l.error, writtenAt: l.written_at, citations: citations.rows,
+    status: l.status, error: l.error, writtenAt: l.written_at, citations: citations.rows, day: l.period, dayName: dayName(l.period as number | null), planStatus: l.plan_status,
   };
 }
 

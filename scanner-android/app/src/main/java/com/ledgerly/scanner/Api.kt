@@ -93,6 +93,7 @@ class Api(private val context: Context) {
         }.build()
     }
     fun post(path: String, body: JSONObject): JSONObject = send(Request.Builder().url("$baseUrl$path").post(body.toString().toRequestBody(json)).build()).getJSONObject("data")
+    fun delete(path: String) { send(Request.Builder().url("$baseUrl$path").delete().build()) }
 
     fun uploadPage(batchId: String, clientPageId: String, seq: Int, studentId: String?, file: File): JSONObject {
         val form = MultipartBody.Builder().setType(MultipartBody.FORM)

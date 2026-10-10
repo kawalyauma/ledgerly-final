@@ -4,6 +4,7 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,12 +79,12 @@ fun LessonsScreen() {
     val list = schemes.arr.objs()
         .filter { m?.optBoolean("allClasses") != false || it.s("className") in mineIds }
         .filter { cls == null || it.s("className") == cls }
-    val canWrite = m?.o("can")?.optBoolean("write") == true
+    val canWrite = m?.o("can")?.optBoolean("manage") == true
     Page("Lessons", subtitle = "Schemes of work, notes and lesson plans by Ledgerly AI",
         actions = { if (canWrite) IconButton(onClick = { nav.navigate("newscheme") }) { Icon(Icons.Filled.Add, "New scheme", tint = C.Brand) } }) {
         if (classes.size > 1) item { ChoiceRow(listOf("" to "All classes") + classes.map { (it.s("name") ?: "") to (it.s("name") ?: "") }, cls ?: "") { cls = it.ifEmpty { null } } }
         item { Row(Modifier.fillMaxWidth()) { SecondaryButton("My timetable", Modifier.weight(1f)) { nav.navigate("timetable") } } }
-        status(schemes, list.isEmpty(), "No schemes yet", if (canWrite) "Tap + to ask Ledgerly AI to write a scheme of work for a class and subject." else "The Director of Studies orders schemes; they appear here.")
+        status(schemes, list.isEmpty(), "No schemes yet", if (canWrite) "Tap + to generate the term's schemes for the classes you choose." else "The Director of Studies generates the schemes; they appear here.")
         list.forEach { s -> item { SchemeCard(s) { nav.navigate("scheme/${s.s("id")}") } } }
     }
 }
@@ -129,85 +130,146 @@ fun SchemeScreen(id: String) {
     val res = rememberData("/api/v1/learn/schemes/$id")
     val s = res.obj
     var tab by remember { mutableIntStateOf(0) }
-    var busy by remember { mutableStateOf(false) }
-    val can = m?.o("can")
+    var download by remember { mutableStateOf<Int?>(null) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    val dos = m?.o("can")?.optBoolean("manage") == true
+    // Refresh while Ledgerly AI is writing, so ticks appear without leaving the page.
+    androidx.compose.runtime.LaunchedEffect(id) { while (true) { kotlinx.coroutines.delay(20_000); res.reload() } }
     Page(s?.let { "${it.s("subjectName")} · ${it.s("className")}" } ?: "Scheme", onBack = { nav.popBackStack() }, subtitle = s?.s("termName"),
-        bottom = s?.let { sc -> {
-            PrimaryButton(if (busy) "Preparing the Word file…" else "Download notes & lesson plans", enabled = !busy) {
-                busy = true
-                launchCall(scope, ctx, { busy = false }) {
-                    val bytes = api.bytes("/api/v1/learn/schemes/$id/export.docx")
-                    val f = File(File(ctx.cacheDir, "share").apply { mkdirs() }, "${sc.s("subjectName")}-${sc.s("className")}-${sc.s("termName")}.docx".replace(Regex("[^A-Za-z0-9.-]+"), "-"))
-                    f.writeBytes(bytes)
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { shareFile(ctx, f, "application/vnd.openxmlformats-officedocument.wordprocessingml.document") }
-                }
-            }
-        } }) {
+        actions = { if (s != null) IconButton(onClick = { download = 0 }) { Icon(Icons.Filled.Download, "Download", tint = C.Brand) } },
+        bottom = s?.let { { PrimaryButton("Download, share or print") { download = 0 } } }) {
         if (s == null) { status(res, false, "", ""); return@Page }
         val lessons = s.a("lessons").objs()
-        val written = lessons.count { it.s("status") == "written" }
+        val weeks = s.i("weeks", 10)
+        val notes = lessons.count { it.s("status") == "written" || it.s("status") == "reviewed" }
+        val plans = lessons.count { it.s("planStatus") == "written" }
         item {
             Card {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ring(if (lessons.isEmpty()) 0f else written.toFloat() / lessons.size, "${if (lessons.isEmpty()) 0 else written * 100 / lessons.size}%", C.Brand, 60.dp)
+                    Ring(if (lessons.isEmpty()) 0f else (notes + plans).toFloat() / (2 * lessons.size), "${if (lessons.isEmpty()) 0 else (notes + plans) * 50 / lessons.size}%", C.Brand, 60.dp)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Scheme progress", style = MaterialTheme.typography.titleSmall)
-                        Text("$written of ${lessons.size} lessons written · ${s.i("weeks")} weeks · ${s.i("periodsPerWeek")} periods a week", style = MaterialTheme.typography.bodySmall)
+                        Text("${lessons.size} lessons · $weeks weeks · one a day, Mon–Fri", style = MaterialTheme.typography.titleSmall)
+                        Text("Notes: $notes of ${lessons.size} · Lesson plans: $plans of ${lessons.size}", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(4.dp)); SchemeStatus(s.s("status"))
                     }
                 }
             }
         }
-        item { Tabs(listOf("Lessons", "About", "Sources"), tab) { tab = it } }
+        if (s.s("status") in setOf("draft", "sourcing", "outlining")) item { Notice(Icons.Filled.HourglassEmpty, "Ledgerly AI is reading the e-library and writing the term's scheme. The weeks appear here when it is ready.", C.Ai, C.AiSoft) }
+        item { Tabs(listOf("Weeks", "Lessons", "About"), tab) { tab = it } }
         when (tab) {
             0 -> {
-                val units = s.a("units").objs()
-                units.forEach { u ->
-                    val inUnit = lessons.filter { it.s("unitId") == u.s("id") }
-                    item { SectionHeader("${u.i("seq")}. ${u.s("title")}") }
-                    item {
-                        Card(padding = 8.dp) {
-                            Text("Weeks ${u.i("weekFrom")}–${u.i("weekTo")}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp, 2.dp))
-                            inUnit.forEach { l -> LessonRow(l) { nav.navigate("lesson/${l.s("id")}") } }
+                if (dos) item { Text("Step 1: write a week's notes. Step 2: write that week's lesson plans (made from the notes).", style = MaterialTheme.typography.bodySmall) }
+                (1..weeks).forEach { w ->
+                    val inWeek = lessons.filter { it.i("week", 1) == w }
+                    if (inWeek.isEmpty()) return@forEach
+                    item { WeekCard(w, inWeek, dos, onDownload = { download = w }, onOpen = { nav.navigate("lesson/$it") }) { what ->
+                        launchCall(scope, ctx, { ok -> if (ok) { Toast.makeText(ctx, "Week $w ${if (what == "notes") "notes" else "lesson plans"}: Ledgerly AI has started.", Toast.LENGTH_LONG).show(); res.reload() } }) {
+                            api.post("/api/v1/learn/schemes/$id/weeks/$w/$what", JSONObject())
                         }
-                    }
+                    } }
                 }
-                val loose = lessons.filter { l -> units.none { it.s("id") == l.s("unitId") } }
-                if (loose.isNotEmpty()) item { Card(padding = 8.dp) { loose.forEach { l -> LessonRow(l) { nav.navigate("lesson/${l.s("id")}") } } } }
             }
             1 -> {
-                item { Card { Text(s.s("title") ?: "", style = MaterialTheme.typography.titleSmall); s.s("summary")?.let { Spacer(Modifier.height(6.dp)); Text(it) } } }
-                s.a("units").objs().forEach { u -> u.s("competences")?.let { c -> item { Card { Text(u.s("title") ?: "", style = MaterialTheme.typography.titleSmall); u.s("theme")?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; Spacer(Modifier.height(6.dp)); Text(c) } } } }
-                if (can?.optBoolean("write") == true) item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        val pending = lessons.count { it.s("status") != "written" }
-                        if (pending > 0) SecondaryButton("Write the remaining $pending lessons") {
-                            launchCall(scope, ctx, { if (it) { Toast.makeText(ctx, "Ledgerly AI is writing them, one lesson at a time.", Toast.LENGTH_LONG).show(); res.reload() } }) {
-                                api.post("/api/v1/learn/schemes/$id/write", JSONObject().put("untilWeek", JSONObject.NULL))
-                            }
-                        }
-                        if (can.optBoolean("manage")) {
-                            if (s.s("status") == "published") SecondaryButton("Unpublish") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/unpublish", JSONObject()) } }
-                            else if (s.s("status") == "review") PrimaryButton("Publish to teachers") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/publish", JSONObject()) } }
-                        }
-                    }
+                s.a("units").objs().forEach { u ->
+                    val inUnit = lessons.filter { it.s("unitId") == u.s("id") }
+                    if (inUnit.isEmpty()) return@forEach
+                    item { SectionHeader("${u.i("seq")}. ${u.s("title")}") }
+                    item { Card(padding = 8.dp) {
+                        Text("Weeks ${u.i("weekFrom")}–${u.i("weekTo")}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(6.dp, 2.dp))
+                        inUnit.forEach { l -> LessonRow(l) { nav.navigate("lesson/${l.s("id")}") } }
+                    } }
                 }
             }
             else -> {
-                val sources = s.a("sources").objs()
-                if (sources.isEmpty()) item { Empty("No sources listed", "Ledgerly AI lists the e-library resources it used here.") }
-                sources.forEach { src -> item { Card { Text(src.s("title") ?: "", style = MaterialTheme.typography.titleSmall); Text(listOfNotNull(src.s("role")?.replace('_', ' '), src.s("pageUrl")).joinToString(" · "), style = MaterialTheme.typography.bodySmall) } } }
+                item { Card { Text(s.s("title") ?: "", style = MaterialTheme.typography.titleSmall); s.s("summary")?.let { Spacer(Modifier.height(6.dp)); Text(it) } } }
+                s.a("units").objs().forEach { u -> u.s("competences")?.let { c -> item { Card { Text(u.s("title") ?: "", style = MaterialTheme.typography.titleSmall); u.s("theme")?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; Spacer(Modifier.height(6.dp)); Text(c) } } } }
+                s.a("sources").objs().takeIf { it.isNotEmpty() }?.let { src ->
+                    item { SectionHeader("Sources (e-library)") }
+                    item { Card { src.forEach { x -> Text("•  ${x.s("title")}", modifier = Modifier.padding(vertical = 2.dp)) } } }
+                }
+                if (dos) item {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (s.s("status") == "published") SecondaryButton("Unpublish") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/unpublish", JSONObject()) } }
+                        else if (s.s("status") == "review" || s.s("status") == "writing") PrimaryButton("Publish to teachers") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/publish", JSONObject()) } }
+                        SecondaryButton("Delete this scheme") { confirmDelete = true }
+                    }
+                }
+            }
+        }
+    }
+    if (download != null && s != null) DownloadDialog(id, "${s.s("subjectName")}-${s.s("className")}-${s.s("termName")}", s.i("weeks", 10),
+        startWeek = download?.takeIf { it > 0 }) { download = null }
+    if (confirmDelete) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmDelete = false },
+        title = { Text("Delete this scheme?") },
+        text = { Text("Its outline, notes and lesson plans are removed. You can then generate a new scheme for this class, subject and term.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            confirmDelete = false
+            launchCall(scope, ctx, { ok -> if (ok) nav.popBackStack() }) { api.delete("/api/v1/learn/schemes/$id") }
+        }) { Text("Delete", color = C.Bad) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
+}
+
+/** One teaching week: its five lessons (Mon–Fri) with note and plan ticks, and the DOS's buttons for the next step. */
+@Composable
+private fun WeekCard(week: Int, lessons: List<JSONObject>, dos: Boolean, onDownload: () -> Unit, onOpen: (String) -> Unit, onRequest: (String) -> Unit) {
+    val notesDone = lessons.count { it.s("status") == "written" || it.s("status") == "reviewed" }
+    val notesBusy = lessons.any { it.s("status") == "writing" || (it.s("status") == "pending" && it.optBoolean("notesRequested")) }
+    val plansDone = lessons.count { it.s("planStatus") == "written" }
+    val plansBusy = lessons.any { it.s("planStatus") == "requested" || it.s("planStatus") == "writing" }
+    Card {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Week $week", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (notesDone + plansDone > 0) Text("Download", color = C.Brand, fontWeight = FontWeight.SemiBold, fontSize = 13.sp,
+                modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickableNoRipple(onDownload).padding(6.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Pill("Notes $notesDone/${lessons.size}", if (notesDone == lessons.size) C.Ok else if (notesBusy) C.Ai else C.Muted)
+            Pill("Plans $plansDone/${lessons.size}", if (plansDone == lessons.size) C.Ok else if (plansBusy) C.Ai else C.Muted)
+        }
+        Spacer(Modifier.height(6.dp))
+        lessons.sortedBy { it.i("seq") }.forEach { l ->
+            Row(Modifier.fillMaxWidth().clickableNoRipple { onOpen(l.s("id")!!) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(DAYS[(l.i("day", 1) - 1).coerceIn(0, 4)], color = C.Muted, fontSize = 12.sp, modifier = Modifier.width(36.dp))
+                Text(l.s("title") ?: "", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2)
+                Tick(l.s("status") == "written" || l.s("status") == "reviewed", l.s("status") == "writing", "N")
+                Spacer(Modifier.width(4.dp))
+                Tick(l.s("planStatus") == "written", l.s("planStatus") == "writing" || l.s("planStatus") == "requested", "P")
+            }
+        }
+        if (dos) {
+            Spacer(Modifier.height(8.dp))
+            when {
+                notesBusy -> Text("Ledgerly AI is writing this week's notes…", color = C.Ai, fontSize = 13.sp)
+                notesDone < lessons.size -> PrimaryButton("Write week $week notes") { onRequest("notes") }
+                plansBusy -> Text("Ledgerly AI is writing this week's lesson plans…", color = C.Ai, fontSize = 13.sp)
+                plansDone < lessons.size -> PrimaryButton("Write week $week lesson plans") { onRequest("plans") }
+                else -> Text("Notes and lesson plans ready ✓", color = C.Ok, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
             }
         }
     }
 }
 
+private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri")
+
+@Composable
+private fun Tick(done: Boolean, busy: Boolean, letter: String) {
+    Box(Modifier.size(22.dp).clip(CircleShape).background(if (done) C.Ok else if (busy) C.AiSoft else Color(0xFFEEF2F7)), contentAlignment = Alignment.Center) {
+        Text(if (done) "✓" else letter, color = if (done) Color.White else if (busy) C.Ai else C.Muted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun Modifier.clickableNoRipple(onClick: () -> Unit) = this.clickable(onClick = onClick)
+
 @Composable
 private fun LessonRow(l: JSONObject, onClick: () -> Unit) {
     val st = l.s("status")
     ListRow(
-        l.s("title") ?: "", listOfNotNull("Week ${l.i("week", 1)}", l.s("subtopic"), "${l.i("periods", 1)} period(s)", l.i("questions").takeIf { it > 0 }?.let { "$it questions" }).joinToString(" · "),
+        l.s("title") ?: "", listOfNotNull("Week ${l.i("week", 1)} ${DAYS[(l.i("day", 1) - 1).coerceIn(0, 4)]}", l.s("subtopic"),
+            if (l.s("planStatus") == "written") "plan ready" else null, l.i("questions").takeIf { it > 0 }?.let { "$it questions" }).joinToString(" · "),
         leading = {
             val (bg, fg, icon) = when (st) {
                 "written" -> Triple(C.Ok, Color.White, Icons.Filled.Check)
@@ -235,7 +297,9 @@ fun LessonScreen(id: String, planId: String?) {
     var tab by remember { mutableIntStateOf(0) }
     var done by remember { mutableStateOf(false) }
     val scheme = rememberData(l?.s("schemeId")?.let { "/api/v1/learn/schemes/$it" })
-    Page(l?.s("title") ?: "Lesson", onBack = { nav.popBackStack() }, subtitle = l?.let { listOfNotNull(it.s("unit"), "Week ${it.i("week", 1)}").joinToString(" · ") },
+    var download by remember { mutableStateOf(false) }
+    Page(l?.s("title") ?: "Lesson", onBack = { nav.popBackStack() }, subtitle = l?.let { listOfNotNull(it.s("unit"), "Week ${it.i("week", 1)} · ${it.s("dayName") ?: ""}").joinToString(" · ") },
+        actions = { if (l != null) IconButton(onClick = { download = true }) { Icon(Icons.Filled.Download, "Download", tint = C.Brand) } },
         bottom = if (l == null || m.obj?.o("can")?.optBoolean("write") != true) null else ({
             PrimaryButton(if (done) "Recorded as taught ✓" else "Mark lesson as taught", enabled = !done) {
                 val sc = scheme.obj
@@ -257,6 +321,7 @@ fun LessonScreen(id: String, planId: String?) {
                 else markdown(l.s("notes")!!, diagrams, api.baseUrl)
             }
             1 -> {
+                if (l.o("lessonPlan") == null) item { Empty("Lesson plan not written yet", "The DOS asks Ledgerly AI for a week's lesson plans after that week's notes are written.") }
                 item {
                     Card {
                         Text("Objectives", style = MaterialTheme.typography.titleSmall)
@@ -297,6 +362,9 @@ fun LessonScreen(id: String, planId: String?) {
             }
         }
     }
+    val sc = scheme.obj
+    if (download && l != null && sc != null) DownloadDialog(sc.s("id") ?: l.s("schemeId")!!, "${sc.s("subjectName")}-${sc.s("className")}-${sc.s("termName")}", sc.i("weeks", 10),
+        lessonId = id, lessonLabel = "Lesson ${l.i("seq")}", startWeek = l.i("week", 1)) { download = false }
 }
 
 @Composable
@@ -428,7 +496,6 @@ fun TimetableScreen() {
 
 /* ───────────── New scheme (DOS / teacher) ───────────── */
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewSchemeScreen() {
     val nav = LocalNav.current
@@ -436,30 +503,53 @@ fun NewSchemeScreen() {
     val api = LocalApi.current
     val scope = rememberCoroutineScope()
     val c = rememberData("/api/v1/learn/captures/context").obj
-    var cls by remember { mutableStateOf<JSONObject?>(null) }
-    var sub by remember { mutableStateOf<JSONObject?>(null) }
-    var weeks by remember { mutableStateOf("12") }
-    var ppw by remember { mutableStateOf("5") }
-    var first by remember { mutableStateOf("2") }
+    val classes = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    val subjects = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     var busy by remember { mutableStateOf(false) }
-    Page("New scheme of work", onBack = { nav.popBackStack() }, subtitle = c?.o("term")?.s("name")?.let { "For $it" }) {
-        item { Notice(Icons.Filled.MenuBook, "Ledgerly AI reads the curriculum, schemes, notes and past papers in the e-library, writes the outline for the whole term, then the notes and lesson plans week by week.", C.Ai, C.AiSoft) }
-        item { Picker("Class", c?.a("classes").objs(), cls) { cls = it } }
-        item { Picker("Subject", c?.a("subjects").objs(), sub) { sub = it } }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Field("Weeks", weeks, { weeks = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), type = androidx.compose.ui.text.input.KeyboardType.Number)
-            Field("Periods a week", ppw, { ppw = it.filter(Char::isDigit).take(2) }, modifier = Modifier.weight(1f), type = androidx.compose.ui.text.input.KeyboardType.Number)
-        } }
-        item { Field("Write notes now for the first … weeks", first, { first = it.filter(Char::isDigit).take(2) }, type = androidx.compose.ui.text.input.KeyboardType.Number) }
-        item {
-            PrimaryButton(if (busy) "Sending…" else "Ask Ledgerly AI to write it", enabled = !busy && cls != null && sub != null && c?.o("term") != null) {
+    var report by remember { mutableStateOf<List<String>>(emptyList()) }
+    val term = c?.o("term")
+    Page("Generate schemes", onBack = { nav.popBackStack() }, subtitle = term?.s("name")?.let { "For $it" },
+        bottom = {
+            PrimaryButton(if (busy) "Starting…" else "Generate ${classes.size * subjects.size} scheme(s)", enabled = !busy && classes.isNotEmpty() && subjects.isNotEmpty() && term != null) {
                 busy = true
-                launchCall(scope, ctx, { ok -> busy = false; if (ok) { Toast.makeText(ctx, "Started. The scheme appears in Lessons while it is written.", Toast.LENGTH_LONG).show(); nav.popBackStack() } }) {
-                    api.post("/api/v1/learn/schemes", JSONObject().put("termId", c!!.o("term")!!.s("id")).put("classId", cls!!.s("id")).put("subjectId", sub!!.s("id"))
-                        .put("weeks", weeks.toIntOrNull()?.coerceIn(1, 20) ?: 12).put("periodsPerWeek", ppw.toIntOrNull()?.coerceIn(1, 20) ?: 5)
-                        .apply { first.toIntOrNull()?.takeIf { it > 0 }?.let { put("writeUntilWeek", it.coerceAtMost(20)) } })
+                val jobs = classes.flatMap { cl -> subjects.map { sb -> cl to sb } }
+                val names = (c!!.a("classes").objs() + c.a("subjects").objs()).associate { (it.s("id") ?: "") to (it.s("name") ?: "") }
+                val out = mutableListOf<String>()
+                launchCall(scope, ctx, { busy = false; report = out.toList() }) {
+                    for ((cl, sb) in jobs) {
+                        val label = "${names[sb]} · ${names[cl]}"
+                        try {
+                            api.post("/api/v1/learn/schemes", JSONObject().put("termId", term!!.s("id")).put("classId", cl).put("subjectId", sb))
+                            out.add("✓ $label: started")
+                        } catch (e: Exception) { out.add("• $label: ${e.message}") }
+                    }
                 }
             }
+        }) {
+        item { Notice(Icons.Filled.MenuBook, "One scheme per class and subject for the term: 10 weeks, one lesson a day Monday to Friday (50 lessons). Ledgerly AI writes the outline from the e-library. Then, week by week, you ask for the notes and then the lesson plans.", C.Ai, C.AiSoft) }
+        if (term == null) item { Text("Loading classes…", style = MaterialTheme.typography.bodySmall) }
+        item { SectionHeader("Classes") }
+        item { MultiChips(c?.a("classes").objs(), classes) }
+        item { SectionHeader("Subjects") }
+        item { MultiChips(c?.a("subjects").objs(), subjects) }
+        if (report.isNotEmpty()) {
+            item { SectionHeader("Result") }
+            item { Card { report.forEach { Text(it, modifier = Modifier.padding(vertical = 2.dp)) } } }
+            item { SecondaryButton("Back to lessons") { nav.popBackStack() } }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun MultiChips(options: List<JSONObject>, chosen: MutableList<String>) {
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEach { o ->
+            val id = o.s("id") ?: return@forEach
+            val on = id in chosen
+            Text((if (on) "✓ " else "") + (o.s("name") ?: ""), color = if (on) Color.White else C.Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp,
+                modifier = Modifier.clip(RoundedCornerShape(20.dp)).background(if (on) C.Brand else Color.White)
+                    .border(1.dp, if (on) C.Brand else C.Line, RoundedCornerShape(20.dp)).clickable { if (on) chosen.remove(id) else chosen.add(id) }.padding(14.dp, 8.dp))
         }
     }
 }

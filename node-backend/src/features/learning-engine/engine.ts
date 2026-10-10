@@ -6,7 +6,7 @@ import { getLedgerlyAiFoundationService } from "../ledgerly-ai/runtime-service.j
 
 export type EngineProvider = "codex" | "claude-code";
 export type EngineState = "running" | "paused" | "stopped";
-export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "page.analyze" | "student.summary" | "figure.generate";
+export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "lesson.plan" | "page.analyze" | "student.summary" | "figure.generate";
 /** Steps that do not call the AI (and so do not count towards the daily limit). */
 const LOCAL_KINDS = new Set<TaskKind>(["scheme.source"]);
 
