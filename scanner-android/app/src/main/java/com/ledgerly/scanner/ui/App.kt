@@ -91,6 +91,7 @@ private fun Shell(onSignOut: () -> Unit) {
                 composable("learners") { LearnersScreen() }
                 composable("profile") { ProfileScreen(onSignOut) }
                 composable("search") { SearchScreen() }
+                composable("resource/{slug}") { ResourceScreen(it.arguments!!.getString("slug")!!) }
                 composable("timetable") { TimetableScreen() }
                 composable("coverage") { CoverageScreen() }
                 composable("engine") { EngineScreen() }

@@ -56,7 +56,8 @@ class Api(private val context: Context) {
     }
 
     private fun send(request: Request, auth: Boolean = true, retried: Boolean = false): JSONObject {
-        val req = if (auth) request.newBuilder().header("Authorization", "Bearer ${prefs.getString("access", "")}").build() else request
+        val builder = request.newBuilder().header("X-Ledgerly-Client", "academics-mobile")
+        val req = if (auth) builder.header("Authorization", "Bearer ${prefs.getString("access", "")}").build() else builder.build()
         http.newCall(req).execute().use { res ->
             val text = res.body?.string().orEmpty()
             if (res.code == 401 && auth && !retried && refresh()) return send(request, auth, true)
@@ -73,10 +74,11 @@ class Api(private val context: Context) {
     fun data(path: String): Any = send(Request.Builder().url("$baseUrl$path").get().build()).get("data")
     fun list(path: String): org.json.JSONArray = data(path) as org.json.JSONArray
     fun put(path: String, body: JSONObject): JSONObject = send(Request.Builder().url("$baseUrl$path").put(body.toString().toRequestBody(json)).build()).getJSONObject("data")
+    fun patch(path: String, body: JSONObject): JSONObject = send(Request.Builder().url("$baseUrl$path").patch(body.toString().toRequestBody(json)).build()).getJSONObject("data")
     val accessToken get() = prefs.getString("access", "") ?: ""
     /** Raw bytes (Word files, images), refreshing the token once if it expired. */
     fun bytes(path: String, retried: Boolean = false): ByteArray {
-        val req = Request.Builder().url("$baseUrl$path").header("Authorization", "Bearer $accessToken").get().build()
+        val req = Request.Builder().url("$baseUrl$path").header("X-Ledgerly-Client", "academics-mobile").header("Authorization", "Bearer $accessToken").get().build()
         http.newCall(req).execute().use { res ->
             if (res.code == 401 && !retried && refresh()) return bytes(path, true)
             if (!res.isSuccessful) throw ApiException(res.code, "Download failed (${res.code})")
@@ -86,9 +88,9 @@ class Api(private val context: Context) {
     /** Client used for images: adds the sign-in token and refreshes it when it expires. */
     val imageClient: OkHttpClient by lazy {
         http.newBuilder().addInterceptor { chain ->
-            val first = chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $accessToken").build())
+            val first = chain.proceed(chain.request().newBuilder().header("X-Ledgerly-Client", "academics-mobile").header("Authorization", "Bearer $accessToken").build())
             if (first.code == 401 && synchronized(this) { refresh() }) {
-                first.close(); chain.proceed(chain.request().newBuilder().header("Authorization", "Bearer $accessToken").build())
+                first.close(); chain.proceed(chain.request().newBuilder().header("X-Ledgerly-Client", "academics-mobile").header("Authorization", "Bearer $accessToken").build())
             } else first
         }.build()
     }

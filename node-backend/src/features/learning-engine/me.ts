@@ -1,6 +1,7 @@
 import type { Runtime } from "../../runtime.js";
 import type { AuthPrincipal } from "../../http/types.js";
 import { listPlan } from "./timetable.js";
+import { ulibtech } from "../school-management/ulibtech.js";
 
 /* The signed-in staff member's view for the Ledgerly Academics app: who they are, what they teach, today's periods, counts. */
 
@@ -77,10 +78,10 @@ function dedupe(items: Array<{ id: string; name: string }>) {
   return items.filter(i => !seen.has(i.id) && seen.add(i.id));
 }
 
-/** One search box: lessons, learners and questions. */
+/** One search box: Ledgerly records plus the trusted Notesug catalogue, including drafts. */
 export async function search(runtime: Runtime, organizationId: string, q: string) {
   const like = `%${q.replace(/[%_\\]/g, m => `\\${m}`)}%`;
-  const [lessons, learners, questions] = await Promise.all([
+  const [lessons, learners, questions, resources] = await Promise.all([
     runtime.db.query(
       `SELECT l.id,l.title,l.subtopic,l.week,l.status,c.name AS "className",s.name AS subject,sc.id AS "schemeId"
          FROM lrn_lessons l JOIN lrn_schemes sc ON sc.id=l.scheme_id JOIN school_classes c ON c.id=sc.class_id JOIN school_subjects s ON s.id=sc.subject_id
@@ -95,6 +96,8 @@ export async function search(runtime: Runtime, organizationId: string, q: string
       `SELECT q.id,q.stem,q.topic,c.name AS "className",s.name AS subject
          FROM lrn_questions q LEFT JOIN school_classes c ON c.id=q.class_id LEFT JOIN school_subjects s ON s.id=q.subject_id
         WHERE q.organization_id=$1 AND q.status<>'retired' AND q.stem ILIKE $2 ORDER BY q.times_given DESC,q.created_at DESC LIMIT 8`, [organizationId, like]),
+    ulibtech(runtime).catalog({ q, limit: 16 }).catch(() => []),
   ]);
-  return { lessons: lessons.rows, learners: learners.rows, questions: questions.rows };
+  return { lessons: lessons.rows, learners: learners.rows, questions: questions.rows,
+    resources: resources.map(resource => ({ ...resource, pageUrl: ulibtech(runtime).links(resource.slug).pageUrl })) };
 }

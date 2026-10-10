@@ -111,6 +111,7 @@ export function createLearningRoutes(runtime: Runtime) {
       type: z.string().max(40).optional(), term: z.string().max(40).optional(), page: z.coerce.number().int().min(1).max(100).default(1) }), c.req.query());
     return c.json({ data: await ulibtech(runtime).search({ ...f, pageSize: 24 }) });
   });
+  r.get("/library/:slug", read, async c => c.json({ data: await ulibtech(runtime).preview(c.req.param("slug")) }));
 
   /* Schemes of work. */
   r.get("/schemes", read, async c => {
@@ -132,6 +133,16 @@ export function createLearningRoutes(runtime: Runtime) {
     return c.json({ data: await createScheme(runtime, p.organizationId, p.userId, v) }, 202);
   });
   r.get("/schemes/:id", read, async c => c.json({ data: await getScheme(runtime, org(c), c.req.param("id")) }));
+  r.patch("/schemes/:id", dos, async c => {
+    const v = parse(z.object({ title: z.string().trim().min(1).max(240).optional(), summary: z.string().max(20_000).nullable().optional(),
+      weeks: z.number().int().min(1).max(20).optional(), periodsPerWeek: z.number().int().min(1).max(20).optional() }), await body(c));
+    const row = await runtime.db.query(`UPDATE lrn_schemes SET title=COALESCE($1,title),summary=CASE WHEN $2 THEN $3 ELSE summary END,
+      weeks=COALESCE($4,weeks),periods_per_week=COALESCE($5,periods_per_week),updated_at=CURRENT_TIMESTAMP
+      WHERE id=$6 AND organization_id=$7 RETURNING id,title,summary,weeks,periods_per_week AS "periodsPerWeek",status`,
+      [v.title??null,Object.hasOwn(v,"summary"),v.summary??null,v.weeks??null,v.periodsPerWeek??null,c.req.param("id"),org(c)]);
+    if(!row.rowCount)throw new AppError(404,"NOT_FOUND","Scheme not found");
+    return c.json({data:row.rows[0]});
+  });
   r.post("/schemes/:id/regenerate", dos, async c => {
     const v = parse(z.object({ what: z.enum(["sources", "outline", "failed_lessons"]) }), await body(c));
     const p = c.get("principal");
@@ -188,13 +199,37 @@ export function createLearningRoutes(runtime: Runtime) {
   r.post("/schemes/:id/publish", dos, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), true) }); });
   r.post("/schemes/:id/unpublish", dos, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), false) }); });
   r.delete("/schemes/:id", dos, async c => {
-    await runtime.db.query(`UPDATE lrn_ai_tasks SET status='cancelled',finished_at=CURRENT_TIMESTAMP WHERE organization_id=$1 AND status IN ('queued','running')
-      AND (subject_ref=$2 OR subject_ref IN (SELECT id FROM lrn_lessons WHERE scheme_id=$2))`, [org(c), c.req.param("id")]);
-    const row = await runtime.db.query(`UPDATE lrn_schemes SET status='archived',updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND organization_id=$2 RETURNING id`, [c.req.param("id"), org(c)]);
-    if (!row.rowCount) throw new AppError(404, "NOT_FOUND", "Scheme not found");
-    return c.json({ data: { id: c.req.param("id"), status: "archived" } });
+    const client=await runtime.db.connect();try{await client.query("BEGIN");
+      const owned=await client.query(`SELECT id FROM lrn_schemes WHERE id=$1 AND organization_id=$2 FOR UPDATE`,[c.req.param("id"),org(c)]);
+      if(!owned.rowCount)throw new AppError(404,"NOT_FOUND","Scheme not found");
+      await client.query(`DELETE FROM lrn_ai_tasks WHERE organization_id=$1 AND (subject_ref=$2 OR subject_ref IN (SELECT id FROM lrn_lessons WHERE scheme_id=$2))`,[org(c),c.req.param("id")]);
+      await client.query(`DELETE FROM lrn_schemes WHERE id=$1 AND organization_id=$2`,[c.req.param("id"),org(c)]);
+      await client.query("COMMIT");return c.json({data:{id:c.req.param("id"),deleted:true}});
+    }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
   });
   r.get("/lessons/:id", read, async c => c.json({ data: await getLesson(runtime, org(c), c.req.param("id")) }));
+  r.patch("/lessons/:id", dos, async c => {
+    const nullableText=z.string().max(200_000).nullable().optional();
+    const v=parse(z.object({title:z.string().trim().min(1).max(300).optional(),subtopic:z.string().max(500).nullable().optional(),
+      week:z.number().int().min(1).max(20).optional(),period:z.number().int().min(1).max(20).optional(),objectives:z.array(z.string().max(1000)).max(30).optional(),
+      notes:nullableText,methods:nullableText,materials:nullableText,lifeSkills:nullableText,assessment:nullableText,lessonPlan:z.unknown().nullable().optional()}),await body(c));
+    const has=(key:string)=>Object.hasOwn(v,key);
+    const row=await runtime.db.query(`UPDATE lrn_lessons SET title=COALESCE($1,title),subtopic=CASE WHEN $2 THEN $3 ELSE subtopic END,
+      week=COALESCE($4,week),period=COALESCE($5,period),objectives=CASE WHEN $6 THEN $7::jsonb ELSE objectives END,
+      notes_markdown=CASE WHEN $8 THEN $9 ELSE notes_markdown END,methods=CASE WHEN $10 THEN $11 ELSE methods END,
+      materials=CASE WHEN $12 THEN $13 ELSE materials END,life_skills=CASE WHEN $14 THEN $15 ELSE life_skills END,
+      assessment=CASE WHEN $16 THEN $17 ELSE assessment END,lesson_plan=CASE WHEN $18 THEN $19::jsonb ELSE lesson_plan END,
+      status=CASE WHEN $8 AND $9 IS NOT NULL THEN 'written' ELSE status END
+      WHERE id=$20 AND organization_id=$21 RETURNING id,title,status`,[v.title??null,has("subtopic"),v.subtopic??null,v.week??null,v.period??null,
+      has("objectives"),JSON.stringify(v.objectives??[]),has("notes"),v.notes??null,has("methods"),v.methods??null,has("materials"),v.materials??null,
+      has("lifeSkills"),v.lifeSkills??null,has("assessment"),v.assessment??null,has("lessonPlan"),JSON.stringify(v.lessonPlan??null),c.req.param("id"),org(c)]);
+    if(!row.rowCount)throw new AppError(404,"NOT_FOUND","Lesson not found");return c.json({data:row.rows[0]});
+  });
+  r.delete("/lessons/:id", dos, async c => {
+    await runtime.db.query(`DELETE FROM lrn_ai_tasks WHERE organization_id=$1 AND subject_ref=$2`,[org(c),c.req.param("id")]);
+    const row=await runtime.db.query(`DELETE FROM lrn_lessons WHERE id=$1 AND organization_id=$2 RETURNING id`,[c.req.param("id"),org(c)]);
+    if(!row.rowCount)throw new AppError(404,"NOT_FOUND","Lesson not found");return c.json({data:{id:c.req.param("id"),deleted:true}});
+  });
   r.post("/lessons/:id/rewrite", dos, async c => {
     const row = await runtime.db.query(`UPDATE lrn_lessons SET status='pending',error=NULL WHERE id=$1 AND organization_id=$2 RETURNING id`, [c.req.param("id"), org(c)]);
     if (!row.rowCount) throw new AppError(404, "NOT_FOUND", "Lesson not found");

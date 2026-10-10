@@ -133,9 +133,15 @@ export class UlibtechClient {
   async catalog(input: { class?: string; subject?: string; type?: string; term?: string; q?: string; limit?: number }) {
     const params = new URLSearchParams({ includeDrafts: "1", limit: String(input.limit ?? 30) });
     for (const k of ["class", "subject", "type", "term", "q"] as const) if (input[k]) params.set(k, input[k]!);
-    const raw = await this.request<{ items: Array<{ slug: string; title: string; status: string; type: string | null; class: string | null; subject: string | null; term: string | null; chars: number; sha256: string | null }> }>(
+    const raw = await this.request<{ items: Array<{ slug: string; title: string; status: string; description?: string | null; topic?: string | null; subtopic?: string | null; keywords?: string[]; type: string | null; class: string | null; subject: string | null; term: string | null; pageCount?: number | null; sizeBytes?: number | null; chars: number; sha256: string | null }> }>(
       `/api/integrations/resources?${params}`, { integration: true });
     return raw.items;
+  }
+
+  /** Trusted mobile preview. Includes draft/review resources without making them publicly visible. */
+  async preview(slug: string, limit = 40_000) {
+    const raw = await this.text(slug, 0, Math.min(100_000, Math.max(1000, limit)));
+    return { ...raw.resource, text: raw.text, totalChars: raw.totalChars, truncated: raw.truncated, ...this.links(slug) };
   }
 
   /** Publishes a document (scheme, notes, lesson plans) to the public library under the Ledgerly AI account. */

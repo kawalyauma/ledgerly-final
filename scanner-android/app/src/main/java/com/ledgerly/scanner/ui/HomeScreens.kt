@@ -357,11 +357,19 @@ fun SearchScreen() {
     LaunchedEffect(q) { delay(350); query = q.trim() }
     val res = rememberData(if (query.length >= 2) "/api/v1/learn/search?q=${enc(query)}" else null)
     Page("Search", onBack = { nav.popBackStack() }) {
-        item { Field("Lessons, learners or questions", q, { q = it }) }
-        if (query.length < 2) { item { Empty("Search everything", "Type at least two letters: a topic (\"feathers\"), a learner's name, or words from a question.") }; return@Page }
+        item { Field("Resources, lessons, learners or questions", q, { q = it }) }
+        if (query.length < 2) { item { Empty("Search everything", "Type at least two letters: a topic (\"feathers\"), a resource title, learner's name, or words from a question.") }; return@Page }
         val d = res.obj
-        status(res, d != null && d.a("lessons").length() + d.a("learners").length() + d.a("questions").length() == 0, "Nothing found", "Try another word.")
+        status(res, d != null && d.a("resources").length() + d.a("lessons").length() + d.a("learners").length() + d.a("questions").length() == 0, "Nothing found", "Try another word.")
         if (d == null) return@Page
+        d.a("resources").objs().takeIf { it.isNotEmpty() }?.let { list ->
+            item { SectionHeader("E-library resources") }
+            item { Card(padding = 8.dp) { list.forEach { r ->
+                ListRow(r.s("title") ?: "Untitled resource", listOfNotNull(r.s("type"), r.s("class"), r.s("subject"), r.s("term")).joinToString(" · "),
+                    trailing = { if (r.s("status") != "published") Pill("Draft", C.Warn, C.WarnSoft) },
+                    leading = { IconTile(Icons.Filled.MenuBook, C.Brand, C.BrandSoft, 38.dp) }) { nav.navigate("resource/${r.s("slug")}") }
+            } } }
+        }
         d.a("lessons").objs().takeIf { it.isNotEmpty() }?.let { list ->
             item { SectionHeader("Lessons") }
             item { Card(padding = 8.dp) { list.forEach { l ->
@@ -378,6 +386,30 @@ fun SearchScreen() {
             item { Card(padding = 8.dp) { list.forEach { x ->
                 ListRow(x.s("stem") ?: "", listOfNotNull(x.s("className"), x.s("subject"), x.s("topic")).joinToString(" · "),
                     leading = { IconTile(Icons.Filled.Quiz, C.Warn, C.WarnSoft, 38.dp) }) { nav.navigate("question/${x.s("id")}") } } } }
+        }
+    }
+}
+
+/** Trusted in-app reader. Draft resources stay private while signed-in staff can search and read them. */
+@Composable
+fun ResourceScreen(slug: String) {
+    val nav = LocalNav.current
+    val res = rememberData("/api/v1/learn/library/${enc(slug)}")
+    val r = res.obj
+    Page(r?.s("title") ?: "E-library resource", onBack = { nav.popBackStack() },
+        subtitle = r?.let { listOfNotNull(it.s("type"), it.s("class"), it.s("subject")).joinToString(" · ") }) {
+        if (r == null) { status(res, false, "", ""); return@Page }
+        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Pill(if (r.s("status") == "published") "Published" else "Draft", if (r.s("status") == "published") C.Ok else C.Warn)
+            r.s("term")?.let { Pill(it, C.Brand) }
+        } }
+        r.s("description")?.let { item { Card { Text(it) } } }
+        val content = r.s("text").orEmpty().trim()
+        if (content.isEmpty()) item { Empty("Text is being prepared", "The file is searchable by its details, but its readable text is not ready yet.") }
+        else {
+            item { SectionHeader("Document text") }
+            content.chunked(3500).forEach { chunk -> item { Card { Text(chunk, style = MaterialTheme.typography.bodyLarge) } } }
+            if (r.optBoolean("truncated")) item { Notice(Icons.Filled.MenuBook, "Showing the first part of this document.", C.Warn, C.WarnSoft) }
         }
     }
 }

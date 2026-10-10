@@ -74,14 +74,15 @@ export async function verifyPassword(password: string, encoded: string): Promise
 }
 
 type Db = Pool | PoolClient;
-export async function issueTokens(runtime: Runtime, db: Db, userId: string, organizationId: string, role: string, scopes: string[], meta: { ip?: string; userAgent?: string }) {
+export async function issueTokens(runtime: Runtime, db: Db, userId: string, organizationId: string, role: string, scopes: string[], meta: { ip?: string; userAgent?: string; persistent?: boolean }) {
   const now = Math.floor(Date.now() / 1000);
   const accessToken = await new SignJWT({ org: organizationId, role, scopes })
     .setProtectedHeader({ alg: "HS256" }).setSubject(userId).setIssuer(runtime.config.JWT_ISSUER).setAudience(runtime.config.JWT_AUDIENCE)
     .setIssuedAt(now).setExpirationTime(now + 900).sign(new TextEncoder().encode(runtime.config.JWT_SECRET));
   const refreshToken = randomToken(48), sessionId = createId("ses");
+  const sessionDays = meta.persistent ? 36500 : 30;
   await db.query(`INSERT INTO sessions(id,user_id,organization_id,refresh_token_hash,expires_at,ip_address,user_agent)
-    VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP + INTERVAL '30 days',$5,$6)`, [sessionId,userId,organizationId,sha256(refreshToken),meta.ip ?? null,meta.userAgent ?? null]);
+    VALUES($1,$2,$3,$4,CURRENT_TIMESTAMP + ($5 * INTERVAL '1 day'),$6,$7)`, [sessionId,userId,organizationId,sha256(refreshToken),sessionDays,meta.ip ?? null,meta.userAgent ?? null]);
   return { accessToken, expiresIn: 900, refreshToken, sessionId };
 }
 

@@ -22,6 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
@@ -132,6 +134,11 @@ fun SchemeScreen(id: String) {
     var tab by remember { mutableIntStateOf(0) }
     var download by remember { mutableStateOf<Int?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var editScheme by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editSummary by remember { mutableStateOf("") }
+    var editWeeks by remember { mutableStateOf("") }
+    var editPeriods by remember { mutableStateOf("") }
     val dos = m?.o("can")?.optBoolean("manage") == true
     // Refresh while Ledgerly AI is writing, so ticks appear without leaving the page.
     androidx.compose.runtime.LaunchedEffect(id) { while (true) { kotlinx.coroutines.delay(20_000); res.reload() } }
@@ -192,6 +199,10 @@ fun SchemeScreen(id: String) {
                 }
                 if (dos) item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        SecondaryButton("Edit scheme") {
+                            editTitle = s.s("title").orEmpty(); editSummary = s.s("summary").orEmpty()
+                            editWeeks = s.i("weeks", 10).toString(); editPeriods = s.i("periodsPerWeek", 5).toString(); editScheme = true
+                        }
                         if (s.s("status") == "published") SecondaryButton("Unpublish") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/unpublish", JSONObject()) } }
                         else if (s.s("status") == "review" || s.s("status") == "writing") PrimaryButton("Publish to teachers") { launchCall(scope, ctx, { res.reload() }) { api.post("/api/v1/learn/schemes/$id/publish", JSONObject()) } }
                         SecondaryButton("Delete this scheme") { confirmDelete = true }
@@ -202,6 +213,23 @@ fun SchemeScreen(id: String) {
     }
     if (download != null && s != null) DownloadDialog(id, "${s.s("subjectName")}-${s.s("className")}-${s.s("termName")}", s.i("weeks", 10),
         startWeek = download?.takeIf { it > 0 }) { download = null }
+    if (editScheme) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { editScheme = false }, title = { Text("Edit scheme") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(editTitle, { editTitle = it }, label = { Text("Title") })
+            OutlinedTextField(editSummary, { editSummary = it }, label = { Text("Summary") }, minLines = 2)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(editWeeks, { editWeeks = it.filter(Char::isDigit) }, label = { Text("Weeks") }, modifier = Modifier.weight(1f))
+                OutlinedTextField(editPeriods, { editPeriods = it.filter(Char::isDigit) }, label = { Text("Periods/week") }, modifier = Modifier.weight(1f))
+            }
+        } },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            val payload = JSONObject().put("title", editTitle).put("summary", editSummary)
+            editWeeks.toIntOrNull()?.let { payload.put("weeks", it) }; editPeriods.toIntOrNull()?.let { payload.put("periodsPerWeek", it) }
+            launchCall(scope, ctx, { ok -> if (ok) { editScheme = false; res.reload() } }) { api.patch("/api/v1/learn/schemes/$id", payload) }
+        }) { Text("Save") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { editScheme = false }) { Text("Cancel") } },
+    )
     if (confirmDelete) androidx.compose.material3.AlertDialog(
         onDismissRequest = { confirmDelete = false },
         title = { Text("Delete this scheme?") },
@@ -303,6 +331,17 @@ fun LessonScreen(id: String, planId: String?) {
     var done by remember { mutableStateOf(false) }
     val scheme = rememberData(l?.s("schemeId")?.let { "/api/v1/learn/schemes/$it" })
     var download by remember { mutableStateOf(false) }
+    var editLesson by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var editTitle by remember { mutableStateOf("") }
+    var editSubtopic by remember { mutableStateOf("") }
+    var editNotes by remember { mutableStateOf("") }
+    var editObjectives by remember { mutableStateOf("") }
+    var editMethods by remember { mutableStateOf("") }
+    var editMaterials by remember { mutableStateOf("") }
+    var editSkills by remember { mutableStateOf("") }
+    var editAssessment by remember { mutableStateOf("") }
+    val canManage = m.obj?.o("can")?.optBoolean("manage") == true
     Page(l?.s("title") ?: "Lesson", onBack = { nav.popBackStack() }, subtitle = l?.let { listOfNotNull(it.s("unit"), "Week ${it.i("week", 1)} · ${it.s("dayName") ?: ""}").joinToString(" · ") },
         actions = { if (l != null) IconButton(onClick = { download = true }) { Icon(Icons.Filled.Download, "Download", tint = C.Brand) } },
         bottom = if (l == null || m.obj?.o("can")?.optBoolean("write") != true) null else ({
@@ -319,6 +358,14 @@ fun LessonScreen(id: String, planId: String?) {
         if (l == null) { status(res, false, "", ""); return@Page }
         val diagrams = l.a("diagrams").objs()
         diagrams.firstOrNull()?.let { d -> item { Figure(api.baseUrl + d.s("url") + "?format=png", d.s("title"), 190) } }
+        if (canManage) item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SecondaryButton("Edit", Modifier.weight(1f)) {
+                editTitle = l.s("title").orEmpty(); editSubtopic = l.s("subtopic").orEmpty(); editNotes = l.s("notes").orEmpty()
+                editObjectives = l.a("objectives").strs().joinToString("\n"); editMethods = l.s("methods").orEmpty()
+                editMaterials = l.s("materials").orEmpty(); editSkills = l.s("lifeSkills").orEmpty(); editAssessment = l.s("assessment").orEmpty(); editLesson = true
+            }
+            SecondaryButton("Delete", Modifier.weight(1f)) { confirmDelete = true }
+        } }
         item { Tabs(listOf("Notes", "Lesson plan", "Activity"), tab) { tab = it } }
         when (tab) {
             0 -> {
@@ -370,6 +417,34 @@ fun LessonScreen(id: String, planId: String?) {
     val sc = scheme.obj
     if (download && l != null && sc != null) DownloadDialog(sc.s("id") ?: l.s("schemeId")!!, "${sc.s("subjectName")}-${sc.s("className")}-${sc.s("termName")}", sc.i("weeks", 10),
         lessonId = id, lessonLabel = "Lesson ${l.i("seq")}", startWeek = l.i("week", 1)) { download = false }
+    if (editLesson) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { editLesson = false }, title = { Text("Edit lesson, notes and plan") },
+        text = { androidx.compose.foundation.lazy.LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.heightIn(max = 520.dp)) {
+            item { OutlinedTextField(editTitle, { editTitle = it }, label = { Text("Lesson title") }) }
+            item { OutlinedTextField(editSubtopic, { editSubtopic = it }, label = { Text("Subtopic") }) }
+            item { OutlinedTextField(editNotes, { editNotes = it }, label = { Text("Lesson notes") }, minLines = 5) }
+            item { OutlinedTextField(editObjectives, { editObjectives = it }, label = { Text("Objectives (one per line)") }, minLines = 3) }
+            item { OutlinedTextField(editMethods, { editMethods = it }, label = { Text("Teaching methods") }) }
+            item { OutlinedTextField(editMaterials, { editMaterials = it }, label = { Text("Materials") }) }
+            item { OutlinedTextField(editSkills, { editSkills = it }, label = { Text("Life skills") }) }
+            item { OutlinedTextField(editAssessment, { editAssessment = it }, label = { Text("Assessment") }, minLines = 2) }
+        } },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            val objectives = org.json.JSONArray(); editObjectives.lines().map(String::trim).filter(String::isNotEmpty).forEach(objectives::put)
+            val payload = JSONObject().put("title", editTitle).put("subtopic", editSubtopic).put("notes", editNotes)
+                .put("objectives", objectives).put("methods", editMethods).put("materials", editMaterials).put("lifeSkills", editSkills).put("assessment", editAssessment)
+            launchCall(scope, ctx, { ok -> if (ok) { editLesson = false; res.reload() } }) { api.patch("/api/v1/learn/lessons/$id", payload) }
+        }) { Text("Save") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { editLesson = false }) { Text("Cancel") } },
+    )
+    if (confirmDelete) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { confirmDelete = false }, title = { Text("Delete this lesson?") },
+        text = { Text("The lesson notes, lesson plan, activities and linked generated files will be permanently removed.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            confirmDelete = false; launchCall(scope, ctx, { ok -> if (ok) nav.popBackStack() }) { api.delete("/api/v1/learn/lessons/$id") }
+        }) { Text("Delete", color = C.Bad) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable
