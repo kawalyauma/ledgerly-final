@@ -155,6 +155,22 @@ export class UlibtechClient {
     return { slug, pageUrl: `${this.baseUrl}/resources/${slug}`, status: body.resource?.status ?? body.status ?? "processing", raw: body };
   }
 
+  /** Uploads a new version of a document published earlier by Ledgerly AI (same page and link). */
+  async replaceFile(slug: string, file: { name: string; bytes: Uint8Array; mimeType: string }, notes?: string) {
+    if (!this.runtime.config.ULIBTECH_INTEGRATION_KEY) throw new AppError(503, "ELIBRARY_TEXT_DISABLED", "Publishing to the e-library is not configured");
+    const form = new FormData();
+    if (notes) form.set("notes", notes);
+    form.set("file", new Blob([Buffer.from(file.bytes)], { type: file.mimeType }), file.name);
+    const response = await fetch(`${this.baseUrl}/api/integrations/resources/${encodeURIComponent(slug)}/file`, {
+      method: "POST", body: form,
+      headers: { "X-Integration-Key": this.runtime.config.ULIBTECH_INTEGRATION_KEY, "User-Agent": "Ledgerly-ELibrary/1.0" },
+      signal: AbortSignal.timeout(120_000),
+    });
+    const body = await response.json().catch(() => ({})) as R;
+    if (!response.ok) throw new AppError(502, "ELIBRARY_PUBLISH_FAILED", `The e-library refused the new version: ${body?.error?.message ?? response.status}`);
+    return { slug, pageUrl: `${this.baseUrl}/resources/${slug}` };
+  }
+
   async publishedStatus(slug: string) {
     return this.request<{ slug: string; status: string; title: string }>(`/api/integrations/resources/${encodeURIComponent(slug)}/status`, { integration: true });
   }

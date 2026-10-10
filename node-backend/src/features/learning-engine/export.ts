@@ -233,8 +233,17 @@ export async function postSchemeToLibrary(runtime: Runtime, organizationId: stri
   const written = doc.lessons.filter(l => l.notes).length;
   if (!written) throw new AppError(409, "NOTHING_WRITTEN", "No lessons have been written yet");
   const title = `${s.className.replace(/\s+\d{4}$/, "")} ${s.subjectName} Scheme of Work, Lesson Plans and Notes – ${s.termName}, ${doc.weeksLabel}`;
+  // Posting the same weeks again updates the existing page (new file version) instead of creating a duplicate.
+  const earlier = await runtime.db.query<{ slug: string }>(
+    `SELECT external_slug AS slug FROM lrn_library_posts WHERE scheme_id=$1 AND weeks=$2 ORDER BY created_at DESC LIMIT 1`, [schemeId, doc.weeksLabel]);
+  const file = { name: doc.fileName, bytes: doc.bytes, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" };
+  if (earlier.rows[0]) {
+    const updated = await ulibtech(runtime).replaceFile(earlier.rows[0].slug, file, `Updated by Ledgerly AI: ${written} lessons`);
+    await runtime.db.query(`UPDATE lrn_library_posts SET status='updated',created_at=CURRENT_TIMESTAMP WHERE scheme_id=$1 AND external_slug=$2`, [schemeId, updated.slug]);
+    return { slug: updated.slug, url: updated.pageUrl, status: "updated", lessons: written };
+  }
   const posted = await ulibtech(runtime).publish(
-    { name: doc.fileName, bytes: doc.bytes, mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+    file,
     {
       title: title.slice(0, 200),
       shortDescription: `${s.subjectName} ${s.className.replace(/\s+\d{4}$/, "")} ${s.termName}: scheme of work with ${written} full lesson plans and learner notes with diagrams.`.slice(0, 300),

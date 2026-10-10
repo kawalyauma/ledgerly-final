@@ -38,13 +38,13 @@ export async function getFigure(runtime: Runtime, id: string): Promise<FigureRow
 export async function findFigure(runtime: Runtime, organizationId: string, concept: string, parts: string[], subject?: string | null, title?: string | null): Promise<FigureRow | null> {
   const key = conceptKey(concept);
   const exact = await runtime.db.query<FigureRow>(
-    `SELECT ${figureColumns} FROM lrn_figures WHERE concept_key=$1 AND status IN ('ready','pending','generating') AND (shared OR organization_id=$2) LIMIT 1`, [key, organizationId]);
+    `SELECT ${figureColumns} FROM lrn_figures WHERE concept_key=$1 AND style='line' AND status IN ('ready','pending','generating') AND (shared OR organization_id=$2) LIMIT 1`, [key, organizationId]);
   if (exact.rows[0]) return exact.rows[0];
   // Descriptions differ ("external parts of a domestic fowl" vs "side view of a domestic fowl, full body"), so match on
   // the meaningful words of the concept and title plus how many of the wanted parts the figure already marks.
   const want = new Set(conceptKey(`${concept} ${title ?? ""}`).split("-").filter(w => w.length > 2 && !GENERIC.has(w)));
   const pool = (await runtime.db.query<FigureRow>(
-    `SELECT ${figureColumns} FROM lrn_figures WHERE status='ready' AND kind<>'coded' AND (shared OR organization_id=$1)
+    `SELECT ${figureColumns} FROM lrn_figures WHERE status='ready' AND kind<>'coded' AND style='line' AND (shared OR organization_id=$1)
         AND ($2::text IS NULL OR subject IS NULL OR lower(subject)=lower($2)) ORDER BY uses DESC,created_at DESC LIMIT 400`,
     [organizationId, subject ?? null])).rows;
   let best: { f: FigureRow; score: number } | null = null;
@@ -139,7 +139,25 @@ export function composeLabelled(base: { href: string; width: number; height: num
     const overflow = (ys.at(-1) ?? 0) - (top + imgH - 10);
     if (overflow > 0) for (let i = ys.length - 1; i >= 0; i -= 1) ys[i] = Math.max(top + 14, ys[i]! - overflow);
     for (let i = ys.length - 2; i >= 0; i -= 1) ys[i] = Math.min(ys[i]!, ys[i + 1]! - gap);
-    return sorted.map((l, i) => ({ ...l, ly: ys[i]! }));
+    const out = sorted.map((l, i) => ({ ...l, ly: ys[i]! }));
+    // Swap neighbouring label slots whose leader lines would cross, until none do.
+    const ax = (l: (typeof out)[number]) => col + l.a.x * imgW, ay = (l: (typeof out)[number]) => top + l.a.y * imgH;
+    const crosses = (p: (typeof out)[number], q: (typeof out)[number], lx: number) => {
+      const d = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number) => (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+      const [x1, y1, x2, y2, x3, y3, x4, y4] = [ax(p), ay(p), lx, p.ly, ax(q), ay(q), lx, q.ly];
+      return d(x1, y1, x2, y2, x3, y3) * d(x1, y1, x2, y2, x4, y4) < 0 && d(x3, y3, x4, y4, x1, y1) * d(x3, y3, x4, y4, x2, y2) < 0;
+    };
+    const lx = items[0] && items[0].a.x < 0.5 ? col - 26 : col + imgW + 26;
+    for (let round = 0; round < out.length * out.length; round += 1) {
+      let swapped = false;
+      for (let i = 0; i + 1 < out.length; i += 1) {
+        for (let j = i + 1; j < Math.min(out.length, i + 4); j += 1) {
+          if (crosses(out[i]!, out[j]!, lx)) { const t = out[i]!.ly; out[i]!.ly = out[j]!.ly; out[j]!.ly = t; swapped = true; }
+        }
+      }
+      if (!swapped) break;
+    }
+    return out;
   };
   const H = Math.max(top + imgH + 24, ...[...layout(sides.left), ...layout(sides.right)].map(l => l.ly + 40));
   const parts: string[] = [
@@ -252,7 +270,9 @@ const qaReply = z.object({
   problems: z.array(z.string().max(300)).max(20).default([]),
 });
 
-const STYLE = "a clean, colourful school textbook illustration in flat vector style with bold dark outlines and soft shading, on a plain pure-white background, centred, with generous margins, scientifically accurate";
+// Schools print in black: line art that photocopies cleanly.
+const STYLE = "a black-and-white school textbook line drawing for printing: crisp solid black outlines on a pure white background, mostly outline, " +
+  "only simple shading where it helps (light grey tone, hatching or stippling), NO colour at all, no gradients, no photo realism, centred with generous margins, scientifically accurate";
 
 registerTaskHandler("figure.generate", async (ctx) => {
   const { runtime, task } = ctx;

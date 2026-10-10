@@ -13,13 +13,15 @@ export const codedSpecSchema = z.discriminatedUnion("type", [
 export type CodedSpec = z.infer<typeof codedSpecSchema>;
 
 const W = 640, H = 420;
-const STROKE = 'stroke="#222" stroke-width="3"';
+const STROKE = 'stroke="#000" stroke-width="3"';
 const esc = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const svgWrap = (body: string, w = W, h = H) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="Liberation Sans"><rect width="${w}" height="${h}" fill="#fff"/>${body}</svg>`;
+// Black and white for printing: outlines, white fills, and diagonal hatching for "shaded" parts.
+const HATCH = `<defs><pattern id="hatch" patternUnits="userSpaceOnUse" width="10" height="10" patternTransform="rotate(45)"><rect width="10" height="10" fill="#fff"/><line x1="0" y1="0" x2="0" y2="10" stroke="#000" stroke-width="2.4"/></pattern></defs>`;
+const svgWrap = (body: string, w = W, h = H) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" font-family="Liberation Sans">${HATCH}<rect width="${w}" height="${h}" fill="#fff"/>${body}</svg>`;
 const n = (v: number) => Math.round(v * 10) / 10;
 const anchor = (key: string, name: string, x: number, y: number, w = W, h = H): Anchor => ({ key, name, x: n(x) / w, y: n(y) / h });
 
-function polygon(points: Array<[number, number]>, names: string[], fill = "#dbe8fb") {
+function polygon(points: Array<[number, number]>, names: string[], fill = "#ffffff") {
   const pts = points.map(([x, y]) => `${n(x)},${n(y)}`).join(" ");
   const anchors = points.map(([x, y], i) => anchor(`vertex-${i + 1}`, names[i] ?? `Vertex ${i + 1}`, x, y));
   // Side midpoints are anchors too, for "label the sides" questions.
@@ -35,14 +37,14 @@ function regular(sides: number, r = 150, cx = W / 2, cy = H / 2 + 10) {
 }
 
 export function codedFigure(spec: CodedSpec): { conceptKey: string; title: string; subject: string; svg: string; width: number; height: number; anchors: Anchor[] } {
-  const key = (parts: Array<string | number>) => `coded-${parts.join("-")}`.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").slice(0, 160);
+  const key = (parts: Array<string | number>) => `coded-line-${parts.join("-")}`.toLowerCase().replace(/[^a-z0-9.-]+/g, "-").slice(0, 160);
   switch (spec.type) {
     case "shape": {
       const vertexNames = (k: number) => Array.from({ length: k }, (_, i) => String.fromCharCode(65 + i));
       let drawn: { body: string; anchors: Anchor[] };
       if (spec.shape === "circle") {
         drawn = {
-          body: `<circle cx="320" cy="215" r="160" fill="#dbe8fb" ${STROKE}/><circle cx="320" cy="215" r="5" fill="#222"/><line x1="320" y1="215" x2="480" y2="215" ${STROKE} stroke-dasharray="8 6"/><line x1="160" y1="215" x2="480" y2="215" stroke="#222" stroke-width="1.5" stroke-dasharray="3 5"/>`,
+          body: `<circle cx="320" cy="215" r="160" fill="#ffffff" ${STROKE}/><circle cx="320" cy="215" r="5" fill="#000"/><line x1="320" y1="215" x2="480" y2="215" ${STROKE} stroke-dasharray="8 6"/><line x1="160" y1="215" x2="480" y2="215" stroke="#000" stroke-width="1.5" stroke-dasharray="3 5"/>`,
           anchors: [anchor("centre", "Centre", 320, 215), anchor("radius", "Radius", 420, 215), anchor("diameter", "Diameter", 220, 215), anchor("circumference", "Circumference", 320 + 160 * Math.cos(-0.8), 215 + 160 * Math.sin(-0.8))],
         };
       } else {
@@ -61,7 +63,7 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
         };
         const points = pts[spec.shape]!;
         drawn = polygon(points, vertexNames(points.length));
-        if (spec.shape === "right-triangle") drawn.body += `<polyline points="150,325 175,325 175,350" fill="none" stroke="#222" stroke-width="2.5"/>`;
+        if (spec.shape === "right-triangle") drawn.body += `<polyline points="150,325 175,325 175,350" fill="none" stroke="#000" stroke-width="2.5"/>`;
       }
       return { conceptKey: key(["shape", spec.shape]), title: spec.shape.replace(/-/g, " ").replace(/^\w/, c => c.toUpperCase()), subject: "mathematics", svg: svgWrap(drawn.body), width: W, height: H, anchors: drawn.anchors };
     }
@@ -75,11 +77,11 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
           const large = t2 - t1 > Math.PI ? 1 : 0;
           const d = b === 1 ? `M ${cx - r},${cy} a ${r},${r} 0 1,0 ${2 * r},0 a ${r},${r} 0 1,0 ${-2 * r},0`
             : `M ${cx},${cy} L ${n(cx + r * Math.cos(t1))},${n(cy + r * Math.sin(t1))} A ${r},${r} 0 ${large},1 ${n(cx + r * Math.cos(t2))},${n(cy + r * Math.sin(t2))} Z`;
-          body += `<path d="${d}" fill="${i < a ? "#7aa7e8" : "#ffffff"}" ${STROKE}/>`;
+          body += `<path d="${d}" fill="${i < a ? "url(#hatch)" : "#ffffff"}" ${STROKE}/>`;
         }
       } else {
         const x0 = 60, w = 520 / b;
-        for (let i = 0; i < b; i += 1) body += `<rect x="${n(x0 + i * w)}" y="150" width="${n(w)}" height="120" fill="${i < a ? "#7aa7e8" : "#ffffff"}" ${STROKE}/>`;
+        for (let i = 0; i < b; i += 1) body += `<rect x="${n(x0 + i * w)}" y="150" width="${n(w)}" height="120" fill="${i < a ? "url(#hatch)" : "#ffffff"}" ${STROKE}/>`;
       }
       return { conceptKey: key(["fraction", spec.shape, a, b]), title: `Fraction ${a}/${b}`, subject: "mathematics", svg: svgWrap(body), width: W, height: H,
         anchors: [anchor("shaded", "Shaded part", spec.shape === "circle" ? 320 + 80 * Math.cos(-Math.PI / 2 + Math.PI / b) : 60 + 260 / b, spec.shape === "circle" ? 215 + 80 * Math.sin(-Math.PI / 2 + Math.PI / b) : 210)] };
@@ -89,29 +91,29 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
       const lo = Math.min(from, to), hi = Math.max(from, to);
       const count = Math.min(40, Math.round((hi - lo) / step));
       const x = (v: number) => 50 + ((v - lo) / (hi - lo || 1)) * 540;
-      let body = `<line x1="30" y1="210" x2="610" y2="210" ${STROKE}/><path d="M610,210 l-14,-8 v16 z M30,210 l14,-8 v16 z" fill="#222"/>`;
+      let body = `<line x1="30" y1="210" x2="610" y2="210" ${STROKE}/><path d="M610,210 l-14,-8 v16 z M30,210 l14,-8 v16 z" fill="#000"/>`;
       for (let i = 0; i <= count; i += 1) {
         const v = lo + i * step;
-        body += `<line x1="${n(x(v))}" y1="198" x2="${n(x(v))}" y2="222" stroke="#222" stroke-width="2.5"/><text x="${n(x(v))}" y="255" font-size="20" text-anchor="middle">${esc(String(Math.round(v * 1000) / 1000))}</text>`;
+        body += `<line x1="${n(x(v))}" y1="198" x2="${n(x(v))}" y2="222" stroke="#000" stroke-width="2.5"/><text x="${n(x(v))}" y="255" font-size="20" text-anchor="middle">${esc(String(Math.round(v * 1000) / 1000))}</text>`;
       }
       const anchors = spec.marks.map((m, i) => anchor(`mark-${i + 1}`, `Point ${String.fromCharCode(80 + i)}`, x(m), 210));
-      for (const m of spec.marks) body += `<circle cx="${n(x(m))}" cy="210" r="8" fill="#d33"/>`;
+      for (const m of spec.marks) body += `<circle cx="${n(x(m))}" cy="210" r="8" fill="#000"/>`;
       return { conceptKey: key(["number-line", lo, hi, step, ...spec.marks]), title: `Number line ${lo} to ${hi}`, subject: "mathematics", svg: svgWrap(body), width: W, height: H, anchors };
     }
     case "clock": {
       const cx = 320, cy = 210, r = 175;
-      let body = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff" stroke="#222" stroke-width="5"/>`;
+      let body = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff" stroke="#000" stroke-width="5"/>`;
       for (let i = 1; i <= 12; i += 1) {
         const t = -Math.PI / 2 + (i * Math.PI) / 6;
         body += `<text x="${n(cx + (r - 32) * Math.cos(t))}" y="${n(cy + (r - 32) * Math.sin(t) + 9)}" font-size="28" text-anchor="middle">${i}</text>`;
       }
       for (let i = 0; i < 60; i += 1) {
         const t = (i * Math.PI) / 30, l = i % 5 === 0 ? 14 : 6;
-        body += `<line x1="${n(cx + (r - 2) * Math.cos(t))}" y1="${n(cy + (r - 2) * Math.sin(t))}" x2="${n(cx + (r - 2 - l) * Math.cos(t))}" y2="${n(cy + (r - 2 - l) * Math.sin(t))}" stroke="#222" stroke-width="${i % 5 === 0 ? 3 : 1.5}"/>`;
+        body += `<line x1="${n(cx + (r - 2) * Math.cos(t))}" y1="${n(cy + (r - 2) * Math.sin(t))}" x2="${n(cx + (r - 2 - l) * Math.cos(t))}" y2="${n(cy + (r - 2 - l) * Math.sin(t))}" stroke="#000" stroke-width="${i % 5 === 0 ? 3 : 1.5}"/>`;
       }
       const tm = -Math.PI / 2 + (spec.minute * Math.PI) / 30, th = -Math.PI / 2 + (((spec.hour % 12) + spec.minute / 60) * Math.PI) / 6;
-      body += `<line x1="${cx}" y1="${cy}" x2="${n(cx + 100 * Math.cos(th))}" y2="${n(cy + 100 * Math.sin(th))}" stroke="#222" stroke-width="9" stroke-linecap="round"/>`;
-      body += `<line x1="${cx}" y1="${cy}" x2="${n(cx + 145 * Math.cos(tm))}" y2="${n(cy + 145 * Math.sin(tm))}" stroke="#222" stroke-width="5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="8" fill="#222"/>`;
+      body += `<line x1="${cx}" y1="${cy}" x2="${n(cx + 100 * Math.cos(th))}" y2="${n(cy + 100 * Math.sin(th))}" stroke="#000" stroke-width="9" stroke-linecap="round"/>`;
+      body += `<line x1="${cx}" y1="${cy}" x2="${n(cx + 145 * Math.cos(tm))}" y2="${n(cy + 145 * Math.sin(tm))}" stroke="#000" stroke-width="5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="8" fill="#000"/>`;
       return { conceptKey: key(["clock", spec.hour % 12, spec.minute]), title: `Clock showing ${spec.hour % 12 || 12}:${String(spec.minute).padStart(2, "0")}`, subject: "mathematics", svg: svgWrap(body), width: W, height: H,
         anchors: [anchor("hour-hand", "Hour hand", cx + 60 * Math.cos(th), cy + 60 * Math.sin(th)), anchor("minute-hand", "Minute hand", cx + 110 * Math.cos(tm), cy + 110 * Math.sin(tm)), anchor("face", "Clock face", cx + r * 0.7, cy + r * 0.7)] };
     }
@@ -124,12 +126,12 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
       const ticks = 5;
       for (let i = 0; i <= ticks; i += 1) {
         const v = (max * i) / ticks, y = base - ((base - top - 10) * i) / ticks;
-        body += `<line x1="${left - 6}" y1="${n(y)}" x2="${left}" y2="${n(y)}" stroke="#222" stroke-width="2"/><text x="${left - 10}" y="${n(y + 6)}" font-size="15" text-anchor="end">${esc(String(Math.round(v * 100) / 100))}</text>`;
+        body += `<line x1="${left - 6}" y1="${n(y)}" x2="${left}" y2="${n(y)}" stroke="#000" stroke-width="2"/><text x="${left - 10}" y="${n(y + 6)}" font-size="15" text-anchor="end">${esc(String(Math.round(v * 100) / 100))}</text>`;
       }
       const anchors: Anchor[] = [];
       spec.bars.forEach((b, i) => {
         const h = ((base - top - 10) * b.value) / max, x = left + i * bw + bw * 0.15;
-        body += `<rect x="${n(x)}" y="${n(base - h)}" width="${n(bw * 0.7)}" height="${n(h)}" fill="#7aa7e8" stroke="#222" stroke-width="2"/><text x="${n(x + bw * 0.35)}" y="${base + 24}" font-size="16" text-anchor="middle">${esc(b.label)}</text>`;
+        body += `<rect x="${n(x)}" y="${n(base - h)}" width="${n(bw * 0.7)}" height="${n(h)}" fill="url(#hatch)" stroke="#000" stroke-width="2"/><text x="${n(x + bw * 0.35)}" y="${base + 24}" font-size="16" text-anchor="middle">${esc(b.label)}</text>`;
         anchors.push(anchor(`bar-${i + 1}`, b.label, x + bw * 0.35, base - h / 2));
       });
       if (spec.yLabel) body += `<text x="22" y="${(top + base) / 2}" font-size="16" text-anchor="middle" transform="rotate(-90 22 ${(top + base) / 2})">${esc(spec.yLabel)}</text>`;
