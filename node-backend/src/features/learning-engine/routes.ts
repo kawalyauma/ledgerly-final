@@ -179,6 +179,22 @@ export function createLearningRoutes(runtime: Runtime) {
         ORDER BY b.created_at DESC LIMIT $4 OFFSET $5`, [org(c), f.classId ?? null, f.status ?? null, f.pageSize, (f.page - 1) * f.pageSize]);
     return c.json({ data: rows.rows });
   });
+  // Everything the scanner app needs to start batches and tag learners, in one call.
+  r.get("/captures/context", capture, async c => {
+    const o = org(c), classId = c.req.query("classId") || null;
+    const [school, classes, subjects, term, students] = await Promise.all([
+      runtime.db.query(`SELECT name FROM organizations WHERE id=$1`, [o]),
+      runtime.db.query(`SELECT id,name FROM school_classes WHERE organization_id=$1 AND active ORDER BY name`, [o]),
+      runtime.db.query(`SELECT id,name FROM school_subjects WHERE organization_id=$1 AND active ORDER BY name`, [o]),
+      runtime.db.query(`SELECT id,name,starts_on::text AS "startsOn",ends_on::text AS "endsOn" FROM school_terms WHERE organization_id=$1 ORDER BY is_current DESC,starts_on DESC LIMIT 1`, [o]),
+      classId ? runtime.db.query(
+        `SELECT st.id,concat_ws(' ',st.first_name,st.middle_name,st.last_name) AS name,st.admission_number AS "admissionNumber"
+           FROM school_students st WHERE st.organization_id=$1 AND st.deleted_at IS NULL AND st.status='active'
+            AND (st.current_class_id=$2 OR EXISTS (SELECT 1 FROM school_enrollments e WHERE e.student_id=st.id AND e.class_id=$2 AND e.status='active'))
+          ORDER BY st.first_name,st.last_name LIMIT 300`, [o, classId]) : Promise.resolve({ rows: [] }),
+    ]);
+    return c.json({ data: { school: school.rows[0]?.name ?? null, classes: classes.rows, subjects: subjects.rows, term: term.rows[0] ?? null, students: students.rows } });
+  });
   r.post("/captures/batches", capture, async c => {
     const v = parse(createBatchSchema, await body(c), "Check the scan batch details");
     const p = c.get("principal");
