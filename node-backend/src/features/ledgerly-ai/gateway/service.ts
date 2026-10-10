@@ -19,6 +19,7 @@ import { normalizeLedgerlyAiResponse } from "./normalize.js";
 import { LedgerlyAiRateLimiter } from "./rate-limit.js";
 import { redactLedgerlyAiText, redactLedgerlyAiValue } from "./redaction.js";
 import type { LedgerlyAiGatewayRepository } from "./repository.js";
+import type { UlibtechClient } from "../../school-management/ulibtech.js";
 
 export type LedgerlyAiGatewayProgress = (event: {
   type: "accepted" | "queued" | "running" | "message" | "waiting_approval" | "completed" | "failed";
@@ -115,8 +116,9 @@ export class LedgerlyAiGatewayService {
     db: Pool,
     private readonly storage:ObjectStorage,
     private readonly logger: LedgerlyAiLogger,
+    library?: UlibtechClient,
   ) {
-    this.context = new LedgerlyAiContextBuilder(repository, memory, config);
+    this.context = new LedgerlyAiContextBuilder(repository, memory, config, library);
     this.rateLimiter = new LedgerlyAiRateLimiter(db, config);
     this.idempotency = new LedgerlyAiIdempotency(db);
   }

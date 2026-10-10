@@ -78,3 +78,8 @@ export type LedgerlyAiToolInvocationResult =
       approvalMode: "single" | "two_step";
       requiredApprovals: number;
     };
+
+/** Declares a tool with its input typed from the schema, then widens it for the registry. */
+export function defineTool<TSchema extends z.ZodType>(definition: LedgerlyAiToolDefinition<TSchema>): LedgerlyAiToolDefinition {
+  return definition as unknown as LedgerlyAiToolDefinition;
+}

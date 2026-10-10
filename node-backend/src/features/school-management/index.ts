@@ -32,6 +32,7 @@ import { createSchoolSetupClassIntegrityRoutes } from "./setup-class-integrity.j
 import { createSchoolSetupSubjectIntegrityRoutes } from "./setup-subject-integrity.js";
 import { createSchoolKioskRoutes } from "./kiosk.js";
 import { createSchoolDutyRoutes } from "./duty.js";
+import { createElibraryRoutes } from "./elibrary.js";
 
 export const schoolFeature: BackendFeature = {
   key: "school-management",
@@ -39,6 +40,7 @@ export const schoolFeature: BackendFeature = {
   mount(app,runtime){
     app.route("/api/v1/school/kiosk",createSchoolKioskRoutes(runtime));
     app.route("/api/v1/school/duty-roster",createSchoolDutyRoutes(runtime));
+    app.route("/api/v1/school/elibrary",createElibraryRoutes(runtime));
     app.route("/api/v1/school/setup",createSchoolSetupTermIntegrityRoutes(runtime));
     app.route("/api/v1/school/setup",createSchoolSetupClassIntegrityRoutes(runtime));
     app.route("/api/v1/school/setup",createSchoolSetupSubjectIntegrityRoutes(runtime));

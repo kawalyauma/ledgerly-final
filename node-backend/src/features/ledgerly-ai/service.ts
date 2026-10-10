@@ -15,6 +15,7 @@ import { LedgerlyAiMonitoringService } from "./monitoring/service.js";
 import { LedgerlyAiPolicyService } from "./policy/service.js";
 import { LedgerlyAiConsoleService } from "./console/service.js";
 import { LedgerlyAiSecurityService } from "./security/service.js";
+import { ulibtech } from "../school-management/ulibtech.js";
 
 export type LedgerlyAiHealth = {
   name: "Ledgerly AI";
@@ -82,6 +83,7 @@ export class LedgerlyAiFoundationService {
       runtime.db,
       runtime.storage,
       this.logger,
+      ulibtech(runtime),
     );
     this.customRuntime = new LedgerlyAiCustomRuntimeService(runtime,this.employees,this.gateway,this.policy);
     this.git = new LedgerlyAiGitService(runtime,this.config);

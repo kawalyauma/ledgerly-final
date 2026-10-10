@@ -73,6 +73,10 @@ const schema = z.object({
   OPENAI_MODEL_TERRA: emptyToUndefined(z.string().min(1).optional()),
   OPENAI_MODEL_SOL: emptyToUndefined(z.string().min(1).optional()),
   AI_PROVIDER_ENCRYPTION_KEY: emptyToUndefined(z.string().min(24).optional()),
+  // ULibTech (notesug.com) public library used by the school e-library and Ledgerly AI.
+  ULIBTECH_API_URL: z.string().url().default("https://notesug.com"),
+  ULIBTECH_INTEGRATION_KEY: emptyToUndefined(z.string().min(24).optional()),
+  ULIBTECH_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60000).default(15000),
   RESPONSE_INTELLIGENCE_URL: emptyToUndefined(z.string().url().optional()),
   RESPONSE_INTELLIGENCE_TOKEN: emptyToUndefined(z.string().min(1).optional()),
   RESPONSE_INTELLIGENCE_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
