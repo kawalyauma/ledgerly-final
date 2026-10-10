@@ -156,6 +156,7 @@ fun SchemeScreen(id: String) {
                 }
             }
         }
+        s.s("coverageNote")?.let { note -> item { Notice(Icons.Filled.MenuBook, note, C.Warn, C.WarnSoft) } }
         if (s.s("status") in setOf("draft", "sourcing", "outlining")) item { Notice(Icons.Filled.HourglassEmpty, "Ledgerly AI is reading the e-library and writing the term's scheme. The weeks appear here when it is ready.", C.Ai, C.AiSoft) }
         item { Tabs(listOf("Weeks", "Lessons", "About"), tab) { tab = it } }
         when (tab) {
@@ -234,7 +235,10 @@ private fun WeekCard(week: Int, lessons: List<JSONObject>, dos: Boolean, onDownl
         lessons.sortedBy { it.i("seq") }.forEach { l ->
             Row(Modifier.fillMaxWidth().clickableNoRipple { onOpen(l.s("id")!!) }.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(DAYS[(l.i("day", 1) - 1).coerceIn(0, 4)], color = C.Muted, fontSize = 12.sp, modifier = Modifier.width(36.dp))
-                Text(l.s("title") ?: "", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 2)
+                Column(Modifier.weight(1f)) {
+                    Text(l.s("title") ?: "", style = MaterialTheme.typography.bodyMedium, maxLines = 2)
+                    KIND_LABEL[l.s("kind")]?.let { Text(it, color = C.Ai, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+                }
                 Tick(l.s("status") == "written" || l.s("status") == "reviewed", l.s("status") == "writing", "N")
                 Spacer(Modifier.width(4.dp))
                 Tick(l.s("planStatus") == "written", l.s("planStatus") == "writing" || l.s("planStatus") == "requested", "P")
@@ -254,6 +258,7 @@ private fun WeekCard(week: Int, lessons: List<JSONObject>, dos: Boolean, onDownl
 }
 
 private val DAYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri")
+val KIND_LABEL = mapOf("practice" to "Practice", "review" to "Weekly review", "revision" to "Revision", "assessment" to "End of term assessment")
 
 @Composable
 private fun Tick(done: Boolean, busy: Boolean, letter: String) {
@@ -505,37 +510,97 @@ fun NewSchemeScreen() {
     val c = rememberData("/api/v1/learn/captures/context").obj
     val classes = remember { androidx.compose.runtime.mutableStateListOf<String>() }
     val subjects = remember { androidx.compose.runtime.mutableStateListOf<String>() }
-    var busy by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var checks by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    val extras = remember { androidx.compose.runtime.mutableStateMapOf<String, Set<String>>() }
     var report by remember { mutableStateOf<List<String>>(emptyList()) }
     val term = c?.o("term")
+    val pairs = classes.flatMap { cl -> subjects.map { sb -> cl to sb } }
+    val key = { x: JSONObject -> "${x.s("classId")}|${x.s("subjectId")}" }
     Page("Generate schemes", onBack = { nav.popBackStack() }, subtitle = term?.s("name")?.let { "For $it" },
         bottom = {
-            PrimaryButton(if (busy) "Starting…" else "Generate ${classes.size * subjects.size} scheme(s)", enabled = !busy && classes.isNotEmpty() && subjects.isNotEmpty() && term != null) {
-                busy = true
-                val jobs = classes.flatMap { cl -> subjects.map { sb -> cl to sb } }
-                val names = (c!!.a("classes").objs() + c.a("subjects").objs()).associate { (it.s("id") ?: "") to (it.s("name") ?: "") }
+            if (checks.isEmpty()) PrimaryButton(busy ?: "Check e-library material (${pairs.size})", enabled = busy == null && pairs.isNotEmpty() && term != null) {
+                busy = "Checking the e-library…"
+                val out = mutableListOf<JSONObject>()
+                launchCall(scope, ctx, { busy = null; checks = out.toList() }) {
+                    for ((cl, sb) in pairs) {
+                        val r = try { api.post("/api/v1/learn/schemes/preview", JSONObject().put("termId", term!!.s("id")).put("classId", cl).put("subjectId", sb)) }
+                            catch (e: Exception) { JSONObject().put("error", e.message) }
+                        out.add(r.put("classId", cl).put("subjectId", sb))
+                    }
+                }
+            } else PrimaryButton(busy ?: "Generate ${checks.count { it.s("existingSchemeId") == null && it.s("error") == null }} scheme(s)", enabled = busy == null) {
+                busy = "Starting…"
                 val out = mutableListOf<String>()
-                launchCall(scope, ctx, { busy = false; report = out.toList() }) {
-                    for ((cl, sb) in jobs) {
-                        val label = "${names[sb]} · ${names[cl]}"
+                launchCall(scope, ctx, { busy = null; report = out.toList() }) {
+                    for (x in checks.filter { it.s("existingSchemeId") == null && it.s("error") == null }) {
+                        val label = "${x.s("subjectName")} · ${x.s("className")}"
                         try {
-                            api.post("/api/v1/learn/schemes", JSONObject().put("termId", term!!.s("id")).put("classId", cl).put("subjectId", sb))
+                            api.post("/api/v1/learn/schemes", JSONObject().put("termId", term!!.s("id")).put("classId", x.s("classId")).put("subjectId", x.s("subjectId"))
+                                .put("library", JSONObject().put("extraSlugs", org.json.JSONArray((extras[key(x)] ?: emptySet()).toList()))))
                             out.add("✓ $label: started")
                         } catch (e: Exception) { out.add("• $label: ${e.message}") }
                     }
                 }
             }
         }) {
-        item { Notice(Icons.Filled.MenuBook, "One scheme per class and subject for the term: 10 weeks, one lesson a day Monday to Friday (50 lessons). Ledgerly AI writes the outline from the e-library. Then, week by week, you ask for the notes and then the lesson plans.", C.Ai, C.AiSoft) }
+        item { Notice(Icons.Filled.MenuBook, "One scheme per class and subject for the term: 10 weeks, one lesson a day Monday to Friday (50 lessons). Monday to Thursday teach and practise; every Friday reviews the week. You then ask for each week's notes, then its lesson plans.", C.Ai, C.AiSoft) }
+        if (report.isNotEmpty()) {
+            item { SectionHeader("Result") }
+            item { Card { report.forEach { Text(it, modifier = Modifier.padding(vertical = 2.dp)) } } }
+            item { SecondaryButton("Back to lessons") { nav.popBackStack() } }
+            return@Page
+        }
+        if (checks.isNotEmpty()) {
+            item { Text("Material found in the e-library. Tick extra resources to add them; Ledgerly uses them together with what it picked.", style = MaterialTheme.typography.bodySmall) }
+            checks.forEach { x -> item { MaterialCard(x, extras[key(x)] ?: emptySet(), onOpen = { id -> nav.navigate("scheme/$id") }) { slug ->
+                val cur = extras[key(x)] ?: emptySet(); extras[key(x)] = if (slug in cur) cur - slug else cur + slug } } }
+            item { SecondaryButton("Change classes or subjects") { checks = emptyList() } }
+            return@Page
+        }
         if (term == null) item { Text("Loading classes…", style = MaterialTheme.typography.bodySmall) }
         item { SectionHeader("Classes") }
         item { MultiChips(c?.a("classes").objs(), classes) }
         item { SectionHeader("Subjects") }
         item { MultiChips(c?.a("subjects").objs(), subjects) }
-        if (report.isNotEmpty()) {
-            item { SectionHeader("Result") }
-            item { Card { report.forEach { Text(it, modifier = Modifier.padding(vertical = 2.dp)) } } }
-            item { SecondaryButton("Back to lessons") { nav.popBackStack() } }
+        item { Text("For P1–P3, SST and Science material filed as Literacy One / Literacy Two is included automatically.", style = MaterialTheme.typography.bodySmall) }
+    }
+}
+
+/** One class + subject: what Ledgerly found, how far it reaches, and resources the DOS can add. */
+@Composable
+private fun MaterialCard(x: JSONObject, chosen: Set<String>, onOpen: (String) -> Unit, onToggle: (String) -> Unit) {
+    Card {
+        Text("${x.s("subjectName") ?: ""} · ${x.s("className") ?: ""}", style = MaterialTheme.typography.titleMedium)
+        x.s("error")?.let { Text(it, color = C.Bad); return@Card }
+        x.s("existingSchemeId")?.let { id ->
+            Text("Already has a scheme this term.", color = C.Warn, fontWeight = FontWeight.SemiBold)
+            Text("Open it", color = C.Brand, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { onOpen(id) }.padding(vertical = 4.dp))
+            return@Card
+        }
+        val lessons = x.i("teachingLessons"); val weeks = x.i("weeksCovered")
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 6.dp)) {
+            Ring(weeks / 10f, "$weeks/10", if (weeks >= 10) C.Ok else if (weeks >= 5) C.Warn else C.Bad, 54.dp); Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("About $lessons teaching lessons · weeks covered: $weeks of 10", style = MaterialTheme.typography.titleSmall)
+                Text(x.s("advice") ?: "", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        val picked = x.a("picked").objs()
+        Text("Ledgerly will use (${picked.size}):", style = MaterialTheme.typography.titleSmall)
+        if (picked.isEmpty()) Text("Nothing found automatically.", color = C.Bad, fontSize = 13.sp)
+        picked.forEach { p -> Text("•  ${p.s("title")}  (${p.i("pages")} pages, ${p.s("role")?.replace('_', ' ')})", fontSize = 13.sp, modifier = Modifier.padding(vertical = 1.dp)) }
+        val others = x.a("others").objs()
+        if (others.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text("Add more from the e-library:", style = MaterialTheme.typography.titleSmall)
+            others.forEach { o ->
+                val slug = o.s("slug") ?: return@forEach
+                Row(Modifier.fillMaxWidth().clickable { onToggle(slug) }.padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(slug in chosen, { onToggle(slug) })
+                    Text("${o.s("title")}  (${o.i("pages")} pages${o.s("type")?.let { ", $it" } ?: ""})", fontSize = 13.sp, modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }

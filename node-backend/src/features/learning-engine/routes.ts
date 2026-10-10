@@ -9,7 +9,7 @@ import { addPage, assignPageStudent, createBatch, createBatchSchema, getBatch, g
 import { enqueueTask, getSettings, updateSettings } from "./engine.js";
 import { coverage, recordTeaching, requestStudentSummary, studentOverview, teachingAt, teachingEventSchema, timeline } from "./insights.js";
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
-import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, requestWeek, setPublished, writeUntil } from "./schemes.js";
+import { createScheme, createSchemeSchema, getLesson, getScheme, previewMaterial, regenerate, requestWeek, setPublished, writeUntil } from "./schemes.js";
 import { lessonPrintHtml } from "./print.js";
 import { me, search } from "./me.js";
 import { docxToPdf, postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
@@ -168,6 +168,11 @@ export function createLearningRoutes(runtime: Runtime) {
   r.get("/schemes/:id/library", read, async c => c.json({ data: (await runtime.db.query(
     `SELECT external_slug AS slug,page_url AS url,weeks,status,created_at AS "createdAt" FROM lrn_library_posts WHERE scheme_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,
     [c.req.param("id"), org(c)])).rows }));
+  /** Material check before generating: what the e-library has for this class, subject and term, and how far it reaches. */
+  r.post("/schemes/preview", dos, async c => {
+    const v = parse(z.object({ termId: id, classId: id, subjectId: id }), await body(c));
+    return c.json({ data: await previewMaterial(runtime, org(c), v) });
+  });
   /** Week by week: notes first, then the lesson plans for that week. */
   r.post("/schemes/:id/weeks/:week/:what", dos, async c => {
     const week = Number(c.req.param("week")), what = c.req.param("what");

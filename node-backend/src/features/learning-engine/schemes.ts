@@ -47,6 +47,8 @@ export const createSchemeSchema = z.object({
   library: z.object({
     classSlug: z.string().max(40).optional(), subjectSlug: z.string().max(80).optional(), termSlug: z.string().max(40).optional(),
     resourceSlugs: z.array(z.string().min(1).max(240)).max(12).optional(),
+    /** Resources the DOS added after the material check, used together with the ones Ledgerly picks. */
+    extraSlugs: z.array(z.string().min(1).max(240)).max(12).optional(),
   }).default({}),
 });
 
@@ -74,6 +76,7 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
     subjectSlug: input.library.subjectSlug ?? await librarySubjectSlug(runtime, ref.subjectName).catch(() => null),
     termSlug: input.library.termSlug ?? (termNumber ? `term-${termNumber}` : null),
     resourceSlugs: input.library.resourceSlugs ?? [],
+    extraSlugs: input.library.extraSlugs ?? [],
   };
   const id = createId("lsch");
   await runtime.db.query(
@@ -87,7 +90,7 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
 
 type SchemeRow = {
   id: string; organizationId: string; termId: string; classId: string; subjectId: string; title: string; status: string;
-  weeks: number; periodsPerWeek: number; library: { classSlug: string | null; subjectSlug: string | null; termSlug: string | null; resourceSlugs: string[] };
+  weeks: number; periodsPerWeek: number; library: { classSlug: string | null; subjectSlug: string | null; termSlug: string | null; resourceSlugs: string[]; extraSlugs?: string[] };
   className: string; subjectName: string; termName: string;
 };
 
@@ -121,15 +124,45 @@ export function schemeScope(library: { classSlug: string | null; termSlug: strin
  * Picks the best material of each type: published before drafts, this term (or all-term books) first, the most
  * complete text first, never two copies of the same book, and books that cover several classes when they include ours.
  */
-async function pickFromCatalog(library: ReturnType<typeof ulibtech>, classSlug: string, subjectSlug: string, termSlug: string | null, scope: Scope) {
-  const picked: Array<{ slug: string; role: string; title: string }> = [];
+/**
+ * Lower primary (P1–P3, and nursery) follows the thematic curriculum: SST and Science material is filed under
+ * "Literacy" (Literacy One / Literacy I mostly, Literacy Two for reading and writing). Returns the subjects to search
+ * and which literacy number fits best.
+ */
+export function librarySubjects(classSlug: string | null, subjectSlug: string | null, subjectName: string): { slugs: string[]; literacy: 1 | 2 | null } {
+  const lower = /^(p[123]|baby-class|middle-class|top-class)$/.test(classSlug ?? "");
+  const name = subjectName.toLowerCase();
+  const isLit = /literacy/.test(name) || subjectSlug === "literacy";
+  const litNo: 1 | 2 = /literacy\s*(2|two|ii)\b/.test(name) ? 2 : 1;
+  if (!lower) return { slugs: subjectSlug ? [subjectSlug] : [], literacy: null };
+  if (isLit) return { slugs: ["literacy", ...(litNo === 1 ? ["social-studies", "science"] : ["english"])], literacy: litNo };
+  if (subjectSlug && ["social-studies", "science", "integrated-science"].includes(subjectSlug)) return { slugs: [subjectSlug, "literacy"], literacy: 1 };
+  return { slugs: subjectSlug ? [subjectSlug] : [], literacy: null };
+}
+
+/** +2 for the wanted Literacy (One/Two), -1 for the other one, +1 for thematic material, 0 otherwise. */
+function literacyScore(title: string, want: 1 | 2 | null) {
+  if (!want) return 0;
+  const t = title.toLowerCase();
+  const one = /lit(?:eracy)?\.?\s*(?:1|one|i)\b(?!i)/.test(t), two = /lit(?:eracy)?\.?\s*(?:2|two|ii)\b/.test(t);
+  // Reading and writing books belong to Literacy Two; SST and Science content is Literacy One.
+  const reading = /\breading\b|\bwriting\b|phonics|handwriting/.test(t);
+  if ((want === 1 && one) || (want === 2 && (two || reading))) return 2;
+  if (want === 1 && reading) return -1;
+  if (one || two) return -1;
+  return /thematic|theme/.test(t) ? 1 : 0;
+}
+
+async function pickFromCatalog(library: ReturnType<typeof ulibtech>, classSlug: string, subjectSlug: string | string[], termSlug: string | null, scope: Scope, literacy: 1 | 2 | null = null) {
+  const subjects = Array.isArray(subjectSlug) ? subjectSlug : [subjectSlug];
+  const picked: Array<{ slug: string; role: string; title: string; chars: number; type: string }> = [];
   const seen: CatalogItem[] = [];
   const same = (a: CatalogItem, b: CatalogItem) =>
     (a.sha256 && a.sha256 === b.sha256) || Math.abs(a.chars - b.chars) <= Math.max(200, a.chars * 0.005) ||
     a.title.toLowerCase().replace(/[^a-z0-9]/g, "") === b.title.toLowerCase().replace(/[^a-z0-9]/g, "");
   for (const [type, count] of WANT) {
-    const own = await library.catalog({ class: classSlug, subject: subjectSlug, type, limit: 40 });
-    const wide = (await library.catalog({ subject: subjectSlug, type, limit: 100 }))
+    const own = (await Promise.all(subjects.map(subject => library.catalog({ class: classSlug, subject, type, limit: 40 })))).flat();
+    const wide = (await Promise.all(subjects.map(subject => library.catalog({ subject, type, limit: 100 })))).flat()
       .filter(i => i.class !== classSlug && classesInTitle(i.title).some(c => scope.cls && c.level === scope.cls.level && c.no === scope.cls.no));
     const termNo = scope.term;
     const termScore = (i: CatalogItem) => {
@@ -141,20 +174,71 @@ async function pickFromCatalog(library: ReturnType<typeof ulibtech>, classSlug: 
       return 0;
     };
     const ranked = [...own, ...wide].sort((a, b) =>
-      Number(b.status === "published") - Number(a.status === "published") || termScore(b) - termScore(a) || b.chars - a.chars);
+      Number(b.status === "published") - Number(a.status === "published") || literacyScore(b.title, literacy) - literacyScore(a.title, literacy) || termScore(b) - termScore(a) || b.chars - a.chars);
     let n = 0;
     for (const item of ranked) {
       if (n >= count) break;
       // Catalogue class tags are sometimes wrong: a book whose title names other classes only is not ours.
       const named = classesInTitle(item.title);
       if (named.length && scope.cls && !named.some(c => c.level === scope.cls!.level && c.no === scope.cls!.no)) continue;
-      if (termScore(item) < 0 || seen.some(x => same(x, item))) continue;
+      if (termScore(item) < 0 || literacyScore(item.title, literacy) < 0 || seen.some(x => same(x, item))) continue;
       seen.push(item);
-      picked.push({ slug: item.slug, role: /curricul/i.test(item.title) ? "curriculum" : ROLE_BY_TYPE[type] ?? "reference", title: item.title });
+      picked.push({ slug: item.slug, role: /curricul/i.test(item.title) ? "curriculum" : ROLE_BY_TYPE[type] ?? "reference", title: item.title, chars: item.chars, type });
       n += 1;
     }
   }
   return picked;
+}
+
+/** About 3,000 characters (roughly one page) of source material per teaching lesson. */
+const CHARS_PER_LESSON = 3000;
+
+/**
+ * Material check before generating: what Ledgerly would use, how many teaching lessons it supports, and other
+ * resources the DOS can add. Nothing is stored and no AI is used.
+ */
+export async function previewMaterial(runtime: Runtime, organizationId: string, input: { termId: string; classId: string; subjectId: string }) {
+  const ref = (await runtime.db.query<{ className: string; subjectName: string; termName: string }>(
+    `SELECT c.name AS "className",s.name AS "subjectName",t.name AS "termName" FROM school_classes c, school_subjects s, school_terms t
+      WHERE c.id=$1 AND c.organization_id=$4 AND s.id=$2 AND s.organization_id=$4 AND t.id=$3 AND t.organization_id=$4`,
+    [input.classId, input.subjectId, input.termId, organizationId])).rows[0];
+  if (!ref) throw new AppError(404, "NOT_FOUND", "Class, subject or term not found in this school");
+  const library = ulibtech(runtime);
+  const classSlug = libraryClassSlug(ref.className);
+  const subjectSlug = await librarySubjectSlug(runtime, ref.subjectName).catch(() => null);
+  const termNumber = /(\d)/.exec(ref.termName)?.[1] ?? Object.entries(WORDS).find(([w]) => ref.termName.toLowerCase().includes(w))?.[1];
+  const termSlug = termNumber ? `term-${termNumber}` : null;
+  const subj = librarySubjects(classSlug, subjectSlug, ref.subjectName);
+  const existing = await runtime.db.query<{ id: string }>(
+    `SELECT id FROM lrn_schemes WHERE organization_id=$1 AND term_id=$2 AND class_id=$3 AND subject_id=$4 AND status NOT IN ('archived','failed') LIMIT 1`,
+    [organizationId, input.termId, input.classId, input.subjectId]);
+  if (!classSlug || !subj.slugs.length) return { ...ref, classSlug, subjects: subj.slugs, picked: [], others: [], chars: 0, teachingLessons: 0, existingSchemeId: existing.rows[0]?.id ?? null,
+    advice: `Could not match ${ref.className} / ${ref.subjectName} to the e-library.` };
+  const scope = schemeScope({ classSlug, termSlug });
+  const picked = await pickFromCatalog(library, classSlug, subj.slugs, termSlug, scope, subj.literacy);
+  const all = (await Promise.all(subj.slugs.map(subject => library.catalog({ class: classSlug, subject, limit: 100 })))).flat();
+  const taken = new Set(picked.map(p => p.slug));
+  const others = all.filter(i => {
+    if (taken.has(i.slug)) return false;
+    taken.add(i.slug);
+    const t = parseTerm(i.title);
+    return !(scope.term && t && t !== scope.term);   // other terms' books are left out
+  })
+    .sort((a, b) => literacyScore(b.title, subj.literacy) - literacyScore(a.title, subj.literacy) || b.chars - a.chars).slice(0, 25)
+    .map(i => ({ slug: i.slug, title: i.title, type: i.type, chars: i.chars, pages: Math.max(1, Math.round(i.chars / CHARS_PER_LESSON)) }));
+  // Teaching content: notes, lesson plans and schemes; past papers and curricula guide but add few lessons of their own.
+  const teachChars = picked.filter(p => ["notes", "lesson_plans", "scheme", "reference"].includes(p.role)).reduce((n, p) => n + p.chars, 0);
+  const chars = picked.reduce((n, p) => n + p.chars, 0);
+  const teachingLessons = Math.min(40, Math.round(teachChars / CHARS_PER_LESSON / 2));
+  const weeksCovered = Math.min(10, Math.ceil(teachingLessons / 4));
+  return {
+    ...ref, classSlug, subjects: subj.slugs, existingSchemeId: existing.rows[0]?.id ?? null,
+    picked: picked.map(p => ({ slug: p.slug, title: p.title, role: p.role, chars: p.chars, pages: Math.max(1, Math.round(p.chars / CHARS_PER_LESSON)) })),
+    others, chars, teachingLessons, weeksCovered,
+    advice: teachingLessons >= 40 ? "Enough material for the full 10 weeks."
+      : teachingLessons >= 20 ? `Enough for about ${teachingLessons} teaching lessons. Ledgerly adds a practice lesson after each topic and a review every Friday to fill 10 weeks.`
+      : `Thin material: about ${teachingLessons} teaching lessons. Add more resources below, or Ledgerly will use practice, review and revision lessons for the remaining weeks.`,
+  };
 }
 
 /** Step 1 (no AI): find the class/subject material in the e-library and store its text as passages. */
@@ -168,7 +252,8 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
     if (!scheme.library.classSlug || !scheme.library.subjectSlug)
       throw new Error(`Could not match ${scheme.className} / ${scheme.subjectName} to the e-library. Set the library class and subject on the scheme.`);
     if (library.textEnabled) {
-      picked.push(...await pickFromCatalog(library, scheme.library.classSlug, scheme.library.subjectSlug, scheme.library.termSlug, schemeScope(scheme.library)));
+      const subj = librarySubjects(scheme.library.classSlug, scheme.library.subjectSlug, scheme.subjectName);
+      picked.push(...await pickFromCatalog(library, scheme.library.classSlug, subj.slugs, scheme.library.termSlug, schemeScope(scheme.library), subj.literacy));
     } else {
       for (const [type, count] of WANT) {
         const items = (await library.search({ class: scheme.library.classSlug, subject: scheme.library.subjectSlug, type, pageSize: count })).items;
@@ -176,6 +261,7 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
       }
     }
   }
+  for (const slug of scheme.library.extraSlugs ?? []) if (!picked.some(p => p.slug === slug)) picked.push({ slug, role: "reference" });
   const ingested: Array<{ title: string; role: string; status: string; chunks: number }> = [];
   for (const p of picked) {
     try {
@@ -217,6 +303,7 @@ const outlineReply = z.object({
       subtopic: z.string().max(300).nullish(),
       week: z.number().int().min(1).max(20).nullish(),
       periods: z.number().int().min(1).max(10).nullish(),
+      kind: z.enum(["teach", "practice"]).catch("teach").optional(),
       objectives: z.array(z.string().max(500)).max(10).default([]),
       sourcePassageIds: ids,
     })).max(60),
@@ -239,15 +326,18 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   const reply = parseLenient(outlineReply, await ctx.ai({
     prompt: [
       `Task: draft the OUTLINE of a scheme of work for ${scheme.subjectName}, ${scheme.className}, ${scheme.termName}.`,
-      `The term has ${scheme.weeks} teaching weeks and the subject is taught ONE period a day, Monday to Friday: ${scheme.periodsPerWeek} lessons a week, exactly ${scheme.weeks * scheme.periodsPerWeek} lessons in total.`,
-      `Every lesson is one period. Give exactly ${scheme.weeks * scheme.periodsPerWeek} lessons in teaching order (lesson 1 = week 1 Monday, lesson 6 = week 2 Monday, ...); split big subtopics over several lessons and use revision or assessment lessons where the material runs short.`,
+      `The term has ${scheme.weeks} teaching weeks and the subject is taught ONE period a day, Monday to Friday. Every Friday is a review lesson that Ledgerly adds itself,`,
+      `so give the Monday–Thursday lessons: at most ${scheme.weeks * (scheme.periodsPerWeek - 1)} lessons in teaching order, 4 a week, each one period.`,
+      "Each lesson has a kind: \"teach\" (new content) or \"practice\" (the same subtopic as the teaching lesson just before it: exercises, oral work, drawing, matching, filling in blanks, ALL taken from the passages).",
+      "When the material is thin (common in lower primary), follow each teaching lesson with a practice lesson. Split big subtopics over several teaching lessons.",
+      "Never pad with content the passages do not have: if they cannot fill the term, return fewer lessons and list what is missing in gaps. Ledgerly fills the remaining weeks with revision.",
       "You are composing the SCHOOL'S OWN scheme. The passages below (Ugandan curricula, schemes of work, lesson plans, notes and past papers from the school e-library) are reference material:",
       "combine them — follow the curriculum's order and coverage where present, use the reference schemes for week-by-week pacing, and the notes and past papers for what each subtopic must cover. Do not copy one reference scheme blindly.",
       `Use this term's part of the material (${scheme.termName}) when the passages cover several terms.`,
       "Do NOT write lesson content yet. Each unit and lesson must cite the passage ids it comes from in sourcePassageIds.",
       "",
       "Reply shape:",
-      `{"title":string,"summary":string,"units":[{"title":string,"theme":string|null,"weekFrom":int|null,"weekTo":int|null,"competences":string|null,"sourcePassageIds":[string],"lessons":[{"title":string,"subtopic":string|null,"week":int|null,"periods":int,"objectives":[string],"sourcePassageIds":[string]}]}],"gaps":[string]}`,
+      `{"title":string,"summary":string,"units":[{"title":string,"theme":string|null,"weekFrom":int|null,"weekTo":int|null,"competences":string|null,"sourcePassageIds":[string],"lessons":[{"title":string,"subtopic":string|null,"kind":"teach"|"practice","objectives":[string],"sourcePassageIds":[string]}]}],"gaps":[string]}`,
       "",
       "<passages>",
       formatPassages(passages),
@@ -256,34 +346,71 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   }));
   // Keep only what is traceable to the passages we supplied.
   const cite = (list: string[]) => list.filter(id => allowed.has(id));
-  const maxPeriods = scheme.weeks * scheme.periodsPerWeek;
-  let lessonSeq = 0, dropped = 0, periodsUsed = 0;
+  // Layout: Monday–Thursday are the outline's lessons in order, every Friday is a review of that week. When the material
+  // runs out, the remaining Monday–Thursday slots revise the units in turn; the last Friday is the end-of-term assessment.
+  const weekdays = scheme.periodsPerWeek - 1;
+  const totalSlots = scheme.weeks * weekdays;
+  let lessonSeq = 0, dropped = 0;
   const client = await runtime.db.connect();
+  let coverageNote: string | null = null;
   try {
     await client.query("BEGIN");
     await client.query("DELETE FROM lrn_units WHERE scheme_id=$1", [scheme.id]);
+    type Slot = { unitId: string; unitTitle: string; title: string; subtopic: string | null; objectives: string[]; cites: string[]; kind: string };
+    const queue: Slot[] = [];
+    const units: Array<{ id: string; title: string; cites: string[] }> = [];
     for (const [u, unit] of reply.units.entries()) {
       const unitCites = cite(unit.sourcePassageIds);
       const lessons = unit.lessons.filter(l => cite(l.sourcePassageIds).length || unitCites.length);
       dropped += unit.lessons.length - lessons.length;
       if (!unitCites.length && !lessons.length) { dropped += 1; continue; }
       const unitId = createId("lunit");
+      const allCites = [...new Set([...unitCites, ...lessons.flatMap(l => cite(l.sourcePassageIds))])];
       await client.query(
         `INSERT INTO lrn_units(id,organization_id,scheme_id,seq,title,theme,week_from,week_to,competences,source_chunk_ids) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [unitId, task.organizationId, scheme.id, u + 1, unit.title, unit.theme ?? null, unit.weekFrom ?? null, unit.weekTo ?? null, unit.competences ?? null, unitCites]);
-      for (const lesson of lessons) {
-        const periods = 1; // one period a day
-        if (periodsUsed + periods > maxPeriods) { dropped += 1; continue; }
-        lessonSeq += 1;
-        periodsUsed += periods;
-        await client.query(
-          `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,periods,title,subtopic,objectives,source_chunk_ids,period) VALUES($1,$2,$3,$4,$5,$6,$11,$7,$8,$9::jsonb,$10,$12)`,
-          [createId("lles"), task.organizationId, scheme.id, unitId, lessonSeq, Math.floor((lessonSeq - 1) / scheme.periodsPerWeek) + 1, lesson.title, lesson.subtopic ?? null,
-            JSON.stringify(lesson.objectives), cite(lesson.sourcePassageIds).length ? cite(lesson.sourcePassageIds) : unitCites, periods, ((lessonSeq - 1) % scheme.periodsPerWeek) + 1]);
-      }
+        [unitId, task.organizationId, scheme.id, units.length + 1, unit.title, unit.theme ?? null, null, null, unit.competences ?? null, allCites]);
+      units.push({ id: unitId, title: unit.title, cites: allCites });
+      for (const l of lessons) queue.push({ unitId, unitTitle: unit.title, title: l.title, subtopic: l.subtopic ?? null, objectives: l.objectives,
+        cites: cite(l.sourcePassageIds).length ? cite(l.sourcePassageIds) : allCites, kind: l.kind ?? "teach" });
     }
-    if (!lessonSeq) throw new Error("The outline had no lessons that trace back to the e-library passages.");
+    if (!queue.length) throw new Error("The outline had no lessons that trace back to the e-library passages.");
+    dropped += Math.max(0, queue.length - totalSlots);
+    const taught = Math.min(queue.length, totalSlots);
+    const insert = async (week: number, day: number, x: Slot) => {
+      lessonSeq += 1;
+      await client.query(
+        `INSERT INTO lrn_lessons(id,organization_id,scheme_id,unit_id,seq,week,periods,title,subtopic,objectives,source_chunk_ids,period,lesson_kind) VALUES($1,$2,$3,$4,$5,$6,1,$7,$8,$9::jsonb,$10,$11,$12)`,
+        [createId("lles"), task.organizationId, scheme.id, x.unitId, lessonSeq, week, x.title, x.subtopic, JSON.stringify(x.objectives), x.cites.slice(0, 30), day, x.kind]);
+    };
+    let next = 0, revise = 0;
+    for (let week = 1; week <= scheme.weeks; week += 1) {
+      const thisWeek: Slot[] = [];
+      for (let day = 1; day <= weekdays; day += 1) {
+        let slot: Slot;
+        if (next < taught) slot = queue[next++]!;
+        else {
+          const u = units[revise++ % units.length]!;
+          slot = { unitId: u.id, unitTitle: u.title, title: `Revision: ${u.title}`, subtopic: "Revision and practice", objectives: [`Revise and practise the main points of ${u.title}`], cites: u.cites, kind: "revision" };
+        }
+        thisWeek.push(slot);
+        await insert(week, day, slot);
+      }
+      const last = week === scheme.weeks;
+      const covered = [...new Set(thisWeek.map(x => x.unitTitle))];
+      await insert(week, scheme.periodsPerWeek, last
+        ? { unitId: thisWeek[thisWeek.length - 1]!.unitId, unitTitle: "", title: "End of term assessment", subtopic: units.map(u => u.title).join(", ").slice(0, 280),
+            objectives: ["Assess what learners have learnt this term"], cites: [...new Set(units.flatMap(u => u.cites))].slice(0, 30), kind: "assessment" }
+        : { unitId: thisWeek[thisWeek.length - 1]!.unitId, unitTitle: "", title: `Week ${week} review`, subtopic: covered.join(", ").slice(0, 280),
+            objectives: [`Review this week's lessons: ${thisWeek.map(x => x.title).join("; ")}`.slice(0, 480)], cites: [...new Set(thisWeek.flatMap(x => x.cites))].slice(0, 30), kind: "review" });
+    }
+    if (taught < totalSlots) {
+      const lastWeek = Math.ceil(taught / weekdays);
+      coverageNote = `The e-library material covers ${taught} teaching and practice lessons (to week ${lastWeek}). ` +
+        (lastWeek < scheme.weeks ? `Weeks ${lastWeek + 1}–${scheme.weeks} revise the term's units. ` : "") +
+        (reply.gaps.length ? `Missing from the material: ${reply.gaps.join("; ")}` : "Add more resources to the scheme and regenerate the outline to cover more.");
+    }
     await client.query(`UPDATE lrn_units u SET week_from=x.f,week_to=x.t FROM (SELECT unit_id,min(week) AS f,max(week) AS t FROM lrn_lessons WHERE scheme_id=$1 GROUP BY unit_id) x WHERE x.unit_id=u.id`, [scheme.id]);
+    await client.query(`UPDATE lrn_schemes SET coverage_note=$2 WHERE id=$1`, [scheme.id, coverageNote]);
     await client.query(
       `UPDATE lrn_schemes SET status='writing',summary=$2,title=COALESCE(NULLIF($3,''),title),error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=$1`,
       [scheme.id, reply.summary ?? null, reply.title ?? ""]);
@@ -296,7 +423,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   }
   await queueNextLesson(runtime, task.organizationId, scheme.id, task.requestedBy);
   passages = [];
-  return { units: reply.units.length, lessons: lessonSeq, periods: periodsUsed, droppedUncitedOrOverTerm: dropped, gaps: reply.gaps };
+  return { units: reply.units.length, lessons: lessonSeq, droppedUncitedOrOverTerm: dropped, gaps: reply.gaps, coverageNote };
 });
 
 /** Lessons are written strictly one after another: each finished lesson queues the next pending one. */
@@ -366,14 +493,22 @@ const lessonReply = z.object({
   gaps: z.array(z.string().max(500)).max(20).default([]),
 });
 
+/** How the notes differ for lessons that are not new teaching (lower primary often needs these to fill the term). */
+const KIND_BRIEF: Record<string, string> = {
+  practice: "This is a PRACTICE lesson on the subtopic taught in the lesson before it. notes = a short recap (5–8 lines), then guided exercises and learner activities (oral work, drawing, matching, filling in blanks) taken from the passages. activities = those exercises.",
+  review: "This is the FRIDAY REVIEW of this week's lessons (listed in the objectives). notes = a short recap of each lesson, then review questions taken from the passages. activities = those questions.",
+  revision: "This is a REVISION lesson for the unit. notes = the unit's key points as a recap, then practice questions taken from the passages. activities = those questions.",
+  assessment: "This is the END OF TERM ASSESSMENT. notes = an assessment paper of 15–25 questions from the passages covering the term's units, numbered, with a marking guide (answers) at the end where the passages give them. activities = the questions.",
+};
+
 /** Step 3..n (AI): one lesson at a time — learner notes, methods, materials and source activities for the bank. */
 registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const { runtime, task, settings } = ctx;
   const lesson = await runtime.db.query<{
     id: string; schemeId: string; seq: number; periods: number; title: string; subtopic: string | null; objectives: string[]; sourceChunkIds: string[]; status: string;
-    unitTitle: string; theme: string | null;
+    unitTitle: string; theme: string | null; kind: string;
   }>(
-    `SELECT l.id,l.scheme_id AS "schemeId",l.seq,l.periods,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,u.title AS "unitTitle",u.theme
+    `SELECT l.id,l.scheme_id AS "schemeId",l.seq,l.periods,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,u.title AS "unitTitle",u.theme,l.lesson_kind AS kind
        FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.id=$1 AND l.organization_id=$2`, [task.subjectRef, task.organizationId]);
   const l = lesson.rows[0];
   if (!l) return { skipped: "lesson no longer exists" };
@@ -405,6 +540,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       `Task: write lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}. It takes ${l.periods ?? 1} period(s), ${minutes} minutes in total.`,
       `Unit: ${l.unitTitle}${l.theme ? ` (theme: ${l.theme})` : ""}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
       l.objectives?.length ? `Objectives: ${l.objectives.join("; ")}` : "",
+      KIND_BRIEF[l.kind] ?? "",
       "",
       "Write, using ONLY the passages below:",
       "- notes: clear learner notes in Markdown at the class level, restating what the passages say on this lesson (definitions, examples, diagrams described in words).",
@@ -593,7 +729,7 @@ onTaskFailed("lesson.write", async (runtime, task, message) => {
 
 export async function getScheme(runtime: Runtime, organizationId: string, id: string) {
   const scheme = await runtime.db.query(
-    `SELECT sc.id,sc.title,sc.status,sc.summary,sc.error,sc.weeks,sc.periods_per_week AS "periodsPerWeek",sc.library_filters AS library,
+    `SELECT sc.id,sc.title,sc.status,sc.summary,sc.error,sc.coverage_note AS "coverageNote",sc.weeks,sc.periods_per_week AS "periodsPerWeek",sc.library_filters AS library,
             sc.term_id AS "termId",sc.class_id AS "classId",sc.subject_id AS "subjectId",c.name AS "className",s.name AS "subjectName",t.name AS "termName",
             sc.published_at AS "publishedAt",sc.created_at AS "createdAt",sc.updated_at AS "updatedAt"
        FROM lrn_schemes sc JOIN school_classes c ON c.id=sc.class_id JOIN school_subjects s ON s.id=sc.subject_id JOIN school_terms t ON t.id=sc.term_id
@@ -603,7 +739,7 @@ export async function getScheme(runtime: Runtime, organizationId: string, id: st
     runtime.db.query(`SELECT id,seq,title,theme,week_from AS "weekFrom",week_to AS "weekTo",competences FROM lrn_units WHERE scheme_id=$1 ORDER BY seq`, [id]),
     runtime.db.query(
       `SELECT l.id,l.unit_id AS "unitId",l.seq,l.week,l.period AS day,l.periods,l.title,l.subtopic,l.objectives,l.status,l.error,l.written_at AS "writtenAt",
-              l.notes_requested AS "notesRequested",l.plan_status AS "planStatus",l.plan_error AS "planError",
+              l.notes_requested AS "notesRequested",l.lesson_kind AS kind,l.plan_status AS "planStatus",l.plan_error AS "planError",
               (SELECT count(*)::int FROM lrn_questions q WHERE q.lesson_id=l.id) AS questions
          FROM lrn_lessons l WHERE l.scheme_id=$1 ORDER BY l.seq`, [id]),
     runtime.db.query(
@@ -628,7 +764,7 @@ export async function getLesson(runtime: Runtime, organizationId: string, id: st
   const assets = await runtime.db.query(
     `SELECT id,kind,asset_key AS key,title,caption FROM lrn_lesson_assets WHERE lesson_id=$1 ORDER BY created_at`, [id]);
   return {
-    id: l.id, schemeId: l.scheme_id, unit: l.unit_title, seq: l.seq, week: l.week, periods: l.periods, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
+    id: l.id, schemeId: l.scheme_id, kind: l.lesson_kind, unit: l.unit_title, seq: l.seq, week: l.week, periods: l.periods, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
     notes: l.notes_markdown, lessonPlan: l.lesson_plan, methods: l.methods, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
     diagrams: assets.rows.map((a: { id: string }) => ({ ...a, url: `/api/v1/learn/lessons/${id}/assets/${a.id}.svg` })),
     status: l.status, error: l.error, writtenAt: l.written_at, citations: citations.rows, day: l.period, dayName: dayName(l.period as number | null), planStatus: l.plan_status,
