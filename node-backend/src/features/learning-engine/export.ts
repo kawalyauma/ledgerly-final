@@ -134,7 +134,7 @@ export async function loadSchemeForExport(runtime: Runtime, organizationId: stri
 }
 
 /** The scheme as a Word document: scheme of work table, then a lesson plan and learner notes (with diagrams) per lesson. */
-export async function schemeDocx(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number) {
+export async function schemeDocx(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number, publicCopy = false) {
   const { scheme, lessons, assets, questions, sources } = await loadSchemeForExport(runtime, organizationId, schemeId, untilWeek);
   const weeksLabel = untilWeek ? (untilWeek === 1 ? "Week 1" : `Weeks 1–${untilWeek}`) : "Whole term";
   const sections: ISectionOptions[] = [];
@@ -142,7 +142,7 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
   sections.push({
     properties: { page: { size: { orientation: PageOrientation.LANDSCAPE }, margin: { top: 720, bottom: 720, left: 720, right: 720 } } },
     children: [
-      new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: scheme.school.toUpperCase(), bold: true, size: 28 })] }),
+      new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: publicCopy ? "NOTESUG.COM · PREPARED BY LEDGERLY AI" : scheme.school.toUpperCase(), bold: true, size: 28 })] }),
       new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: `${scheme.subjectName.toUpperCase()} SCHEME OF WORK · ${scheme.className.toUpperCase()} · ${scheme.termName.toUpperCase()}`, bold: true, size: 26, color: "123D8A" })] }),
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [new TextRun({ text: `${weeksLabel} · ${scheme.periodsPerWeek} periods a week · prepared by Ledgerly AI from the sources listed at the end`, size: 18, color: "5B6878" })] }),
       ...(scheme.summary ? [new Paragraph({ spacing: { after: 160 }, children: runs(scheme.summary, { size: 20 }) })] : []),
@@ -222,7 +222,7 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
 
 /** Posts the scheme pack (Word document) to the public library, notesug.com, and records the link. */
 export async function postSchemeToLibrary(runtime: Runtime, organizationId: string, userId: string, schemeId: string, untilWeek?: number) {
-  const doc = await schemeDocx(runtime, organizationId, schemeId, untilWeek);
+  const doc = await schemeDocx(runtime, organizationId, schemeId, untilWeek, true);
   const s = doc.scheme;
   const written = doc.lessons.filter(l => l.notes).length;
   if (!written) throw new AppError(409, "NOTHING_WRITTEN", "No lessons have been written yet");
