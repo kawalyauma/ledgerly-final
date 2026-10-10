@@ -35,25 +35,35 @@ export async function getFigure(runtime: Runtime, id: string): Promise<FigureRow
  * Finds a reusable figure for a concept: the same concept key, or a close one whose parts cover what the
  * lesson needs. Shared figures from any school count, so a drawing is only ever generated once.
  */
-export async function findFigure(runtime: Runtime, organizationId: string, concept: string, parts: string[], subject?: string | null): Promise<FigureRow | null> {
+export async function findFigure(runtime: Runtime, organizationId: string, concept: string, parts: string[], subject?: string | null, title?: string | null): Promise<FigureRow | null> {
   const key = conceptKey(concept);
-  const rows = (await runtime.db.query<FigureRow & { sim: number }>(
-    `SELECT ${figureColumns},similarity(concept_key,$1) AS sim FROM lrn_figures
-      WHERE status IN ('ready','pending','generating') AND (shared OR organization_id=$2) AND (concept_key=$1 OR concept_key % $1)
-        AND ($3::text IS NULL OR subject IS NULL OR lower(subject)=lower($3))
-      ORDER BY (concept_key=$1) DESC,(status='ready') DESC,sim DESC,uses DESC LIMIT 10`, [key, organizationId, subject ?? null])).rows;
-  for (const f of rows) {
-    if (f.conceptKey === key) return f;
-    if (f.sim < 0.55 || f.status !== "ready") continue;
-    const covered = parts.filter(p => f.anchors.some(a => sameName(a.name, p))).length;
-    if (!parts.length || covered / parts.length >= 0.6) return f;
+  const exact = await runtime.db.query<FigureRow>(
+    `SELECT ${figureColumns} FROM lrn_figures WHERE concept_key=$1 AND status IN ('ready','pending','generating') AND (shared OR organization_id=$2) LIMIT 1`, [key, organizationId]);
+  if (exact.rows[0]) return exact.rows[0];
+  // Descriptions differ ("external parts of a domestic fowl" vs "side view of a domestic fowl, full body"), so match on
+  // the meaningful words of the concept and title plus how many of the wanted parts the figure already marks.
+  const want = new Set(conceptKey(`${concept} ${title ?? ""}`).split("-").filter(w => w.length > 2 && !GENERIC.has(w)));
+  const pool = (await runtime.db.query<FigureRow>(
+    `SELECT ${figureColumns} FROM lrn_figures WHERE status='ready' AND kind<>'coded' AND (shared OR organization_id=$1)
+        AND ($2::text IS NULL OR subject IS NULL OR lower(subject)=lower($2)) ORDER BY uses DESC,created_at DESC LIMIT 400`,
+    [organizationId, subject ?? null])).rows;
+  let best: { f: FigureRow; score: number } | null = null;
+  for (const f of pool) {
+    const have = new Set(conceptKey(`${f.conceptKey.replace(/-/g, " ")} ${f.title}`).split("-"));
+    const overlap = want.size ? [...want].filter(w => have.has(w)).length / want.size : 0;
+    const coverage = parts.length ? parts.filter(p => f.anchors.some(a => sameName(a.name, p))).length / parts.length : 1;
+    if (overlap < 0.5 || coverage < 0.6) continue;
+    const score = overlap * 0.5 + coverage * 0.5 + Math.min(f.uses, 20) / 400;
+    if (!best || score > best.score) best = { f, score };
   }
-  return null;
+  return best?.f ?? null;
 }
+
+const GENERIC = new Set(["view", "side", "full", "body", "clearly", "standing", "colour", "color", "picture", "image", "part", "simple", "labelled", "showing", "large", "small"]);
 
 /** Returns a figure for the concept: reused when it exists, otherwise queued for generation (counts towards the daily image limit). */
 export async function requestFigure(runtime: Runtime, organizationId: string, requestedBy: string | null, input: { concept: string; title: string; parts: string[]; subject?: string | null; level?: string | null; style?: string | null }) {
-  const found = await findFigure(runtime, organizationId, input.concept, input.parts, input.subject);
+  const found = await findFigure(runtime, organizationId, input.concept, input.parts, input.subject, input.title);
   if (found) {
     await runtime.db.query(`UPDATE lrn_figures SET uses=uses+1 WHERE id=$1`, [found.id]);
     return { figure: found, reused: true };

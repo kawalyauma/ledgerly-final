@@ -408,6 +408,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       "  NEVER make a table, list or text box into a diagram; tables belong in the notes as Markdown tables. Choose a method per picture:",
       "  * method \"illustration\" for real things: animals, plants, body parts and organs, tools, apparatus, objects, scenes (e.g. the external parts of a domestic fowl, a beehive, a flower).",
       "    Give concept = a precise description of what to draw (e.g. 'side view of a domestic hen, full body') and parts = the exact part names from the passages to label. No svg. Ledgerly draws it once and reuses it.",
+      "    For a picture comparing two things, name each part with its owner so both get labelled, e.g. 'comb (cock)', 'comb (hen)'.",
       "  * method \"coded\" for exact maths pictures, with coded = one of:",
       "    {\"type\":\"shape\",\"shape\":\"circle|square|rectangle|triangle|right-triangle|equilateral-triangle|isosceles-triangle|parallelogram|rhombus|trapezium|kite|pentagon|hexagon|octagon\"}",
       "    {\"type\":\"fraction\",\"shape\":\"circle|bar\",\"numerator\":3,\"denominator\":4}   {\"type\":\"number-line\",\"from\":0,\"to\":10,\"step\":1,\"marks\":[3,7]}",
