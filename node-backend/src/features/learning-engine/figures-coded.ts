@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Anchor } from "./figures.js";
+import { MAP_LAYERS, ugandaMap } from "./map.js";
 
 // Figures drawn by code from a few numbers: always exact, identical every time, free, and cached by their spec.
 
@@ -8,6 +9,7 @@ export const codedSpecSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("fraction"), shape: z.enum(["circle", "bar"]), numerator: z.number().int().min(0).max(24), denominator: z.number().int().min(1).max(24) }),
   z.object({ type: z.literal("number-line"), from: z.number().min(-1000).max(1000), to: z.number().min(-1000).max(1000), step: z.number().positive().max(1000), marks: z.array(z.number()).max(12).default([]) }),
   z.object({ type: z.literal("clock"), hour: z.number().int().min(0).max(23), minute: z.number().int().min(0).max(59) }),
+  z.object({ type: z.literal("map"), region: z.literal("uganda").default("uganda"), layers: z.array(z.enum(MAP_LAYERS)).min(1).max(7).default(["lakes", "rivers", "neighbours"]), highlight: z.array(z.string().max(60)).max(10).default([]) }),
   z.object({ type: z.literal("bar-chart"), title: z.string().max(120).default(""), yLabel: z.string().max(60).default(""), bars: z.array(z.object({ label: z.string().min(1).max(30), value: z.number().min(0).max(1e9) })).min(1).max(12) }),
 ]);
 export type CodedSpec = z.infer<typeof codedSpecSchema>;
@@ -116,6 +118,11 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
       body += `<line x1="${cx}" y1="${cy}" x2="${n(cx + 145 * Math.cos(tm))}" y2="${n(cy + 145 * Math.sin(tm))}" stroke="#000" stroke-width="5" stroke-linecap="round"/><circle cx="${cx}" cy="${cy}" r="8" fill="#000"/>`;
       return { conceptKey: key(["clock", spec.hour % 12, spec.minute]), title: `Clock showing ${spec.hour % 12 || 12}:${String(spec.minute).padStart(2, "0")}`, subject: "mathematics", svg: svgWrap(body), width: W, height: H,
         anchors: [anchor("hour-hand", "Hour hand", cx + 60 * Math.cos(th), cy + 60 * Math.sin(th)), anchor("minute-hand", "Minute hand", cx + 110 * Math.cos(tm), cy + 110 * Math.sin(tm)), anchor("face", "Clock face", cx + r * 0.7, cy + r * 0.7)] };
+    }
+    case "map": {
+      const layers = [...new Set(spec.layers)].sort();
+      const m = ugandaMap(layers, spec.highlight);
+      return { conceptKey: key(["map", spec.region, ...layers, ...spec.highlight.map(h => h.toLowerCase())]), title: m.title, subject: "social-studies", svg: m.svg, width: m.width, height: m.height, anchors: m.anchors };
     }
     case "bar-chart": {
       const max = Math.max(...spec.bars.map(b => b.value), 1);

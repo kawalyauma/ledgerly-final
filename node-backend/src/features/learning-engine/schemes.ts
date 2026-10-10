@@ -412,6 +412,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       "  * method \"coded\" for exact maths pictures, with coded = one of:",
       "    {\"type\":\"shape\",\"shape\":\"circle|square|rectangle|triangle|right-triangle|equilateral-triangle|isosceles-triangle|parallelogram|rhombus|trapezium|kite|pentagon|hexagon|octagon\"}",
       "    {\"type\":\"fraction\",\"shape\":\"circle|bar\",\"numerator\":3,\"denominator\":4}   {\"type\":\"number-line\",\"from\":0,\"to\":10,\"step\":1,\"marks\":[3,7]}",
+      "    {\"type\":\"map\",\"region\":\"uganda\",\"layers\":[\"lakes\",\"rivers\",\"mountains\",\"towns\",\"neighbours\",\"regions\",\"equator\"],\"highlight\":[\"Northern\"]} for any map of Uganda (pick the layers needed; parts = the lakes, rivers, mountains, towns, neighbours or regions to label, e.g. 'Lake Kyoga', 'River Victoria Nile', 'Mount Elgon', 'Kenya', 'Northern Region'),",
       "    {\"type\":\"clock\",\"hour\":3,\"minute\":30}   {\"type\":\"bar-chart\",\"title\":\"...\",\"yLabel\":\"...\",\"bars\":[{\"label\":\"Mon\",\"value\":4}]} (only with data given in the passages)",
       "  All pictures are printed in BLACK: black outlines on white, mostly outline, simple grey or hatched shading only where needed, never colour.",
       "  * method \"svg\" for simple schematics only (cycles, food chains, flow of a process): a self-contained SVG, viewBox=\"0 0 640 420\", white background, black outlined shapes (fills white or light grey #e6e6e6 only),",
