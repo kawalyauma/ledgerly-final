@@ -44,7 +44,7 @@ services:
       NODE_ENV: production
       DATABASE_URL: postgresql://ledgerly:${POSTGRES_PASSWORD:-ledgerly-change-me}@127.0.0.1:5432/ledgerly
       REDIS_URL: redis://127.0.0.1:6379
-      STORAGE_DRIVER: local
+      STORAGE_DRIVER: ${STORAGE_DRIVER:-local}
       STORAGE_LOCAL_ROOT: /data/storage
       JWT_SECRET: ${JWT_SECRET:-replace-this-with-a-long-random-production-secret}
       JWT_ISSUER: ${JWT_ISSUER:-your-finance-pro}
