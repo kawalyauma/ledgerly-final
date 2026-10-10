@@ -24,7 +24,7 @@ export async function createRuntime(config: AppConfig = parseEnv()): Promise<Run
   const db = createPostgresPool(config, logger);
   const cache = createClient({ url: config.REDIS_URL });
   cache.on("error", (error) => logger.error({ err: error }, "Redis error"));
-  const storage = createStorage(config);
+  const storage = createStorage(config, db);
   const queue = new PostgresQueue(db);
 
   await Promise.all([db.query("SELECT 1"), cache.connect(), storage.initialize()]);

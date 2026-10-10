@@ -27,7 +27,12 @@ const schema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
   DATABASE_SSL: envBoolean(false),
   REDIS_URL: z.string().url().default("redis://127.0.0.1:6379"),
-  STORAGE_DRIVER: z.enum(["local", "minio"]).default("local"),
+  STORAGE_DRIVER: z.enum(["local", "minio", "nexdrive"]).default("local"),
+  // NexDrive (self-hosted drive) used when STORAGE_DRIVER=nexdrive; one workspace and write key for Ledgerly.
+  NEXDRIVE_URL: emptyToUndefined(z.string().url().optional()),
+  NEXDRIVE_WORKSPACE_ID: emptyToUndefined(z.string().uuid().optional()),
+  NEXDRIVE_API_KEY: emptyToUndefined(z.string().startsWith("nd_").optional()),
+  NEXDRIVE_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(120000),
   STORAGE_LOCAL_ROOT: z.string().min(1).default("./data/storage"),
   S3_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().min(1).default("us-east-1"),
@@ -84,6 +89,11 @@ const schema = z.object({
   if (value.STORAGE_DRIVER === "minio") {
     for (const key of ["S3_ENDPOINT", "S3_ACCESS_KEY", "S3_SECRET_KEY"] as const) {
       if (!value[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=minio` });
+    }
+  }
+  if (value.STORAGE_DRIVER === "nexdrive") {
+    for (const key of ["NEXDRIVE_URL", "NEXDRIVE_WORKSPACE_ID", "NEXDRIVE_API_KEY"] as const) {
+      if (!value[key]) ctx.addIssue({ code: "custom", path: [key], message: `${key} is required when STORAGE_DRIVER=nexdrive` });
     }
   }
   if (value.SCHOOLPAY_ENFORCE_WEBHOOK_IP_ALLOWLIST && value.SCHOOLPAY_WEBHOOK_IP_ALLOWLIST.length === 0) {
