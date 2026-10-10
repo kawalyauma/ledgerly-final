@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ledgerly Academic System: Architecture, Functionality and Usage</title>
+<meta name="robots" content="noindex">
+<style>
+  :root{--ink:#16202c;--muted:#5b6878;--line:#dfe5ec;--bg:#f6f8fb;--card:#fff;--brand:#1d5fd1;--brand-soft:#e8f0fd;--ai:#7a3fd1;--ai-soft:#f1eafd;--ok:#127a4a;--ok-soft:#e5f5ec;--warn:#9a5b00;--warn-soft:#fdf3e1;--src:#0b7285;--src-soft:#e3f6f8}
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,Ubuntu,sans-serif;color:var(--ink);background:var(--bg)}
+  header{background:linear-gradient(135deg,#123d8a,#1d5fd1 60%,#7a3fd1);color:#fff;padding:48px 20px 40px}
+  header .wrap{max-width:1080px;margin:0 auto}
+  header h1{margin:0 0 8px;font-size:clamp(26px,4.4vw,40px);line-height:1.2}
+  header p{margin:0;max-width:760px;opacity:.92;font-size:clamp(15px,2.2vw,18px)}
+  header .meta{margin-top:18px;font-size:13px;opacity:.8}
+  nav{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid var(--line);overflow-x:auto;white-space:nowrap}
+  nav .wrap{max-width:1080px;margin:0 auto;padding:0 12px}
+  nav a{display:inline-block;padding:12px 10px;color:var(--muted);text-decoration:none;font-size:14px;font-weight:600}
+  nav a:hover{color:var(--brand)}
+  main{max-width:1080px;margin:0 auto;padding:8px 16px 64px}
+  section{margin-top:44px}
+  h2{font-size:clamp(21px,3vw,27px);margin:0 0 6px;line-height:1.25}
+  h2 small{display:block;font-size:14px;font-weight:500;color:var(--muted);margin-top:4px}
+  h3{font-size:18px;margin:0 0 6px}
+  p{margin:8px 0}
+  .lead{color:var(--muted);max-width:800px}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-top:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card ul{margin:8px 0 0;padding-left:20px}
+  .card li{margin:3px 0}
+  .tag{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.02em;padding:2px 8px;border-radius:999px;margin-right:6px;vertical-align:2px}
+  .t-built{background:var(--ok-soft);color:var(--ok)}
+  .t-plan{background:var(--warn-soft);color:var(--warn)}
+  .t-ai{background:var(--ai-soft);color:var(--ai)}
+  .t-src{background:var(--src-soft);color:var(--src)}
+  .callout{border-left:4px solid var(--brand);background:var(--brand-soft);padding:14px 16px;border-radius:0 12px 12px 0;margin-top:16px}
+  .callout.ai{border-color:var(--ai);background:var(--ai-soft)}
+  .callout.warn{border-color:var(--warn);background:var(--warn-soft)}
+  /* architecture diagram */
+  .arch{display:grid;gap:10px;margin-top:18px}
+  .layer{border-radius:14px;padding:14px;border:1px solid var(--line);background:#fff}
+  .layer>b{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .boxes{display:flex;flex-wrap:wrap;gap:8px}
+  .box{flex:1 1 150px;border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600;border:1px solid}
+  .box span{display:block;font-weight:400;font-size:12.5px;color:var(--muted);margin-top:2px}
+  .l-src .box{background:var(--src-soft);border-color:#b7e3e9}
+  .l-ai{background:linear-gradient(180deg,#fbf8ff,#fff);border-color:#d9c6f6}
+  .l-ai .box{background:var(--ai-soft);border-color:#d9c6f6}
+  .l-core .box{background:var(--brand-soft);border-color:#c6d8f8}
+  .l-out .box{background:var(--ok-soft);border-color:#bfe5cf}
+  .arrow{text-align:center;color:var(--muted);font-size:13px;line-height:1.2}
+  .arrow:before{content:"▼";display:block;font-size:16px;color:#9aa8b8}
+  /* pipeline */
+  .steps{counter-reset:s;list-style:none;padding:0;margin:14px 0 0}
+  .steps li{counter-increment:s;position:relative;padding:10px 12px 10px 52px;margin:8px 0;background:#fff;border:1px solid var(--line);border-radius:12px}
+  .steps li:before{content:counter(s);position:absolute;left:12px;top:10px;width:28px;height:28px;border-radius:50%;background:var(--brand);color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center}
+  .steps li.ai:before{background:var(--ai)}
+  .steps li b{display:block}
+  table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}
+  th,td{padding:9px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{background:#f0f3f8;font-size:13px}
+  .scroll{overflow-x:auto;margin-top:14px;border-radius:12px}
+  code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#eef2f7;padding:1px 5px;border-radius:5px}
+  .week{display:grid;grid-template-columns:70px repeat(5,minmax(110px,1fr));gap:4px;min-width:640px;font-size:12.5px}
+  .week div{background:#fff;border:1px solid var(--line);border-radius:8px;padding:6px 7px}
+  .week .h{background:#f0f3f8;font-weight:700;text-align:center}
+  .week .p{background:#f0f3f8;font-weight:700}
+  .week .math{background:#e8f0fd;border-color:#c6d8f8}
+  .week .sst{background:#e5f5ec;border-color:#bfe5cf}
+  .week .eng{background:#fdf3e1;border-color:#f1d9a9}
+  .week .sci{background:#f1eafd;border-color:#d9c6f6}
+  .week .brk{background:repeating-linear-gradient(45deg,#f6f8fb,#f6f8fb 6px,#eef1f5 6px,#eef1f5 12px);color:var(--muted);text-align:center}
+  .week small{display:block;color:var(--muted)}
+  footer{max-width:1080px;margin:0 auto;padding:24px 16px 48px;color:var(--muted);font-size:13px;border-top:1px solid var(--line)}
+  @media (max-width:560px){main{padding:4px 12px 48px}.card{padding:15px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Ledgerly Academic System</h1>
+    <p>The academic system Ledgerly AI runs. It builds schemes of work and notes from real curriculum material, plans every lesson onto the timetable, scans exercise books and lesson plan books, keeps a grouped question bank per class and term, tracks what each class is being taught, and keeps an evidence-based profile of each learner.</p>
+    <div class="meta">Architecture, functionality and usage · Draft for review · 10 October 2026</div>
+  </div>
+</header>
+<nav><div class="wrap">
+  <a href="#overview">Overview</a><a href="#architecture">Architecture</a><a href="#principles">Principles</a><a href="#brain">AI brain</a>
+  <a href="#schemes">Schemes</a><a href="#timetable">Timetable</a><a href="#bank">Question bank</a><a href="#scanner">Scanner</a>
+  <a href="#tracking">Teaching tracker</a><a href="#learners">Learners</a><a href="#usage">Usage</a><a href="#data">Data</a>
+  <a href="#security">Security</a><a href="#status">Status</a><a href="#questions">Open questions</a>
+</div></nav>
+
+<main>
+
+<section id="overview">
+  <h2>What the system does<small>One academic engine on top of Ledgerly, with Ledgerly AI as the master brain</small></h2>
+  <div class="grid">
+    <div class="card"><h3>📚 Builds the teaching content</h3><p>Ledgerly AI reads the national curriculum, existing schemes of work, notes and past exams from the e-library. From them it writes the school's own <b>schemes of work</b>, then the <b>notes and activities for each lesson</b>.</p></div>
+    <div class="card"><h3>🗓️ Plans every period</h3><p>It manages the <b>timetable</b> and splits each lesson into the periods it needs. It then places those periods on the term calendar, so you know <b>which subtopic is taught on which day</b> in every class.</p></div>
+    <div class="card"><h3>📷 Reads the books</h3><p>A <b>scanner app</b> photographs exercise books and lesson plan books in batches. The AI reads every page: questions, answers, the teacher's marks, handwriting, spelling and language.</p></div>
+    <div class="card"><h3>❓ Grows a question bank</h3><p>Questions from the sources and from learners' books are stored per <b>class and term</b>, and similar questions are grouped (1 + 2 and 2 + 4 fall in one group). Teachers can compare a question with the bank and get alternative questions to give learners.</p></div>
+    <div class="card"><h3>📍 Knows what is taught now</h3><p>It compares the plan (timetable and period plan) with the evidence (lesson plan books, exercise books, teacher entries). It shows what every class is learning at any moment and which classes are behind.</p></div>
+    <div class="card"><h3>🧒 Knows each learner</h3><p>Each learner's overview shows handwriting, spelling level, language, presentation, results per subject, weak skills, common mistakes and achievements. Every point comes from the learner's own scanned work.</p></div>
+  </div>
+</section>
+
+<section id="architecture">
+  <h2>Architecture<small>How information flows from sources, through the AI, into records and screens</small></h2>
+  <div class="arch">
+    <div class="layer l-src"><b>1 · Sources (everything the system learns from)</b>
+      <div class="boxes">
+        <div class="box">ULibTech e-library<span>Curricula, schemes of work, lesson plans, notes, past papers, marking guides</span></div>
+        <div class="box">Scanner app<span>Exercise books, lesson plan books, exam scripts, teacher notes</span></div>
+        <div class="box">Ledgerly school records<span>Classes, streams, subjects, teachers, learners, term dates; existing schemes as reference</span></div>
+        <div class="box">Teachers &amp; DOS<span>Timetable rules, approvals, corrections, lesson records</span></div>
+      </div>
+    </div>
+    <div class="arrow">collected, split into passages, stored once</div>
+    <div class="layer l-ai"><b>2 · Ledgerly AI master brain</b>
+      <div class="boxes">
+        <div class="box">Step queue<span>One small job at a time: outline, one lesson, one page, one summary</span></div>
+        <div class="box">Provider switch<span>Claude ⇄ Codex, Start / Pause / Stop, daily step limit</span></div>
+        <div class="box">Grounding checks<span>Every topic, note and question must trace back to a source passage or page</span></div>
+        <div class="box">Planner<span>Timetable building, lesson-to-period splitting, re-planning when lessons are missed</span></div>
+      </div>
+    </div>
+    <div class="arrow">writes structured, cited records</div>
+    <div class="layer l-core"><b>3 · Academic records (Ledgerly database)</b>
+      <div class="boxes">
+        <div class="box">Source passages<span>Citable text from each resource</span></div>
+        <div class="box">Schemes &amp; lessons<span>Units, lessons, notes, methods, materials</span></div>
+        <div class="box">Timetable &amp; period plan<span>Slots, periods, subtopic per day</span></div>
+        <div class="box">Question bank<span>Grouped per class, subject and term</span></div>
+        <div class="box">Teaching timeline<span>Planned vs actually taught</span></div>
+        <div class="box">Learner evidence<span>Answers, marks, observations</span></div>
+      </div>
+    </div>
+    <div class="arrow">served to people and devices</div>
+    <div class="layer l-out"><b>4 · Outputs</b>
+      <div class="boxes">
+        <div class="box">Published schemes &amp; notes<span>For teachers, printable</span></div>
+        <div class="box">Daily lesson plan<span>Per class, per period, per teacher</span></div>
+        <div class="box">Practice sets<span>From the bank, per class or learner</span></div>
+        <div class="box">Learner overview<span>For head teacher, teachers, parents</span></div>
+        <div class="box">Kiosk &amp; dashboards<span>"Now teaching", coverage, alerts</span></div>
+        <div class="box">Ledgerly AI chat<span>"How is Aisha doing?" "What is P4 learning now?"</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="principles">
+  <h2>Ground rules</h2>
+  <div class="grid">
+    <div class="card"><h3>1 · Nothing is invented</h3><p>The AI may only use the passages, page images and records it is given. Every unit, lesson and note cites the passages it came from. A question enters the bank only if its exact wording is found in the source or on the scanned page. Sums are checked by the system, not taken from the AI. If the material doesn't cover something, the AI reports a <b>gap</b> instead of filling it in.</p></div>
+    <div class="card"><h3>2 · Ledgerly AI writes the schemes</h3><p>Schemes already stored in Ledgerly, and those in the e-library, are <b>reference material only</b>. Ledgerly AI composes the school's scheme from the curriculum, schemes of work, notes and past exams together.</p></div>
+    <div class="card"><h3>3 · Step by step, not all at once</h3><p>Large PDFs are never sent whole. The AI first writes the <b>overall scheme</b>, then works <b>one lesson at a time</b>, each step reading only the few passages relevant to that lesson. This keeps usage low and lets you pause, stop or switch provider between any two steps.</p></div>
+    <div class="card"><h3>4 · People approve</h3><p>Everything the AI produces starts as a <b>draft</b>. The DOS or teacher reviews it, corrects it and publishes it. Pages the AI is unsure about (for example a learner's name it can't match) go to a review list.</p></div>
+  </div>
+</section>
+
+<section id="brain">
+  <h2>Ledgerly AI: the master brain <span class="tag t-ai">AI</span><small>One engine runs every AI job in the academic system</small></h2>
+  <p class="lead">Every piece of AI work is a small, recorded step in a queue. The Ledgerly AI dashboard shows the queue and gives the owner these controls:</p>
+  <div class="grid">
+    <div class="card"><h3>Provider switch</h3><p>Choose <b>Claude</b> or <b>Codex</b> for writing schemes, lessons and summaries. Switching takes effect from the next step. Reading scanned page images uses the image-capable provider.</p></div>
+    <div class="card"><h3>Start · Pause · Stop</h3><p><b>Pause</b> lets the current step finish and takes no new ones. <b>Stop</b> also interrupts the step in progress. Nothing is lost: queued work continues when you press Start.</p></div>
+    <div class="card"><h3>Usage limits</h3><p>A daily step limit per school and a maximum prompt size per step. The dashboard shows today's steps, time used and the size of every prompt.</p></div>
+    <div class="card"><h3>Full history</h3><p>Every step records its provider, duration, size, result and any error. Failed steps retry automatically with a pause between tries. One failed lesson never blocks the rest of the scheme.</p></div>
+  </div>
+  <div class="callout ai"><b>Kinds of step:</b> collect sources · scheme outline · write one lesson · read one scanned page · learner summary · <i>(planned)</i> build timetable · plan periods · extract a past paper into the bank.</div>
+</section>
+
+<section id="schemes">
+  <h2>Scheme of work builder <span class="tag t-ai">AI</span><span class="tag t-src">Sources</span><small>From curriculum and resources to a full scheme with notes for every lesson</small></h2>
+  <ol class="steps">
+    <li><b>Choose class, subject and term</b>The DOS picks, for example, <i>Primary Four · Social Studies · Term 3</i>. The system maps it to the e-library automatically (p4 · social-studies · term-3) and lets you add or remove resources by hand.</li>
+    <li><b>Collect the material</b>It gathers the curriculum, two or three schemes of work, lesson plans, notes and past papers for that class and subject. Each resource's text is stored once and split into short, citable passages. No AI is used in this step.</li>
+    <li class="ai"><b>Overall scheme (AI)</b>The AI combines the curriculum and the reference schemes into the school's scheme: themes and topics in order, week ranges, competences, and the list of lessons with subtopics and objectives. Anything it can't trace to a passage is dropped.</li>
+    <li class="ai"><b>Lessons, one by one (AI)</b>For each lesson the AI receives only the passages on that lesson. It writes learner notes, teaching methods, materials, life skills and assessment, and lists the activities found in the sources. Verified questions go straight into the question bank.</li>
+    <li><b>Review and publish</b>The DOS reads the scheme, edits or asks for a rewrite of any lesson, and publishes it. Published schemes feed the period planner, the teaching tracker and the kiosk.</li>
+  </ol>
+</section>
+
+<section id="timetable">
+  <h2>Timetable manager &amp; period planner <span class="tag t-plan">Planned</span><small>From lessons to "which subtopic is taught on which day"</small></h2>
+  <div class="grid">
+    <div class="card"><h3>1 · Build the timetable</h3><ul>
+      <li>Inputs: classes and streams, subjects with periods per week, teacher assignments, rooms, the daily bell (period times, breaks, lunch).</li>
+      <li>Rules: no teacher or room double-booked, a limit on periods per day for each subject, double periods where needed (e.g. science practicals), core subjects in the morning.</li>
+      <li>The planner proposes a timetable, flags clashes, and lets the DOS swap slots by hand before publishing.</li></ul></div>
+    <div class="card"><h3>2 · Split lessons into periods</h3><ul>
+      <li>Each scheme lesson gets a length in periods, taken from the source scheme ("WK 1, PD 1–2") or estimated from its content.</li>
+      <li>Long lessons are split into parts: <i>Plant life — Part 1: types of plants</i> and <i>Part 2: parts of a flowering plant</i>.</li>
+      <li>Revision, tests and practical periods are kept where the scheme has them.</li></ul></div>
+    <div class="card"><h3>3 · Place periods on the calendar</h3><ul>
+      <li>Walks the term day by day: timetable slots minus public holidays, school events, exam weeks and half-term.</li>
+      <li>Result: every class has a dated plan, for example <b>Tue 14 Oct, P4, 10:20–11:00, SST: Our district, Physical features — mountains and hills</b>.</li>
+      <li>Teachers get their week's plan; the kiosk and AI chat read the same plan.</li></ul></div>
+    <div class="card"><h3>4 · Re-plan automatically</h3><ul>
+      <li>When the scanned books or teacher entries show a lesson was missed or not finished, the rest of the plan moves forward.</li>
+      <li>If a subject falls behind, it warns how many periods are needed to catch up before exams.</li></ul></div>
+  </div>
+  <p class="lead" style="margin-top:18px">Example of one class's week once lessons are placed on the timetable:</p>
+  <div class="scroll"><div class="week">
+    <div class="h"></div><div class="h">Mon</div><div class="h">Tue</div><div class="h">Wed</div><div class="h">Thu</div><div class="h">Fri</div>
+    <div class="p">8:30</div>
+    <div class="math">Maths<small>Addition with carrying (1/2)</small></div><div class="eng">English<small>Describing people</small></div><div class="math">Maths<small>Addition with carrying (2/2)</small></div><div class="sci">Science<small>Types of plants</small></div><div class="math">Maths<small>Word problems on addition</small></div>
+    <div class="p">9:10</div>
+    <div class="eng">English<small>Vocabulary: family</small></div><div class="math">Maths<small>Subtraction without borrowing</small></div><div class="sst">SST<small>Location of our district</small></div><div class="eng">English<small>Comprehension</small></div><div class="sci">Science<small>Parts of a flowering plant</small></div>
+    <div class="p">10:00</div><div class="brk">Break</div><div class="brk">Break</div><div class="brk">Break</div><div class="brk">Break</div><div class="brk">Break</div>
+    <div class="p">10:20</div>
+    <div class="sst">SST<small>Map reading: compass points</small></div><div class="sst">SST<small>Physical features: hills</small></div><div class="sci">Science<small>Uses of plants</small></div><div class="sst">SST<small>Physical features: rivers</small></div><div class="eng">English<small>Composition</small></div>
+  </div></div>
+</section>
+
+<section id="bank">
+  <h2>Question bank <span class="tag t-built">Built</span><small>Per class, per term, grouped, and always traceable</small></h2>
+  <div class="grid">
+    <div class="card"><h3>Where questions come from</h3><ul>
+      <li><b>E-library:</b> exercises, examples and past paper items found while writing lessons, plus whole past papers <i>(planned)</i>.</li>
+      <li><b>Scanned books:</b> every activity a teacher gave, copied exactly from learners' exercise books.</li>
+      <li>Each question keeps its origin: the resource and passage, or the scanned page.</li></ul></div>
+    <div class="card"><h3>Grouping</h3><ul>
+      <li>Sums are grouped by structure: <code>1 + 2</code>, <code>2 + 4</code>, "Add 3 and 4" and "the sum of 6 and 2" all fall in <b>Addition of 1-digit numbers</b>; <code>23 + 45</code> falls in <b>Addition of 2-digit numbers</b>.</li>
+      <li>Other questions are grouped by the subtopic they test and the skill (identify, explain, compute…).</li>
+      <li>Each group shows how many questions it has, how hard they are, and how learners score on it.</li></ul></div>
+    <div class="card"><h3>Compare and offer alternatives</h3><ul>
+      <li><b>Compare:</b> type or pick a question to see whether it is already in the bank, the same-type questions, and similar wording.</li>
+      <li><b>Alternatives:</b> other questions from the same group, least used first, skipping ones a given learner has already done, optionally harder.</li>
+      <li><b>Practice sets:</b> an exercise for a class, a lesson or one learner, focused on that learner's weakest groups.</li></ul></div>
+  </div>
+</section>
+
+<section id="scanner">
+  <h2>Scanner app <span class="tag t-plan">App planned</span><span class="tag t-built">Backend built</span><small>Fast batch scanning of books, then automatic reading</small></h2>
+  <ol class="steps">
+    <li><b>Start a batch</b>Choose the type (learners' exercise books, lesson plan book, exam scripts, teacher notes), the class, the subject and the date.</li>
+    <li><b>Scan quickly</b>Point the phone at each page. The app detects the page edges, crops, straightens and sharpens it, and captures automatically when steady. You can tap a learner's name before their pages, or let the AI read the name on the page.</li>
+    <li><b>Works offline</b>Pages queue on the phone and upload when the connection is good. Re-sending a page never creates a duplicate, and the same image scanned twice is detected.</li>
+    <li class="ai"><b>AI reads each page</b>It records the page type, learner's name and date, topic, each question with the learner's answer and the teacher's tick or cross, corrections, handwriting, spelling mistakes, language, presentation and teacher comments. Only what is visible is recorded; unreadable words are marked as illegible.</li>
+    <li><b>Records update</b>The learner is matched to the class list, the questions join the bank, answers and observations join the learner's profile, and the topic joins the teaching timeline. Pages with an unclear name go to a short review list.</li>
+  </ol>
+</section>
+
+<section id="tracking">
+  <h2>Teaching tracker <span class="tag t-built">Built</span><small>Plan versus reality, for every class</small></h2>
+  <div class="grid">
+    <div class="card"><h3>Right now</h3><p>For any date and time: the subject on the timetable for each class, the latest topic actually taught in each subject, the matching scheme lesson, and the next lesson.</p></div>
+    <div class="card"><h3>Timeline</h3><p>A dated history per class and subject, with the evidence behind each entry: lesson plan book, exercise book or teacher entry.</p></div>
+    <div class="card"><h3>Coverage</h3><p>Per subject: lessons in the scheme, lessons taught, where the class should be by this week, and how far behind it is.</p></div>
+  </div>
+</section>
+
+<section id="learners">
+  <h2>Learner overview <span class="tag t-built">Built</span><small>"Give me Brian's academic overview"</small></h2>
+  <div class="grid">
+    <div class="card"><h3>Writing</h3><ul><li><b>Handwriting:</b> rating, legibility, letter formation, spacing, trend (improving, steady or declining).</li><li><b>Spelling:</b> level and the words they misspell most, as written.</li><li><b>Language:</b> languages written, grammar issues, sentence construction.</li><li><b>Presentation:</b> neatness, margins, crossing out.</li></ul></div>
+    <div class="card"><h3>Learning</h3><ul><li>Accuracy per subject from marked work.</li><li><b>Weaknesses:</b> skill groups below 60%, and the usual mistakes (carrying, misreading…).</li><li><b>Achievements:</b> skills mastered, and skills that have clearly improved.</li><li>Teacher comments, newest first.</li></ul></div>
+    <div class="card"><h3>Summary and next steps</h3><ul><li>A short AI write-up for the head teacher or parents, written only from these figures, which says when there is too little evidence.</li><li>A practice set built from the learner's weak groups.</li></ul></div>
+  </div>
+</section>
+
+<section id="usage">
+  <h2>Who uses it, and how</h2>
+  <div class="scroll"><table>
+    <tr><th>Role</th><th>Main tasks</th><th>Where</th></tr>
+    <tr><td><b>Owner / admin</b></td><td>Switch Claude ⇄ Codex, start, pause or stop the engine, set usage limits, see the AI's work history.</td><td>Ledgerly AI dashboard</td></tr>
+    <tr><td><b>Director of Studies</b></td><td>Order schemes for each class and subject, review and publish them, build and publish the timetable, watch coverage and lagging classes, handle the scan review list.</td><td>Academics · Schemes, Timetable, Coverage</td></tr>
+    <tr><td><b>Teacher</b></td><td>See the week's plan (subtopic per period), read lesson notes, record a lesson taught, get questions and alternatives, print practice sets, view their learners.</td><td>Academics · My lessons, Question bank</td></tr>
+    <tr><td><b>Scanner operator</b></td><td>Scan books in batches after lessons or tests, tag names when needed, resolve unclear names.</td><td>Scanner app</td></tr>
+    <tr><td><b>Head teacher</b></td><td>Learner overviews and summaries, class progress, teaching against the plan.</td><td>Learners, Kiosk, Ledgerly AI chat</td></tr>
+    <tr><td><b>Anyone with Ledgerly AI</b></td><td>Ask in chat: "Create the P5 Science scheme for term 1", "What is P4 learning now?", "How is Aisha doing in English?", "Give me 10 questions like 23 + 45".</td><td>Ledgerly AI chat</td></tr>
+  </table></div>
+  <h3 style="margin-top:22px">A term in practice</h3>
+  <ol class="steps">
+    <li><b>Before the term</b>The DOS orders schemes for every class and subject; Ledgerly AI writes them step by step overnight. The DOS reviews and publishes them, then builds the timetable, and the planner places every lesson on the calendar.</li>
+    <li><b>Every day</b>Teachers follow the period plan. The kiosk shows what each class is learning now.</li>
+    <li><b>After lessons and tests</b>Books are scanned in batches. The system learns which topics were really covered, adds the activities to the bank and updates each learner's profile.</li>
+    <li><b>Every week</b>Lagging subjects are re-planned, and teachers get practice sets for weak skills.</li>
+    <li><b>End of term</b>Learner overviews and summaries are ready for reports and parents.</li>
+  </ol>
+</section>
+
+<section id="data">
+  <h2>Data model<small>New tables (prefix <code>lrn_</code>) that reuse Ledgerly's core school records</small></h2>
+  <div class="scroll"><table>
+    <tr><th>Area</th><th>Tables</th><th>Holds</th></tr>
+    <tr><td>Engine</td><td><code>lrn_engine_settings</code>, <code>lrn_ai_tasks</code></td><td>Provider, state, limits; every AI step with its usage, result and errors</td></tr>
+    <tr><td>Sources</td><td><code>lrn_sources</code>, <code>lrn_source_chunks</code></td><td>E-library resources and their searchable, citable passages</td></tr>
+    <tr><td>Schemes</td><td><code>lrn_schemes</code>, <code>lrn_scheme_sources</code>, <code>lrn_units</code>, <code>lrn_lessons</code></td><td>Schemes, topics, lessons, notes, citations, status</td></tr>
+    <tr><td>Timetable <span class="tag t-plan">Planned</span></td><td><code>lrn_timetable_*</code>, <code>lrn_period_plan</code></td><td>Bell schedule, rules, slots, dated period plan (subtopic per period)</td></tr>
+    <tr><td>Question bank</td><td><code>lrn_questions</code>, <code>lrn_question_groups</code></td><td>Questions per class, subject and term with group, origin and difficulty</td></tr>
+    <tr><td>Scanning</td><td><code>lrn_capture_batches</code>, <code>lrn_capture_pages</code></td><td>Batches, page images, the AI's reading of each page</td></tr>
+    <tr><td>Teaching</td><td><code>lrn_teaching_events</code></td><td>What was taught, when, by whom, and the evidence</td></tr>
+    <tr><td>Learners</td><td><code>lrn_student_attempts</code>, <code>lrn_student_observations</code>, <code>lrn_student_summaries</code></td><td>Marked answers, handwriting, spelling and language observations, summaries</td></tr>
+    <tr><td>Reused</td><td>school classes, streams, subjects, terms, learners, staff, enrolments</td><td>Ledgerly's existing school records (not duplicated)</td></tr>
+  </table></div>
+  <p class="lead" style="margin-top:12px">API: <code>/api/v1/learn/…</code> covers engine, library, schemes, lessons, questions, captures, teaching and students, with timetable and plan to come.</p>
+</section>
+
+<section id="security">
+  <h2>Security and privacy</h2>
+  <div class="grid">
+    <div class="card"><ul>
+      <li>Every record belongs to one school; no school can see another's data.</li>
+      <li>Permissions: read, write, scan and engine control are separate; only owners and admins can switch or stop the AI.</li>
+      <li>Scanned images are stored privately and only shown to signed-in staff.</li></ul></div>
+    <div class="card"><ul>
+      <li>The AI receives only what a step needs: passages for a lesson, or one page image.</li>
+      <li>The full-text link to the e-library uses a private key between Ledgerly and ULibTech.</li>
+      <li>Every AI step is logged and can be audited.</li></ul></div>
+  </div>
+</section>
+
+<section id="status">
+  <h2>Build status and roadmap</h2>
+  <div class="scroll"><table>
+    <tr><th>Phase</th><th>Scope</th><th>Status</th></tr>
+    <tr><td>0</td><td>E-library connected to Ledgerly (search, shelf, full text for the AI)</td><td><span class="tag t-built">Live</span></td></tr>
+    <tr><td>1</td><td>Backend core: engine and provider switch, source store, scheme pipeline, question bank, scanner backend, teaching tracker, learner overview</td><td><span class="tag t-built">Written</span> On the development PC. Collecting sources works; the AI steps still need a full test on the server.</td></tr>
+    <tr><td>2</td><td>Scheme builder v2: curriculum as the backbone, past papers into the bank, existing schemes as reference only</td><td><span class="tag t-plan">Next</span></td></tr>
+    <tr><td>3</td><td>Timetable manager and period planner (subtopic per day, automatic re-planning)</td><td><span class="tag t-plan">Next</span></td></tr>
+    <tr><td>4</td><td>Scanner app (Android first): batch capture, auto-crop, offline queue</td><td><span class="tag t-plan">Planned</span></td></tr>
+    <tr><td>5</td><td>Screens: Ledgerly AI dashboard switch, schemes, timetable, bank, learners, kiosk "now teaching"</td><td><span class="tag t-plan">Planned</span></td></tr>
+    <tr><td>6</td><td>Ledgerly AI chat commands, parent views, end-of-term reports</td><td><span class="tag t-plan">Planned</span></td></tr>
+  </table></div>
+</section>
+
+<section id="questions">
+  <h2>Open questions for the owner</h2>
+  <div class="callout warn"><ol style="margin:0;padding-left:20px">
+    <li>Point 5 of your request was blank. What should it be?</li>
+    <li>Curriculum documents: the e-library has no "curriculum" type yet. Should we add the NCDC curricula to ULibTech, or upload them into Ledgerly directly?</li>
+    <li>Timetable rules: period length, periods per day, breaks, and any fixed slots (assembly, games, religious education)?</li>
+    <li>Scanner device: Android phones, a tablet, or a document scanner on a PC?</li>
+    <li>Who should see learner overviews: staff only, or parents too through the parent portal?</li>
+  </ol></div>
+</section>
+
+</main>
+<footer>Ledgerly · Academic system architecture · Draft for review. The functionality described here is partly built (marked Built or Live) and partly planned.</footer>
+</body>
+</html>
