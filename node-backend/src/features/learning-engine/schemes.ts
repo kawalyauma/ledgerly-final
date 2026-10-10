@@ -7,7 +7,7 @@ import { enqueueTask, onTaskFailed, registerTaskHandler, type TaskContext, parse
 import { addQuestion, COGNITIVE_LEVELS, QUESTION_KINDS } from "./questions.js";
 import { quoteAppearsIn } from "./signature.js";
 import { sanitizeSvg } from "./svg.js";
-import { formatPassages, ingestResource, openingPassages, relevantPassages, type Passage } from "./sources.js";
+import { classesInTitle, formatPassages, ingestResource, openingPassages, parseTerm, relevantPassages, type Passage, type Scope } from "./sources.js";
 
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
 
@@ -38,6 +38,8 @@ export const createSchemeSchema = z.object({
   title: z.string().trim().max(300).optional(),
   weeks: z.number().int().min(1).max(20).default(12),
   periodsPerWeek: z.number().int().min(1).max(20).default(5),
+  /** Write lesson notes/plans only up to this week for now (the outline always covers the whole term). */
+  writeUntilWeek: z.number().int().min(1).max(20).optional(),
   /** Override the e-library class/subject/term mapping, or name the exact resources to use. */
   library: z.object({
     classSlug: z.string().max(40).optional(), subjectSlug: z.string().max(80).optional(), termSlug: z.string().max(40).optional(),
@@ -62,10 +64,10 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
   };
   const id = createId("lsch");
   await runtime.db.query(
-    `INSERT INTO lrn_schemes(id,organization_id,academic_year_id,term_id,class_id,subject_id,title,library_filters,weeks,periods_per_week,status,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,'sourcing',$11)`,
+    `INSERT INTO lrn_schemes(id,organization_id,academic_year_id,term_id,class_id,subject_id,title,library_filters,weeks,periods_per_week,status,created_by,write_until_week)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,'sourcing',$11,$12)`,
     [id, organizationId, ref.academicYearId, input.termId, input.classId, input.subjectId,
-      input.title || `${ref.subjectName} · ${ref.className} · ${ref.termName}`, JSON.stringify(library), input.weeks, input.periodsPerWeek, userId]);
+      input.title || `${ref.subjectName} · ${ref.className} · ${ref.termName}`, JSON.stringify(library), input.weeks, input.periodsPerWeek, userId, input.writeUntilWeek ?? null]);
   await enqueueTask(runtime, organizationId, "scheme.source", id, { priority: 10, requestedBy: userId });
   return { id, status: "sourcing", library };
 }
@@ -87,8 +89,57 @@ async function loadScheme(runtime: Runtime, organizationId: string, id: string):
   return row.rows[0];
 }
 
-const ROLE_BY_TYPE: Record<string, string> = { "schemes-of-work": "scheme", "lesson-plans": "lesson_plans", notes: "notes", "past-papers": "past_papers" };
-const WANT: Array<[string, number]> = [["schemes-of-work", 2], ["lesson-plans", 2], ["notes", 3], ["past-papers", 2]];
+const ROLE_BY_TYPE: Record<string, string> = { "schemes-of-work": "scheme", "lesson-plans": "lesson_plans", notes: "notes", "past-papers": "past_papers", curriculum: "curriculum" };
+const WANT: Array<[string, number]> = [["curriculum", 1], ["schemes-of-work", 2], ["lesson-plans", 1], ["notes", 3], ["past-papers", 1]];
+
+type CatalogItem = { slug: string; title: string; status: string; type: string | null; class: string | null; term: string | null; chars: number; sha256: string | null };
+
+/** The scheme's class and term as a passage scope (e.g. p5 + term 1). */
+export function schemeScope(library: { classSlug: string | null; termSlug: string | null }): Scope {
+  const m = /^(p|s)(\d)$/.exec(library.classSlug ?? "");
+  const n = /^(baby|middle|top)-class$/.exec(library.classSlug ?? "");
+  return {
+    cls: m ? { level: m[1] as "p" | "s", no: Number(m[2]) } : n ? { level: "n", no: { baby: 1, middle: 2, top: 3 }[n[1] as "baby"] } : null,
+    term: /^term-(\d)$/.exec(library.termSlug ?? "")?.[1] ? Number(/^term-(\d)$/.exec(library.termSlug!)![1]) : null,
+  };
+}
+
+/**
+ * Picks the best material of each type: published before drafts, this term (or all-term books) first, the most
+ * complete text first, never two copies of the same book, and books that cover several classes when they include ours.
+ */
+async function pickFromCatalog(library: ReturnType<typeof ulibtech>, classSlug: string, subjectSlug: string, termSlug: string | null, scope: Scope) {
+  const picked: Array<{ slug: string; role: string; title: string }> = [];
+  const seen: CatalogItem[] = [];
+  const same = (a: CatalogItem, b: CatalogItem) =>
+    (a.sha256 && a.sha256 === b.sha256) || Math.abs(a.chars - b.chars) <= Math.max(200, a.chars * 0.005) ||
+    a.title.toLowerCase().replace(/[^a-z0-9]/g, "") === b.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const [type, count] of WANT) {
+    const own = await library.catalog({ class: classSlug, subject: subjectSlug, type, limit: 40 });
+    const wide = (await library.catalog({ subject: subjectSlug, type, limit: 100 }))
+      .filter(i => i.class !== classSlug && classesInTitle(i.title).some(c => scope.cls && c.level === scope.cls.level && c.no === scope.cls.no));
+    const termNo = scope.term;
+    const termScore = (i: CatalogItem) => {
+      const t = parseTerm(i.title);
+      if (/all\s+(?:year|terms)|t1\s*-?\s*t3|terms?\s*(?:1|i|one)\s*(?:-|–|to|&)\s*(?:3|iii|three)|i\s*,?\s*ii\s*,?\s*(?:&|and)?\s*iii/i.test(i.title)) return 1;
+      if (termNo && t === termNo) return 2;
+      if (termNo && t && t !== termNo) return -2;
+      if (termSlug && i.term === termSlug) return 1;
+      return 0;
+    };
+    const ranked = [...own, ...wide].sort((a, b) =>
+      Number(b.status === "published") - Number(a.status === "published") || termScore(b) - termScore(a) || b.chars - a.chars);
+    let n = 0;
+    for (const item of ranked) {
+      if (n >= count) break;
+      if (termScore(item) < 0 || seen.some(x => same(x, item))) continue;
+      seen.push(item);
+      picked.push({ slug: item.slug, role: /curricul/i.test(item.title) ? "curriculum" : ROLE_BY_TYPE[type] ?? "reference", title: item.title });
+      n += 1;
+    }
+  }
+  return picked;
+}
 
 /** Step 1 (no AI): find the class/subject material in the e-library and store its text as passages. */
 registerTaskHandler("scheme.source", async ({ runtime, task }) => {
@@ -100,13 +151,13 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
   } else {
     if (!scheme.library.classSlug || !scheme.library.subjectSlug)
       throw new Error(`Could not match ${scheme.className} / ${scheme.subjectName} to the e-library. Set the library class and subject on the scheme.`);
-    for (const [type, count] of WANT) {
-      // Prefer this term's material, then the whole year's.
-      let items = (await library.search({ class: scheme.library.classSlug, subject: scheme.library.subjectSlug, type, term: scheme.library.termSlug ?? undefined, pageSize: count })).items;
-      if (items.length < count && scheme.library.termSlug)
-        items = [...items, ...(await library.search({ class: scheme.library.classSlug, subject: scheme.library.subjectSlug, type, pageSize: count })).items];
-      for (const item of items) if (!picked.some(p => p.slug === item.slug) && picked.filter(p => p.role === ROLE_BY_TYPE[type]).length < count)
-        picked.push({ slug: item.slug, role: ROLE_BY_TYPE[type] ?? "reference" });
+    if (library.textEnabled) {
+      picked.push(...await pickFromCatalog(library, scheme.library.classSlug, scheme.library.subjectSlug, scheme.library.termSlug, schemeScope(scheme.library)));
+    } else {
+      for (const [type, count] of WANT) {
+        const items = (await library.search({ class: scheme.library.classSlug, subject: scheme.library.subjectSlug, type, pageSize: count })).items;
+        for (const item of items) if (!picked.some(p => p.slug === item.slug)) picked.push({ slug: item.slug, role: ROLE_BY_TYPE[type] ?? "reference" });
+      }
     }
   }
   const ingested: Array<{ title: string; role: string; status: string; chunks: number }> = [];
@@ -130,7 +181,7 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
 async function schemeSources(runtime: Runtime, schemeId: string) {
   const rows = await runtime.db.query<{ id: string; role: string; title: string }>(
     `SELECT s.id,ss.role,s.title FROM lrn_scheme_sources ss JOIN lrn_sources s ON s.id=ss.source_id WHERE ss.scheme_id=$1
-      ORDER BY CASE ss.role WHEN 'scheme' THEN 0 WHEN 'lesson_plans' THEN 1 WHEN 'notes' THEN 2 WHEN 'reference' THEN 3 ELSE 4 END,s.title`, [schemeId]);
+      ORDER BY CASE ss.role WHEN 'curriculum' THEN 0 WHEN 'scheme' THEN 1 WHEN 'lesson_plans' THEN 2 WHEN 'notes' THEN 3 WHEN 'reference' THEN 4 ELSE 5 END,s.title`, [schemeId]);
   return rows.rows;
 }
 
@@ -162,9 +213,11 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   const { runtime, task, settings } = ctx;
   const scheme = await loadScheme(runtime, task.organizationId, task.subjectRef);
   const sources = await schemeSources(runtime, scheme.id);
-  const primary = sources.filter(s => s.role === "scheme" || s.role === "lesson_plans" || s.role === "reference").map(s => s.id);
+  const primary = sources.filter(s => ["curriculum", "scheme", "lesson_plans", "reference"].includes(s.role)).map(s => s.id);
   const budget = Math.floor(settings.maxPromptChars * 0.85);
-  let passages: Passage[] = await openingPassages(runtime, task.organizationId, primary.length ? primary : sources.map(s => s.id), budget);
+  const scope = schemeScope(scheme.library);
+  // Only the part of each book for this class and term (a P4–P6 book contributes its P5 Term 1 section).
+  let passages: Passage[] = await openingPassages(runtime, task.organizationId, primary.length ? primary : sources.map(s => s.id), budget, scope);
   if (!passages.length) throw new Error("The scheme has no source passages to work from.");
   const allowed = new Set(passages.map(p => p.id));
   const reply = parseLenient(outlineReply, await ctx.ai({
@@ -232,7 +285,9 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
 /** Lessons are written strictly one after another: each finished lesson queues the next pending one. */
 export async function queueNextLesson(runtime: Runtime, organizationId: string, schemeId: string, requestedBy: string | null) {
   const next = await runtime.db.query<{ id: string; seq: number }>(
-    `SELECT id,seq FROM lrn_lessons WHERE scheme_id=$1 AND status IN ('pending') ORDER BY seq LIMIT 1`, [schemeId]);
+    `SELECT l.id,l.seq FROM lrn_lessons l JOIN lrn_schemes sc ON sc.id=l.scheme_id
+      WHERE l.scheme_id=$1 AND l.status='pending' AND (sc.write_until_week IS NULL OR COALESCE(l.week,1) <= sc.write_until_week)
+      ORDER BY l.seq LIMIT 1`, [schemeId]);
   if (!next.rows[0]) {
     await runtime.db.query(
       `UPDATE lrn_schemes SET status=CASE WHEN status IN ('writing','outlining') THEN 'review' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [schemeId]);
@@ -312,7 +367,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const query = [l.unitTitle, l.theme, l.title, l.subtopic, ...(l.objectives ?? [])].filter(Boolean).join(" ");
   const passages: Passage[] = [];
   let used = 0;
-  for (const p of [...cited.rows, ...await relevantPassages(runtime, task.organizationId, sources, query, budget, 10)]) {
+  for (const p of [...cited.rows, ...await relevantPassages(runtime, task.organizationId, sources, query, budget, 10, schemeScope(scheme.library))]) {
     if (passages.some(x => x.id === p.id) || used + p.content.length > budget) continue;
     passages.push(p);
     used += p.content.length;
@@ -339,9 +394,13 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       `- lessonPlan: a SAMPLE LESSON PLAN in the Ugandan format for the whole ${minutes} minutes: competences (subject and language competence), objectives, prior knowledge, methods, materials, references (the passage sources),`,
       "  and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes and both teacher and learner activities, plus assessment, homework and life skills. The minutes must add up to the lesson time.",
       "  Its content (facts, examples, activities) must come from the passages; the plan's structure and timing are yours.",
-      "- diagrams: up to 3 clear teaching diagrams for things the passages describe that are best shown visually (parts of a plant, the water cycle, a map sketch, a number line, a bar graph, a table of values...).",
-      "  Draw each as a self-contained SVG: viewBox about 0 0 640 400, white or no background, simple shapes, strong outlines, readable labels (font-size 14 or more), arrows via <marker>.",
-      "  No scripts, images, links, CSS or external fonts. Label only what the passages name. key is a short slug; put [[diagram:key]] in the notes where each diagram belongs; sourcePassageId is the passage it depicts.",
+      "- diagrams: up to 3 teaching DRAWINGS of things the passages describe that learners must see: e.g. parts of a flower or the human eye, the water cycle, a lever, a food chain, a map sketch,",
+      "  apparatus for an experiment, a number line, fractions as shaded shapes, a bar graph of given data. Draw the real object or process, the way a teacher draws it on the chalkboard.",
+      "  NEVER draw a table, list or text box as a diagram — tables belong in the notes as Markdown tables. Skip diagrams when nothing in the lesson is visual.",
+      "  Each is a self-contained SVG: viewBox=\"0 0 640 420\", white background rect first, outlined shapes (stroke #222, stroke-width 2-3) with soft fills, curved <path>s for organic shapes,",
+      "  labels with font-size 16-18 placed outside the shape and joined to the part by a thin leader <line>, arrows via <marker> for processes, a title text at the top.",
+      "  Keep every element inside the viewBox, leave margins, avoid overlapping labels. No scripts, images, links, CSS or external fonts.",
+      "  Label only the parts the passages name. key is a short slug; put [[diagram:key]] on its own line in the notes where it belongs; sourcePassageId is the passage it depicts.",
       "- sourcePassageIds: every passage id you used.",
       "",
       "Reply shape:",
@@ -473,11 +532,21 @@ export async function regenerate(runtime: Runtime, organizationId: string, userI
 export async function setPublished(runtime: Runtime, organizationId: string, userId: string, schemeId: string, publish: boolean) {
   const scheme = await loadScheme(runtime, organizationId, schemeId);
   if (publish && !["review", "published"].includes(scheme.status)) {
-    const pending = await runtime.db.query<{ n: number }>(`SELECT count(*)::int AS n FROM lrn_lessons WHERE scheme_id=$1 AND status IN ('pending','writing')`, [schemeId]);
+    const pending = await runtime.db.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM lrn_lessons l JOIN lrn_schemes sc ON sc.id=l.scheme_id
+        WHERE l.scheme_id=$1 AND (l.status='writing' OR (l.status='pending' AND (sc.write_until_week IS NULL OR COALESCE(l.week,1) <= sc.write_until_week)))`, [schemeId]);
     if (pending.rows[0]!.n) throw new AppError(409, "SCHEME_NOT_READY", `${pending.rows[0]!.n} lessons are still being written`);
   }
   await runtime.db.query(
     `UPDATE lrn_schemes SET status=$2,published_at=CASE WHEN $3 THEN CURRENT_TIMESTAMP ELSE NULL END,published_by=CASE WHEN $3 THEN $4 ELSE NULL END,updated_at=CURRENT_TIMESTAMP
       WHERE id=$1`, [schemeId, publish ? "published" : "review", publish, userId]);
   return { id: schemeId, status: publish ? "published" : "review" };
+}
+
+/** Writes more of an outlined scheme: lessons up to a later week (or the whole term with null). */
+export async function writeUntil(runtime: Runtime, organizationId: string, userId: string, schemeId: string, week: number | null) {
+  const row = await runtime.db.query(`UPDATE lrn_schemes SET write_until_week=$3,status=CASE WHEN status IN ('review','writing') THEN 'writing' ELSE status END,updated_at=CURRENT_TIMESTAMP
+    WHERE id=$1 AND organization_id=$2 RETURNING id`, [schemeId, organizationId, week]);
+  if (!row.rowCount) throw new AppError(404, "NOT_FOUND", "Scheme not found");
+  return { id: schemeId, writeUntilWeek: week, next: await queueNextLesson(runtime, organizationId, schemeId, userId) };
 }

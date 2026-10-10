@@ -87,5 +87,9 @@ export function sanitizeSvg(input: string, maxBytes = 80_000): string | null {
   const svg = out.join("");
   if (!/^<svg[\s>]/.test(svg) || !/viewBox=/.test(svg) || Buffer.byteLength(svg) > maxBytes) return null;
   if (!/<(path|rect|circle|ellipse|line|polyline|polygon|text)\b/.test(svg)) return null;
+  // A "diagram" made only of boxes, straight lines and text is a table or list in disguise; those belong in the notes.
+  const drawn = (svg.match(/<(path|circle|ellipse|polygon|polyline)\b/g) ?? []).length;
+  const boxes = (svg.match(/<rect\b/g) ?? []).length;
+  if (drawn === 0 && boxes >= 3) return null;
   return svg;
 }

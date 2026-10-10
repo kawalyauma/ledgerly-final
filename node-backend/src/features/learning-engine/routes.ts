@@ -9,8 +9,9 @@ import { addPage, assignPageStudent, createBatch, createBatchSchema, getBatch, g
 import { enqueueTask, getSettings, updateSettings } from "./engine.js";
 import { coverage, recordTeaching, requestStudentSummary, studentOverview, teachingAt, teachingEventSchema, timeline } from "./insights.js";
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
-import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished } from "./schemes.js";
+import { createScheme, createSchemeSchema, getLesson, getScheme, regenerate, setPublished, writeUntil } from "./schemes.js";
 import { lessonPrintHtml } from "./print.js";
+import { postSchemeToLibrary, schemeDocx, svgToPng } from "./export.js";
 import {
   bellSchema, buildPeriodPlan, dayOffSchema, editSlot, generateBell, generateSchema, generateTimetable, getTimetable, getTimetableSettings, listBell, listLoads,
   listPlan, loadsFromSchemes, loadsSchema, publishTimetable, replaceBell, saveLoads, saveTimetableSettings, setPlanStatus, settingsSchema, slotEditSchema,
@@ -121,6 +122,27 @@ export function createLearningRoutes(runtime: Runtime) {
     const v = parse(z.object({ what: z.enum(["sources", "outline", "failed_lessons"]) }), await body(c));
     const p = c.get("principal");
     return c.json({ data: await regenerate(runtime, p.organizationId, p.userId, c.req.param("id"), v.what) }, 202);
+  });
+  r.get("/schemes/:id/export.docx", read, async c => {
+    const week = Number(c.req.query("untilWeek")) || undefined;
+    const doc = await schemeDocx(runtime, org(c), c.req.param("id"), week);
+    return new Response(Buffer.from(doc.bytes), { headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Disposition": `attachment; filename="${doc.fileName}"`,
+    } });
+  });
+  r.post("/schemes/:id/library", write, async c => {
+    const v = parse(z.object({ untilWeek: z.number().int().min(1).max(20).optional() }), await body(c));
+    const p = c.get("principal");
+    return c.json({ data: await postSchemeToLibrary(runtime, p.organizationId, p.userId, c.req.param("id"), v.untilWeek) }, 201);
+  });
+  r.get("/schemes/:id/library", read, async c => c.json({ data: (await runtime.db.query(
+    `SELECT external_slug AS slug,page_url AS url,weeks,status,created_at AS "createdAt" FROM lrn_library_posts WHERE scheme_id=$1 AND organization_id=$2 ORDER BY created_at DESC`,
+    [c.req.param("id"), org(c)])).rows }));
+  r.post("/schemes/:id/write", write, async c => {
+    const v = parse(z.object({ untilWeek: z.number().int().min(1).max(20).nullable() }), await body(c));
+    const p = c.get("principal");
+    return c.json({ data: await writeUntil(runtime, p.organizationId, p.userId, c.req.param("id"), v.untilWeek) }, 202);
   });
   r.post("/schemes/:id/publish", write, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), true) }); });
   r.post("/schemes/:id/unpublish", write, async c => { const p = c.get("principal"); return c.json({ data: await setPublished(runtime, p.organizationId, p.userId, c.req.param("id"), false) }); });
@@ -278,6 +300,7 @@ export function createLearningRoutes(runtime: Runtime) {
     const row = await runtime.db.query<{ svg: string }>(`SELECT svg FROM lrn_lesson_assets WHERE id=$1 AND lesson_id=$2 AND organization_id=$3`,
       [c.req.param("assetId").replace(/\.svg$/, ""), c.req.param("id"), org(c)]);
     if (!row.rows[0]) throw new AppError(404, "NOT_FOUND", "Diagram not found");
+    if (c.req.query("format") === "png") return new Response(Buffer.from(svgToPng(row.rows[0].svg).png), { headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=3600" } });
     return new Response(row.rows[0].svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", "Cache-Control": "private, max-age=3600" } });
   });
 

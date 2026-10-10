@@ -108,11 +108,55 @@ export class UlibtechClient {
     };
   }
 
-  /** Extracted text for AI grounding; requires the shared integration key. */
-  async text(slug: string) {
-    return this.request<{ resource: R; text: string; totalChars: number; truncated: boolean }>(
-      `/api/integrations/resources/${encodeURIComponent(slug)}/text`, { integration: true },
+  /** Extracted text for AI grounding; requires the shared integration key. Long books come in windows. */
+  async text(slug: string, offset = 0, limit = 200_000) {
+    return this.request<{ resource: R; text: string; totalChars: number; truncated: boolean; nextOffset?: number | null }>(
+      `/api/integrations/resources/${encodeURIComponent(slug)}/text?offset=${offset}&limit=${limit}&includeDrafts=1`, { integration: true },
     );
+  }
+
+  /** The whole extracted text of a book, however long (read window by window, up to maxChars). */
+  async fullText(slug: string, maxChars = 5_000_000) {
+    const first = await this.text(slug, 0, 400_000);
+    let text = first.text;
+    let next = first.nextOffset ?? (first.truncated ? text.length : null);
+    while (next !== null && next !== undefined && text.length < maxChars) {
+      const page = await this.text(slug, next, 400_000);
+      if (!page.text) break;
+      text += page.text;
+      next = page.nextOffset ?? null;
+    }
+    return { resource: first.resource, text, totalChars: first.totalChars, complete: text.length >= first.totalChars };
+  }
+
+  /** Partner catalogue (includes unreviewed drafts, which are only used for AI grounding, never shown publicly). */
+  async catalog(input: { class?: string; subject?: string; type?: string; term?: string; q?: string; limit?: number }) {
+    const params = new URLSearchParams({ includeDrafts: "1", limit: String(input.limit ?? 30) });
+    for (const k of ["class", "subject", "type", "term", "q"] as const) if (input[k]) params.set(k, input[k]!);
+    const raw = await this.request<{ items: Array<{ slug: string; title: string; status: string; type: string | null; class: string | null; subject: string | null; term: string | null; chars: number; sha256: string | null }> }>(
+      `/api/integrations/resources?${params}`, { integration: true });
+    return raw.items;
+  }
+
+  /** Publishes a document (scheme, notes, lesson plans) to the public library under the Ledgerly AI account. */
+  async publish(file: { name: string; bytes: Uint8Array; mimeType: string }, meta: Record<string, string | undefined>) {
+    if (!this.runtime.config.ULIBTECH_INTEGRATION_KEY) throw new AppError(503, "ELIBRARY_TEXT_DISABLED", "Publishing to the e-library is not configured");
+    const form = new FormData();
+    for (const [k, v] of Object.entries(meta)) if (v) form.set(k, v);
+    form.set("file", new Blob([Buffer.from(file.bytes)], { type: file.mimeType }), file.name);
+    const response = await fetch(`${this.baseUrl}/api/integrations/resources`, {
+      method: "POST", body: form,
+      headers: { "X-Integration-Key": this.runtime.config.ULIBTECH_INTEGRATION_KEY, "User-Agent": "Ledgerly-ELibrary/1.0" },
+      signal: AbortSignal.timeout(120_000),
+    });
+    const body = await response.json().catch(() => ({})) as R;
+    if (!response.ok) throw new AppError(502, "ELIBRARY_PUBLISH_FAILED", `The e-library refused the upload: ${body?.error?.message ?? response.status}`);
+    const slug = body.resource?.slug ?? body.slug;
+    return { slug, pageUrl: `${this.baseUrl}/resources/${slug}`, status: body.resource?.status ?? body.status ?? "processing", raw: body };
+  }
+
+  async publishedStatus(slug: string) {
+    return this.request<{ slug: string; status: string; title: string }>(`/api/integrations/resources/${encodeURIComponent(slug)}/status`, { integration: true });
   }
 }
 
