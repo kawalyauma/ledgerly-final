@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Runtime } from "../../runtime.js";
 import { AppError } from "../../http/errors.js";
 import { createId } from "../core-identity/security.js";
-import { enqueueTask, onTaskFailed, registerTaskHandler } from "./engine.js";
+import { enqueueTask, onTaskFailed, registerTaskHandler, parseLenient } from "./engine.js";
 import { addQuestion, QUESTION_KINDS } from "./questions.js";
 import { evaluateArithmetic, groupFor } from "./signature.js";
 
@@ -189,7 +189,7 @@ registerTaskHandler("page.analyze", async (ctx) => {
       `"lessonPlan":{"date":string|null,"startsAt":"HH:MM"|null,"endsAt":"HH:MM"|null,"topic":string|null,"subtopic":string|null,"objectives":[string],"activities":[string]}|null}`,
     ].join("\n"),
   });
-  const analysis = pageReply.parse(raw);
+  const analysis = parseLenient(pageReply, raw);
   await runtime.db.query(
     `UPDATE lrn_capture_pages SET analysis=$2::jsonb,transcript=$3,page_type=$4,written_name=$5,analyzed_at=CURRENT_TIMESTAMP WHERE id=$1`,
     [p.id, JSON.stringify(analysis), analysis.transcript, analysis.pageType, analysis.writtenName ?? null]);

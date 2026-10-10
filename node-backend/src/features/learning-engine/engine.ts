@@ -211,3 +211,29 @@ export function startEngine(runtime: Runtime, concurrency = 2) {
   const timer = setInterval(() => { void tick(); }, 5_000);
   timer.unref?.();
 }
+
+/**
+ * Parses an AI reply against a schema, trimming over-long strings and lists instead of rejecting the whole step
+ * (a lesson should not fail because one label ran a few characters long). Other problems still fail.
+ */
+export function parseLenient<T extends import("zod").ZodTypeAny>(schema: T, value: unknown): import("zod").infer<T> {
+  let current = structuredClone(value);
+  for (let round = 0; round < 25; round += 1) {
+    const result = schema.safeParse(current);
+    if (result.success) return result.data;
+    let fixed = false;
+    for (const issue of result.error.issues as Array<{ code: string; path: PropertyKey[]; maximum?: number | bigint }>) {
+      if (issue.code !== "too_big" || issue.maximum === undefined || !issue.path.length) continue;
+      let parent: any = current;
+      for (const key of issue.path.slice(0, -1)) parent = parent?.[key as never];
+      const key = issue.path.at(-1) as never;
+      const target = parent?.[key];
+      const max = Number(issue.maximum);
+      if (typeof target === "string") { parent[key] = target.slice(0, max); fixed = true; }
+      else if (Array.isArray(target)) { parent[key] = target.slice(0, max); fixed = true; }
+      else if (typeof target === "number") { parent[key] = max; fixed = true; }
+    }
+    if (!fixed) throw result.error;
+  }
+  return schema.parse(current);
+}

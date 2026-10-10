@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { Runtime } from "../../runtime.js";
 import { AppError } from "../../http/errors.js";
 import { createId } from "../core-identity/security.js";
-import { enqueueTask, registerTaskHandler } from "./engine.js";
+import { enqueueTask, registerTaskHandler, parseLenient } from "./engine.js";
 
 /* ───────────── Teaching timeline: what each class is being taught ───────────── */
 
@@ -225,7 +225,7 @@ const summaryReply = z.object({ summary: z.string().min(1).max(6000) });
 registerTaskHandler("student.summary", async (ctx) => {
   const overview = await studentOverview(ctx.runtime, ctx.task.organizationId, ctx.task.subjectRef);
   if (!Number(overview.evidence?.pages ?? 0)) throw new Error("There are no scanned books for this learner yet.");
-  const reply = summaryReply.parse(await ctx.ai({
+  const reply = parseLenient(summaryReply, await ctx.ai({
     prompt: [
       "Task: write a short academic overview of this learner for the head teacher and parents (6-10 sentences, plain English).",
       "Cover handwriting, spelling, language, presentation, subject performance, weaknesses with what to practise, and achievements.",

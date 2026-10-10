@@ -3,7 +3,7 @@ import type { Runtime } from "../../runtime.js";
 import { AppError } from "../../http/errors.js";
 import { createId } from "../core-identity/security.js";
 import { ulibtech } from "../school-management/ulibtech.js";
-import { enqueueTask, onTaskFailed, registerTaskHandler, type TaskContext } from "./engine.js";
+import { enqueueTask, onTaskFailed, registerTaskHandler, type TaskContext, parseLenient } from "./engine.js";
 import { addQuestion, COGNITIVE_LEVELS, QUESTION_KINDS } from "./questions.js";
 import { quoteAppearsIn } from "./signature.js";
 import { sanitizeSvg } from "./svg.js";
@@ -167,7 +167,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   let passages: Passage[] = await openingPassages(runtime, task.organizationId, primary.length ? primary : sources.map(s => s.id), budget);
   if (!passages.length) throw new Error("The scheme has no source passages to work from.");
   const allowed = new Set(passages.map(p => p.id));
-  const reply = outlineReply.parse(await ctx.ai({
+  const reply = parseLenient(outlineReply, await ctx.ai({
     prompt: [
       `Task: draft the OUTLINE of a scheme of work for ${scheme.subjectName}, ${scheme.className}, ${scheme.termName}.`,
       `The term has ${scheme.weeks} teaching weeks with ${scheme.periodsPerWeek} periods a week (at most ${scheme.weeks * scheme.periodsPerWeek} lessons).`,
@@ -323,7 +323,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const periodLength = await runtime.db.query<{ minutes: number }>(
     `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
   const minutes = (periodLength.rows[0]?.minutes ?? 40) * (l.periods ?? 1);
-  const reply = lessonReply.parse(await ctx.ai({
+  const reply = parseLenient(lessonReply, await ctx.ai({
     prompt: [
       `Task: write lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}. It takes ${l.periods ?? 1} period(s), ${minutes} minutes in total.`,
       `Unit: ${l.unitTitle}${l.theme ? ` (theme: ${l.theme})` : ""}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
