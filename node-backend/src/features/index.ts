@@ -42,10 +42,11 @@ import { nvrFeature } from "./nvr/index.js";
 import { nvrGroupsFeature } from "./nvr-groups/index.js";
 import { nvrMetricsFeature } from "./nvr-metrics/index.js";
 import { ledgerlyAiFeature } from "./ledgerly-ai/index.js";
+import { learningEngineFeature } from "./learning-engine/index.js";
 import { workspaceSettingsFeature } from "./workspace-settings/index.js";
 import { billingFeature } from "./billing/index.js";
 import type { BackendFeature } from "./types.js";
 
 /** Independent Node implementations only. Never import the Cloudflare backend here. */
 // billingFeature mounts second: its Premium-plan gate must be registered before the gated module routes.
-export const features: BackendFeature[] = [coreIdentityFeature, billingFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, fileManagerFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, schoolPayFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsIntegrityFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature, nvrGroupsFeature, nvrMetricsFeature, ledgerlyAiFeature, workspaceSettingsFeature];
+export const features: BackendFeature[] = [coreIdentityFeature, billingFeature, fiscalPeriodsFeature, financeCoreFeature, contactsFeature, documentsFeature, paymentsFeature, bankingFeature, budgetsFeature, inventoryFeature, fixedAssetsFeature, dimensionsProjectsFeature, salesPurchasingFeature, taxFeature, closingFeature, complianceFeature, reportsFeature, reportManagementFeature, documentOutputFeature, fileManagerFeature, financeMaintenanceFeature, integrationsFeature, modulesFeature, financeMobileFeature, mobileSyncFeature, schoolFeature, schoolPayFeature, booksFeature, libraryFeature, boardingFeature, transportFeature, parentPortalFeature, academicsFeature, examsIntegrityFeature, examsFeature, humanResourcesFeature, payrollFeature, communicationsFeature, tasksWorkFeature, printerlyFeature, printerlyHealthFeature, nvrFeature, nvrGroupsFeature, nvrMetricsFeature, ledgerlyAiFeature, learningEngineFeature, workspaceSettingsFeature];
