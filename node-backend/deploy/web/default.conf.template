@@ -22,6 +22,19 @@ server {
     proxy_read_timeout 1900s;
     proxy_send_timeout 1900s;
   }
+  # Provider callbacks are public, signature-verified API routes. Keep this
+  # before the SPA fallback or NGINX rejects their POST requests with 405.
+  location ^~ /webhooks/ {
+    proxy_pass http://127.0.0.1:${LEDGERLY_API_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $http_x_forwarded_proto;
+    proxy_buffering off;
+    proxy_read_timeout 1900s;
+    proxy_send_timeout 1900s;
+  }
   location = /openapi.json { proxy_pass http://127.0.0.1:${LEDGERLY_API_PORT}; }
 
   location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; try_files $uri =404; }

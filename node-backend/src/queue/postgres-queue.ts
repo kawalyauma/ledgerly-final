@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 export type ClaimedJob = {
   id: string;
@@ -14,8 +14,18 @@ export class PostgresQueue {
   constructor(private readonly pool: Pool) {}
 
   async publish(kind: string, payload: unknown, options?: { queue?: string; delaySeconds?: number; maxAttempts?: number }): Promise<string> {
+    return this.publishWithClient(this.pool, kind, payload, options);
+  }
+
+  /**
+   * Publish through a caller-owned connection. The scheduler holds a database
+   * connection while it owns the advisory lock, so asking the pool for a
+   * second connection here can deadlock when many cron entries fire together.
+   */
+  async publishWithClient(client: Pick<PoolClient, "query"> | Pool, kind: string, payload: unknown,
+    options?: { queue?: string; delaySeconds?: number; maxAttempts?: number }): Promise<string> {
     const id = randomUUID();
-    await this.pool.query(`INSERT INTO backend_jobs
+    await client.query(`INSERT INTO backend_jobs
       (id, queue, kind, payload, status, attempts, max_attempts, available_at)
       VALUES ($1, $2, $3, $4::jsonb, 'queued', 0, $5, CURRENT_TIMESTAMP + ($6 * INTERVAL '1 second'))`,
       [id, options?.queue ?? "default", kind, JSON.stringify(payload ?? null), options?.maxAttempts ?? 8, options?.delaySeconds ?? 0]);

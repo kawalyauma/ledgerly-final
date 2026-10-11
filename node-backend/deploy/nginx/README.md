@@ -23,6 +23,7 @@ The important routing invariants are:
 /api/v1/agentic-employees/* -> 127.0.0.1:8787
 /api/v1/files*              -> 127.0.0.1:8787
 /api/v1/schoolpay*          -> 127.0.0.1:8080
+/webhooks/schoolpay/*       -> 127.0.0.1:8080
 /api/v1/printerly/receipt-printing/* -> 127.0.0.1:8080
 /api/v1/*                   -> 127.0.0.1:8080
 /api|/auth|/system          -> 127.0.0.1:8080

@@ -15,7 +15,7 @@ const tasks = definitions.map((definition) => cron.schedule(definition.cron, asy
     const lock = await client.query<{ locked: boolean }>("SELECT pg_try_advisory_lock(hashtext($1)::bigint) AS locked", [definition.name]);
     if (!lock.rows[0]?.locked) return;
     try {
-      await runtime.queue.publish(definition.kind, definition.payload?.() ?? {}, {
+      await runtime.queue.publishWithClient(client, definition.kind, definition.payload?.() ?? {}, {
         queue: definition.queue,
         maxAttempts: definition.maxAttempts,
       });
