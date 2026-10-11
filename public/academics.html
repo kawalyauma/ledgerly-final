@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Explore Ledgerly Academics: AI-assisted schemes, lesson notes, timetables, resource search, learner tracking and school academic management.">
+  <meta name="theme-color" content="#113a2c">
+  <title>Ledgerly Academics — Features</title>
+  <style>
+    :root{--ink:#14211c;--muted:#5c6d65;--green:#176b4c;--lime:#c9f277;--cream:#f6f4ec;--white:#fff;--line:#dfe6e1;--navy:#122b26;--blue:#dceeff}
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{margin:0;background:var(--cream);color:var(--ink);font:16px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+    a{color:inherit}
+    .wrap{width:min(1120px,calc(100% - 34px));margin:auto}
+    nav{position:sticky;top:0;z-index:10;background:rgba(246,244,236,.94);backdrop-filter:blur(14px);border-bottom:1px solid rgba(20,33,28,.09)}
+    nav .wrap{height:70px;display:flex;align-items:center;gap:20px}
+    .brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:850;letter-spacing:-.03em;font-size:20px}
+    .mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--green);color:#fff;font-size:19px}
+    .navlinks{display:flex;gap:20px;margin-left:auto;align-items:center}
+    .navlinks>a:not(.button){text-decoration:none;color:var(--muted);font-weight:650;font-size:14px}
+    .button{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;border-radius:999px;padding:12px 20px;background:var(--green);color:#fff;font-weight:800;border:1px solid var(--green);transition:.2s transform,.2s box-shadow}
+    .button:hover{transform:translateY(-1px);box-shadow:0 10px 25px rgba(23,107,76,.2)}
+    .button.alt{background:transparent;color:var(--ink);border-color:#aab8b1}
+    header{padding:92px 0 70px;overflow:hidden;background:radial-gradient(circle at 82% 22%,rgba(201,242,119,.45),transparent 25%),linear-gradient(145deg,#f6f4ec 35%,#e9f3e9)}
+    .hero{display:grid;grid-template-columns:1.15fr .85fr;gap:58px;align-items:center}
+    .eyebrow{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border:1px solid #b9c8c0;border-radius:999px;color:var(--green);font-size:13px;font-weight:800;background:rgba(255,255,255,.56)}
+    .dot{width:8px;height:8px;border-radius:50%;background:#35a56f;box-shadow:0 0 0 5px rgba(53,165,111,.13)}
+    h1{font-size:clamp(42px,6.7vw,76px);letter-spacing:-.065em;line-height:.98;margin:24px 0 22px;max-width:760px}
+    .intro{max-width:650px;font-size:clamp(18px,2vw,21px);color:var(--muted)}
+    .actions{display:flex;flex-wrap:wrap;gap:11px;margin-top:30px}
+    .phone{position:relative;background:var(--navy);border-radius:34px;padding:11px;box-shadow:0 35px 70px rgba(18,43,38,.22);transform:rotate(2deg);max-width:360px;margin:auto}
+    .screen{min-height:510px;border-radius:26px;background:#f8faf8;padding:23px 18px;color:var(--ink)}
+    .screenbar{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}
+    .hello{margin:30px 0 18px}.hello small{color:var(--muted)}.hello b{display:block;font-size:24px;letter-spacing:-.04em}
+    .featurecard{border-radius:22px;padding:21px;background:linear-gradient(145deg,#176b4c,#0f4937);color:#fff;box-shadow:0 14px 35px rgba(23,107,76,.2)}
+    .featurecard small{color:#cce4d8}.featurecard h3{font-size:22px;margin:7px 0}.progress{height:7px;background:rgba(255,255,255,.2);border-radius:10px;margin-top:16px}.progress i{display:block;width:72%;height:100%;background:var(--lime);border-radius:10px}
+    .mini{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}.mini div{padding:13px;border-radius:15px;background:#fff;border:1px solid var(--line)}.mini span{font-size:20px}.mini b{display:block;font-size:13px;margin-top:4px}.mini small{color:var(--muted)}
+    section{padding:82px 0}
+    .sectionhead{display:flex;justify-content:space-between;gap:30px;align-items:end;margin-bottom:30px}
+    .sectionhead h2{font-size:clamp(32px,4.4vw,52px);letter-spacing:-.055em;line-height:1.05;margin:0;max-width:690px}
+    .sectionhead p{color:var(--muted);max-width:400px;margin:0}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .card{background:var(--white);border:1px solid var(--line);border-radius:22px;padding:26px;min-height:245px}
+    .icon{display:grid;place-items:center;width:48px;height:48px;border-radius:15px;background:#e8f3ee;font-size:23px;margin-bottom:28px}
+    .card:nth-child(2n) .icon{background:#f0f6d8}.card:nth-child(3n) .icon{background:var(--blue)}
+    .card h3{font-size:21px;letter-spacing:-.025em;margin:0 0 9px}.card p{color:var(--muted);margin:0}
+    .workflow{background:var(--navy);color:#fff}
+    .workflow .sectionhead p{color:#b7c8c1}
+    .steps{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;counter-reset:step}
+    .step{counter-increment:step;padding:24px;border:1px solid rgba(255,255,255,.14);border-radius:20px;background:rgba(255,255,255,.045)}
+    .step:before{content:"0" counter(step);display:block;color:var(--lime);font-size:13px;font-weight:900;letter-spacing:.12em;margin-bottom:36px}
+    .step h3{margin:0 0 8px;font-size:19px}.step p{margin:0;color:#b7c8c1;font-size:14px}
+    .spotlight{display:grid;grid-template-columns:.9fr 1.1fr;gap:44px;align-items:center}
+    .spotcopy h2{font-size:clamp(34px,4.5vw,54px);letter-spacing:-.055em;line-height:1.04;margin:0 0 18px}.spotcopy p{color:var(--muted);font-size:18px}
+    .checks{list-style:none;padding:0;margin:25px 0}.checks li{padding:9px 0 9px 32px;position:relative;font-weight:650}.checks li:before{content:"✓";position:absolute;left:0;top:8px;display:grid;place-items:center;width:21px;height:21px;border-radius:50%;background:var(--lime);color:#183724;font-size:12px;font-weight:900}
+    .timetable{background:#fff;border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:0 24px 50px rgba(18,43,38,.1);overflow:auto}
+    .days{min-width:530px;display:grid;grid-template-columns:64px repeat(5,1fr);gap:6px;font-size:11px}.days div{border-radius:9px;padding:9px;background:#f2f4f1}.days .head{background:transparent;text-align:center;font-weight:800;color:var(--muted)}.days .time{background:transparent;color:var(--muted)}.days .math{background:#dceeff}.days .english{background:#e7f2cc}.days .science{background:#eee5ff}.days b{display:block;font-size:12px}
+    .cta{padding:80px 0}.ctabox{display:flex;align-items:center;justify-content:space-between;gap:30px;border-radius:30px;padding:46px;background:linear-gradient(135deg,var(--green),#0e4433);color:#fff}.ctabox h2{font-size:clamp(30px,4vw,48px);letter-spacing:-.05em;line-height:1.05;margin:0 0 9px}.ctabox p{margin:0;color:#c9ddd4}.ctabox .button{background:var(--lime);color:#153525;border-color:var(--lime);white-space:nowrap}
+    footer{padding:28px 0 45px;color:var(--muted);border-top:1px solid var(--line);font-size:14px}.foot{display:flex;justify-content:space-between;gap:20px;align-items:center}
+    @media(max-width:850px){.hero,.spotlight{grid-template-columns:1fr}.phone{margin-top:20px}.grid{grid-template-columns:1fr 1fr}.steps{grid-template-columns:1fr 1fr}.navlinks>a:not(.button){display:none}}
+    @media(max-width:560px){header{padding:60px 0 52px}.grid,.steps{grid-template-columns:1fr}.sectionhead,.ctabox,.foot{display:block}.sectionhead p{margin-top:14px}.cta .button{margin-top:24px}.phone{transform:none}.screen{min-height:470px}section{padding:62px 0}}
+  </style>
+</head>
+<body>
+  <nav><div class="wrap"><a class="brand" href="/"><span class="mark">L</span>Ledgerly Academics</a><div class="navlinks"><a href="#features">Features</a><a href="#workflow">How it works</a><a class="button" href="/">Open Ledgerly</a></div></div></nav>
+  <header><div class="wrap hero">
+    <div><span class="eyebrow"><span class="dot"></span>Built for Ugandan schools</span><h1>Teaching plans that know your curriculum.</h1><p class="intro">Ledgerly Academics brings resources, schemes of work, lesson notes, timetables, questions and learner evidence into one intelligent workspace.</p><div class="actions"><a class="button" href="/">Open Ledgerly</a><a class="button alt" href="/apps/ledgerly-academics.apk">Download Android app ↓</a></div></div>
+    <div class="phone"><div class="screen"><div class="screenbar"><b>9:41</b><span>● ● ●</span></div><div class="hello"><small>Good morning</small><b>Academic workspace</b></div><div class="featurecard"><small>PRIMARY FIVE · SCIENCE</small><h3>Term 1 teaching plan</h3><span>Curriculum-aligned lessons and activities</span><div class="progress"><i></i></div></div><div class="mini"><div><span>📚</span><b>Resources</b><small>Search notes</small></div><div><span>🗓️</span><b>Timetable</b><small>Today's lessons</small></div><div><span>✨</span><b>AI schemes</b><small>Draft & review</small></div><div><span>📷</span><b>Scan books</b><small>Capture evidence</small></div></div></div></div>
+  </div></header>
+  <main>
+    <section id="features"><div class="wrap"><div class="sectionhead"><h2>One academic engine, from curriculum to classroom.</h2><p>Plan teaching, find the right material and follow learning without moving between disconnected tools.</p></div><div class="grid">
+      <article class="card"><span class="icon">✨</span><h3>AI schemes and lesson notes</h3><p>Build structured schemes from curricula, existing schemes, detailed notes and assessment material. Every output begins as a draft for review.</p></article>
+      <article class="card"><span class="icon">🔎</span><h3>Advanced resource search</h3><p>Search the NotesUG library by class, subject, term, topic and document content—including approved and draft resources.</p></article>
+      <article class="card"><span class="icon">🏷️</span><h3>Smarter term detection</h3><p>Recognises Term 1, Term One and Term I inside titles and content, helping keep teaching material in the correct term.</p></article>
+      <article class="card"><span class="icon">📈</span><h3>Age-appropriate depth</h3><p>Lesson detail grows with the class—from short, concrete P1 activities to broader P7 explanations, practice and revision.</p></article>
+      <article class="card"><span class="icon">❓</span><h3>Activities and question bank</h3><p>Reuse suitable exam questions as examples, class activities and notes, with extra subject-focused practice where material is shallow.</p></article>
+      <article class="card"><span class="icon">🗓️</span><h3>Intelligent timetables</h3><p>Respect teacher availability, lesson loads, breaks and school hours. High-load subjects can receive sensible double periods.</p></article>
+      <article class="card"><span class="icon">📷</span><h3>Book scanning</h3><p>Capture exercise books and lesson-plan books from Android, then organise the pages as academic evidence.</p></article>
+      <article class="card"><span class="icon">📍</span><h3>Teaching progress</h3><p>Compare planned work with classroom evidence to understand what each class is learning and where coverage is behind.</p></article>
+      <article class="card"><span class="icon">✏️</span><h3>Full teacher control</h3><p>Create, review, edit and delete schemes, lessons and academic records while keeping AI-generated work under human control.</p></article>
+    </div></div></section>
+    <section class="workflow" id="workflow"><div class="wrap"><div class="sectionhead"><h2>A clear path from trusted sources to a teachable lesson.</h2><p>Ledgerly keeps the process visible and editable at every stage.</p></div><div class="steps"><article class="step"><h3>Gather sources</h3><p>Collect curriculum, schemes, lesson notes and relevant assessment resources.</p></article><article class="step"><h3>Build the plan</h3><p>Arrange topics, objectives and workload into an age-appropriate term scheme.</p></article><article class="step"><h3>Review drafts</h3><p>Teachers and academic leaders edit the generated lessons before use.</p></article><article class="step"><h3>Teach and track</h3><p>Place lessons on the timetable and follow progress using real classroom evidence.</p></article></div></div></section>
+    <section><div class="wrap spotlight"><div class="spotcopy"><span class="eyebrow">Timetable intelligence</span><h2>Built around the real school day.</h2><p>Plan from 7:50 AM to 4:20 PM while balancing teacher availability and each subject’s actual workload.</p><ul class="checks"><li>No teacher double-booking</li><li>Double lessons for heavy subject loads</li><li>Breaks and unavailable periods protected</li><li>Manual editing when the school needs it</li></ul></div><div class="timetable"><div class="days"><div></div><div class="head">MON</div><div class="head">TUE</div><div class="head">WED</div><div class="head">THU</div><div class="head">FRI</div><div class="time">7:50</div><div class="math"><b>Maths</b>Place value</div><div class="english"><b>English</b>Reading</div><div class="math"><b>Maths</b>Fractions</div><div class="science"><b>Science</b>Plants</div><div class="english"><b>English</b>Grammar</div><div class="time">8:30</div><div class="math"><b>Maths</b>Practice</div><div class="science"><b>Science</b>Living things</div><div class="english"><b>English</b>Comprehension</div><div class="science"><b>Science</b>Practical</div><div class="math"><b>Maths</b>Revision</div><div class="time">9:10</div><div class="english"><b>English</b>Writing</div><div class="math"><b>Maths</b>Numbers</div><div class="science"><b>Science</b>Environment</div><div class="math"><b>Maths</b>Practice</div><div class="english"><b>English</b>Reading</div></div></div></div></section>
+    <section class="cta"><div class="wrap"><div class="ctabox"><div><h2>Take the academic workspace with you.</h2><p>Use Ledgerly on the web or install the Android Academics app.</p></div><a class="button" href="/apps/ledgerly-academics.apk">Download Android app</a></div></div></section>
+  </main>
+  <footer><div class="wrap foot"><span class="brand"><span class="mark">L</span>Ledgerly Academics</span><span>Powered by NotesUG · Education technology for Uganda</span></div></footer>
+</body>
+</html>
