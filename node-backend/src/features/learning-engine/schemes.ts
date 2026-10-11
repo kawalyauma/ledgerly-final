@@ -259,6 +259,23 @@ export async function previewMaterial(runtime: Runtime, organizationId: string, 
   };
 }
 
+/** Does a resource title name this subject? ("P1 MTC Scheme" → Mathematics, "P3 SST notes" → Social Studies.) */
+export function namesSubject(title: string, subjectName: string): boolean {
+  const t = title.toLowerCase(), n = subjectName.toLowerCase();
+  const words: Array<[RegExp, RegExp]> = [
+    [/math|numeracy|arith/, /math|\bmtc\b|numeracy|arith/],
+    [/english/, /english|\beng\b|grammar|composition/],
+    [/science/, /scien|\bsci\b|\bist\b/],
+    [/social|sst/, /social|\bsst\b/],
+    [/religious|cre|ire|islam|christian/, /religious|\bc\.?r\.?e\b|\bi\.?r\.?e\b|islam|christian/],
+    [/literacy/, /literacy|\blit\b/],
+    [/reading/, /reading/],
+  ];
+  for (const [subject, inTitle] of words) if (subject.test(n)) return inTitle.test(t);
+  const first = n.split(/\s+/)[0] ?? n;
+  return first.length > 2 && t.includes(first);
+}
+
 /** Step 1 (no AI): find the class/subject material in the e-library and store its text as passages. */
 registerTaskHandler("scheme.source", async ({ runtime, task }) => {
   const scheme = await loadScheme(runtime, task.organizationId, task.subjectRef);
@@ -280,6 +297,12 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
     }
   }
   for (const slug of scheme.library.extraSlugs ?? []) if (!picked.some(p => p.slug === slug)) picked.push({ slug, role: "reference" });
+  // A scheme whose title names the subject is the subject's scheme. General thematic schemes (lower primary: all learning
+  // areas of the term in one document) are kept only for the theme and week order when a subject scheme exists.
+  const titles = await Promise.all(picked.map(async p => (p as { title?: string }).title ?? p.slug));
+  if (picked.some((p, i) => p.role === "scheme" && namesSubject(titles[i]!, scheme.subjectName)))
+    picked.forEach((p, i) => { if (p.role === "scheme" && !namesSubject(titles[i]!, scheme.subjectName)) p.role = "theme"; });
+  await runtime.db.query(`DELETE FROM lrn_scheme_sources WHERE scheme_id=$1`, [scheme.id]);
   const ingested: Array<{ title: string; role: string; status: string; chunks: number }> = [];
   const wantedTerm = schemeScope(scheme.library).term;
   for (const p of picked) {
@@ -340,10 +363,12 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   const scope = schemeScope(scheme.library);
   // Curriculum and reference schemes define coverage/order; strong notes supply depth; exams reveal expected application.
   const governance = sources.filter(s => ["curriculum", "scheme"].includes(s.role)).map(s => s.id);
+  const themeOnly = sources.filter(s => s.role === "theme");
   const teaching = sources.filter(s => ["notes", "lesson_plans", "reference"].includes(s.role)).map(s => s.id);
   const assessment = sources.filter(s => s.role === "past_papers").map(s => s.id);
   const parts = await Promise.all([
-    openingPassages(runtime, task.organizationId, governance, Math.floor(budget * 0.45), scope),
+    openingPassages(runtime, task.organizationId, governance, Math.floor(budget * (themeOnly.length ? 0.37 : 0.45)), scope),
+    openingPassages(runtime, task.organizationId, themeOnly.map(s => s.id), Math.floor(budget * (themeOnly.length ? 0.08 : 0)), scope),
     openingPassages(runtime, task.organizationId, teaching, Math.floor(budget * 0.4), scope),
     openingPassages(runtime, task.organizationId, assessment, Math.floor(budget * 0.15), scope),
   ]);
@@ -362,6 +387,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
       "You are composing the SCHOOL'S OWN scheme. The passages below (Ugandan curricula, schemes of work, lesson plans, notes and past papers from the school e-library) are reference material:",
       "combine them in this authority order: curriculum for required coverage; all relevant schemes for sequence and pacing; the strongest detailed notes for accurate teaching depth; past papers for expected applications and activities. Do not copy one reference scheme blindly.",
       `Use this term's part of the material (${scheme.termName}) when the passages cover several terms.`,
+      themeOnly.length ? `Theme-only references (${themeOnly.map(s => s.title).join("; ")}): general thematic schemes covering every learning area. Use them ONLY for the term's theme name and week order; ignore their content for other learning areas (reading, spelling, drawing, literacy, songs). Every lesson must be ${scheme.subjectName} content.` : "",
       "Do NOT write lesson content yet. Each unit and lesson must cite the passage ids it comes from in sourcePassageIds.",
       "",
       "Reply shape:",
@@ -571,7 +597,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     `SELECT c.id,c.source_id AS "sourceId",s.title AS "sourceTitle",c.seq,c.content FROM lrn_source_chunks c JOIN lrn_sources s ON s.id=c.source_id
       WHERE c.id=ANY($1::text[]) AND c.organization_id=$2`, [l.sourceChunkIds, task.organizationId]);
   const sourceRows = await schemeSources(runtime, scheme.id);
-  const sources = sourceRows.filter(s => s.role !== "past_papers").map(s => s.id);
+  const sources = sourceRows.filter(s => !["past_papers", "theme"].includes(s.role)).map(s => s.id);
   const examSources = sourceRows.filter(s => s.role === "past_papers").map(s => s.id);
   const query = [l.unitTitle, l.theme, l.title, l.subtopic, ...(l.objectives ?? [])].filter(Boolean).join(" ");
   const passages: Passage[] = [];
