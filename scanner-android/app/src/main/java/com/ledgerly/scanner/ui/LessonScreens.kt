@@ -197,6 +197,24 @@ fun SchemeScreen(id: String) {
                     item { SectionHeader("Sources (e-library)") }
                     item { Card { src.forEach { x -> Text("•  ${x.s("title")}", modifier = Modifier.padding(vertical = 2.dp)) } } }
                 }
+                s.o("resourceReport")?.let { report ->
+                    val resources = report.a("resources").objs()
+                    item { SectionHeader("Resource quality report") }
+                    item { Card {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Stat(report.i("used").toString(), "used", Modifier.weight(1f))
+                            Stat(report.i("skipped").toString(), "skipped", Modifier.weight(1f))
+                            Stat(report.i("failed").toString(), "failed", Modifier.weight(1f))
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        resources.forEach { x ->
+                            val decision = x.s("decision") ?: "used"
+                            val detail = x.s("reason") ?: "${x.i("passagesUsed")} of ${x.i("passages")} passages used"
+                            Text("• ${x.s("title")} — $decision", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                            Text(detail, color = C.Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 10.dp, bottom = 5.dp))
+                        }
+                    } }
+                }
                 if (dos) item {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         SecondaryButton("Edit scheme") {

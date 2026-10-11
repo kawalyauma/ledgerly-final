@@ -22,7 +22,26 @@ export function chunkText(text: string): Array<{ start: number; content: string 
   return chunks;
 }
 
-export type SourceRow = { id: string; title: string; resourceType: string | null; status: string; chunkCount: number; termsCovered: number[] };
+export type SourceQuality = { status: "good" | "warning" | "unreadable"; issues: string[]; words: number; textChars: number };
+export type SourceRow = { id: string; title: string; resourceType: string | null; status: string; chunkCount: number; termsCovered: number[]; qualityStatus: SourceQuality["status"]; qualityIssues: string[] };
+
+/** Detects broken/empty extraction before OCR rubbish is allowed to influence a scheme. */
+export function assessSourceText(text: string): SourceQuality {
+  const clean = text.trim();
+  const tokens = clean.match(/\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu) ?? [];
+  const issues: string[] = [];
+  const meaningful = (clean.match(/[\p{L}\p{N}]/gu) ?? []).length;
+  const visible = Math.max(1, (clean.match(/\S/g) ?? []).length);
+  const replacement = (clean.match(/\uFFFD/g) ?? []).length;
+  const single = tokens.filter(w => w.length === 1).length;
+  if (clean.length < 300 || tokens.length < 60) issues.push("too little readable text was extracted");
+  if (meaningful / visible < 0.55) issues.push("too many non-text OCR characters");
+  if (replacement / visible > 0.005) issues.push("damaged OCR replacement characters");
+  if (tokens.length > 30 && single / tokens.length > 0.35) issues.push("OCR split most words into single characters");
+  if (/(.)\1{14,}/u.test(clean)) issues.push("long repeated OCR characters");
+  const severe = issues.some(x => /too little|too many non-text|split most/.test(x));
+  return { status: severe ? "unreadable" : issues.length ? "warning" : "good", issues, words: tokens.length, textChars: clean.length };
+}
 
 /* ───────────── Book map: which class / term / topic each part of a book is about ───────────── */
 
@@ -133,7 +152,7 @@ const MAP_VERSION = 2;
 /** Copies one e-library resource (metadata and its whole text) into the school's source store and maps it. */
 export async function ingestResource(runtime: Runtime, organizationId: string, slug: string): Promise<SourceRow> {
   const existing = await runtime.db.query<SourceRow & { mapVersion: number }>(
-    `SELECT id,title,resource_type AS "resourceType",status,chunk_count AS "chunkCount",map_version AS "mapVersion",terms_covered AS "termsCovered" FROM lrn_sources
+    `SELECT id,title,resource_type AS "resourceType",status,chunk_count AS "chunkCount",map_version AS "mapVersion",terms_covered AS "termsCovered",quality_status AS "qualityStatus",quality_issues AS "qualityIssues" FROM lrn_sources
       WHERE organization_id=$1 AND provider='ulibtech' AND external_slug=$2`, [organizationId, slug]);
   if (existing.rows[0]?.status === "ready" && existing.rows[0].mapVersion >= MAP_VERSION) return existing.rows[0];
 
@@ -157,8 +176,15 @@ export async function ingestResource(runtime: Runtime, organizationId: string, s
     await runtime.db.query(`UPDATE lrn_sources SET status='failed',error=$2 WHERE id=$1`, [id, error instanceof Error ? error.message : String(error)]);
     throw error;
   }
+  return storeSourceText(runtime, organizationId, id, { title: meta.title, className: meta.className, term: meta.term, resourceType: meta.typeSlug }, text);
+}
+
+/** Maps a source's text to class/term/topic and stores it as passages. */
+async function storeSourceText(runtime: Runtime, organizationId: string, id: string,
+  meta: { title: string; className: string | null; term: string | null; resourceType: string | null; classes?: ClassRef[] }, text: string): Promise<SourceRow> {
+  const quality = assessSourceText(text);
   // A book's own headings win; its catalogue class/term are the fallback when it has none.
-  const titleClasses = classesInTitle(`${meta.title} ${meta.className ?? ""}`);
+  const titleClasses = meta.classes ?? classesInTitle(`${meta.title} ${meta.className ?? ""}`);
   const inferredTerm = inferDocumentTerm(meta.title, meta.term, text);
   const defaults: Scope = { cls: titleClasses.length === 1 ? titleClasses[0] : null, term: inferredTerm.term };
   // A book about one class and one term is labelled as a whole; headings only split books that span several.
@@ -176,8 +202,9 @@ export async function ingestResource(runtime: Runtime, organizationId: string, s
         [createId("lchk"), organizationId, id, seq, chunk.start, chunk.content, chunk.cls?.level ?? null, chunk.cls?.no ?? null, chunk.term, chunk.heading?.slice(0, 200) ?? null]);
     }
     await client.query(
-      `UPDATE lrn_sources SET status=$2,total_chars=$3,chunk_count=$4,classes_covered=$5,terms_covered=$6,map_version=$7,fetched_at=CURRENT_TIMESTAMP,error=NULL WHERE id=$1`,
-      [id, chunks.length ? "ready" : "no_text", text.length, chunks.length, covered.length ? covered : titleClasses.map(c => `${c.level}${c.no}`), terms, MAP_VERSION]);
+      `UPDATE lrn_sources SET status=$2,total_chars=$3,chunk_count=$4,classes_covered=$5,terms_covered=$6,map_version=$7,quality_status=$8,quality_issues=$9::jsonb,fetched_at=CURRENT_TIMESTAMP,error=$10 WHERE id=$1`,
+      [id, chunks.length && quality.status !== "unreadable" ? "ready" : "no_text", text.length, chunks.length, covered.length ? covered : titleClasses.map(c => `${c.level}${c.no}`), terms, MAP_VERSION,
+        quality.status, JSON.stringify(quality.issues), quality.status === "unreadable" ? `OCR quality failed: ${quality.issues.join("; ")}` : null]);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK").catch(() => undefined);
@@ -185,7 +212,45 @@ export async function ingestResource(runtime: Runtime, organizationId: string, s
   } finally {
     client.release();
   }
-  return { id, title: meta.title, resourceType: meta.typeSlug, status: chunks.length ? "ready" : "no_text", chunkCount: chunks.length, termsCovered: terms };
+  return { id, title: meta.title, resourceType: meta.resourceType, status: chunks.length && quality.status !== "unreadable" ? "ready" : "no_text", chunkCount: chunks.length, termsCovered: terms,
+    qualityStatus: quality.status, qualityIssues: quality.issues };
+}
+
+/* ───────────── NCDC base library: the official curricula, syllabi and guides every scheme starts from ───────────── */
+
+export type BaseDocument = { slug: string; title: string; kind: string; classes: string[]; thematic: boolean; sourceUrl: string | null; chars: number };
+
+/** Role of each kind of NCDC document in a scheme. Assessment guidelines and other papers are kept but not used for schemes. */
+export const BASE_ROLE: Record<string, string> = { curriculum: "curriculum", teachers_guide: "lesson_plans", learners_book: "notes", sample_items: "past_papers" };
+
+/** NCDC documents for a class ("p1", "s3", "baby-class"), in authority order. */
+export async function baseDocumentsFor(runtime: Runtime, classSlug: string): Promise<BaseDocument[]> {
+  const n = /^(baby|middle|top)-class$/.exec(classSlug);
+  const cls = n ? `n${{ baby: 1, middle: 2, top: 3 }[n[1] as "baby"]}` : classSlug;
+  return (await runtime.db.query<BaseDocument>(
+    `SELECT slug,title,kind,classes,thematic,source_url AS "sourceUrl",length(content) AS chars FROM lrn_base_documents
+      WHERE $1=ANY(classes) AND kind=ANY($2::text[])
+      ORDER BY array_position($2::text[], kind), title`, [cls, Object.keys(BASE_ROLE)])).rows;
+}
+
+/** Copies one NCDC base document into the school's source store and maps it, like an e-library resource. */
+export async function ingestBaseDocument(runtime: Runtime, organizationId: string, slug: string): Promise<SourceRow> {
+  const existing = await runtime.db.query<SourceRow & { mapVersion: number }>(
+    `SELECT id,title,resource_type AS "resourceType",status,chunk_count AS "chunkCount",map_version AS "mapVersion",terms_covered AS "termsCovered",quality_status AS "qualityStatus",quality_issues AS "qualityIssues" FROM lrn_sources
+      WHERE organization_id=$1 AND provider='ncdc' AND external_slug=$2`, [organizationId, slug]);
+  if (existing.rows[0]?.status === "ready" && existing.rows[0].mapVersion >= MAP_VERSION) return existing.rows[0];
+  const doc = (await runtime.db.query<{ title: string; kind: string; classes: string[]; sourceUrl: string | null; content: string }>(
+    `SELECT title,kind,classes,source_url AS "sourceUrl",content FROM lrn_base_documents WHERE slug=$1`, [slug])).rows[0];
+  if (!doc) throw new Error(`NCDC document ${slug} is not in the base library`);
+  const id = existing.rows[0]?.id ?? createId("lsrc");
+  await runtime.db.query(
+    `INSERT INTO lrn_sources(id,organization_id,provider,external_slug,title,resource_type,page_url,status)
+     VALUES($1,$2,'ncdc',$3,$4,$5,$6,'pending')
+     ON CONFLICT(organization_id,provider,external_slug) DO UPDATE SET title=EXCLUDED.title,resource_type=EXCLUDED.resource_type,page_url=EXCLUDED.page_url`,
+    [id, organizationId, slug, doc.title, `ncdc-${doc.kind}`, doc.sourceUrl]);
+  // Class tags come from the base library ("n1" is nursery baby class); terms come from the document's own headings.
+  const classes = doc.classes.map(c => ({ level: c[0] as ClassRef["level"], no: Number(c.slice(1)) })).filter(c => c.no > 0);
+  return storeSourceText(runtime, organizationId, id, { title: doc.title, className: null, term: null, resourceType: `ncdc-${doc.kind}`, classes }, doc.content);
 }
 
 export type Passage = { id: string; sourceId: string; sourceTitle: string; seq: number; content: string };
@@ -258,6 +323,19 @@ export async function openingPassages(runtime: Runtime, organizationId: string, 
     totalUsed += row.content.length;
   }
   return picked.sort((a, b) => a.sourceId === b.sourceId ? a.seq - b.seq : 0);
+}
+
+/** All text of the given sources for the class and term, in book order (used to read a curriculum's topic list). */
+export async function scopedText(runtime: Runtime, organizationId: string, sourceIds: string[], scope: Scope): Promise<string> {
+  if (!sourceIds.length) return "";
+  const params: unknown[] = [organizationId, sourceIds];
+  let filter = "";
+  if (scope.cls) { params.push(scope.cls.level, scope.cls.no); filter += ` AND (c.class_no IS NULL OR (c.class_level=$3 AND c.class_no=$4))`; }
+  if (scope.term) { params.push(scope.term); filter += ` AND c.term_no=$${params.length}`; }
+  const rows = (await runtime.db.query<{ content: string }>(
+    `SELECT c.content FROM lrn_source_chunks c WHERE c.organization_id=$1 AND c.source_id=ANY($2::text[])${filter}
+      ORDER BY array_position($2::text[], c.source_id), c.seq`, params)).rows;
+  return rows.map(r => r.content).join("\n");
 }
 
 export function formatPassages(passages: Passage[]) {

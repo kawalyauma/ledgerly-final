@@ -144,6 +144,21 @@ export async function loadSchemeForExport(runtime: Runtime, organizationId: stri
   return { scheme, lessons, assets, questions, sources };
 }
 
+const METHOD_WORDS: Array<[string, RegExp]> = [
+  ["Story telling", /stor(?:y|ies)/i], ["Discussion", /discuss/i], ["Question and answer", /question/i], ["Explanation", /explain|explanation/i],
+  ["Guided Bible reading", /bible/i], ["Guided Quran reading", /qur.?an/i], ["Group work", /group/i], ["Dramatisation", /drama|act(?:s|ing)? out|role.?play/i],
+  ["Singing", /\bsing|song/i], ["Demonstration", /demonstrat/i], ["Observation", /observ/i], ["Experiment", /experiment/i], ["Drawing", /\bdraw/i],
+  ["Brainstorming", /brainstorm/i], ["Field study", /field|nature walk/i], ["Games", /\bgames?\b/i], ["Guided practice", /exercise|practi[cs]e/i],
+];
+
+/** The scheme's Methods column holds method names only; a step-by-step text is reduced to the methods it names. */
+export function methodNames(text: string) {
+  const t = text.trim();
+  if (t.length <= 150 && !/[.:;]\s|\n/.test(t)) return t;
+  const names = METHOD_WORDS.filter(([, re]) => re.test(t)).map(([name]) => name);
+  return names.length ? names.join(", ") : t.split(/[.\n]/)[0]!.slice(0, 120);
+}
+
 /** The scheme as a Word document: scheme of work table, then a lesson plan and learner notes (with diagrams) per lesson. */
 export async function schemeDocx(runtime: Runtime, organizationId: string, schemeId: string, untilWeek?: number, publicCopy = false, opts: ExportOptions = {}) {
   const { scheme, lessons, assets, questions, sources } = await loadSchemeForExport(runtime, organizationId, schemeId, untilWeek, opts);
@@ -165,7 +180,7 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
           return [
             String(l.week ?? ""), String(l.periods), [l.theme, l.unit].filter(Boolean).join("\n"), [l.title, l.subtopic].filter(Boolean).join(": "),
             [...(p?.competences ?? []), ...(p?.objectives ?? l.objectives ?? [])].slice(0, 6).map(x => `• ${x}`).join("\n"),
-            (p?.methods ?? (l.methods ? [l.methods] : [])).join(", "),
+            methodNames((p?.methods?.length ? p.methods : l.methods ? [l.methods] : []).join(", ")),
             (p?.steps ?? []).map(st => st.learnerActivity).filter(Boolean).slice(0, 3).map(x => `• ${x}`).join("\n"),
             (p?.materials ?? (l.materials ? [l.materials] : [])).join(", "),
             (p?.references ?? []).slice(0, 2).join("; "),
