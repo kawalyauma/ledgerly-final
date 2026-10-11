@@ -15,7 +15,7 @@ export type NewQuestion = {
   stem: string; answer?: string | null; options?: string[] | null; kind?: string | null;
   concept?: string | null; skill?: string | null; difficulty?: number | null; cognitiveLevel?: string | null;
   topic?: string | null; subtopic?: string | null;
-  origin: "elibrary" | "capture"; sourceChunkId?: string | null; capturePageId?: string | null; sourceQuote?: string | null; verified: boolean;
+  origin: "elibrary" | "capture" | "generated"; sourceChunkId?: string | null; capturePageId?: string | null; sourceQuote?: string | null; verified: boolean;
 };
 
 /** Adds a question to the bank (or returns the existing copy) and files it under its group. */

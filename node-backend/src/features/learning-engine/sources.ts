@@ -22,7 +22,7 @@ export function chunkText(text: string): Array<{ start: number; content: string 
   return chunks;
 }
 
-export type SourceRow = { id: string; title: string; resourceType: string | null; status: string; chunkCount: number };
+export type SourceRow = { id: string; title: string; resourceType: string | null; status: string; chunkCount: number; termsCovered: number[] };
 
 /* ───────────── Book map: which class / term / topic each part of a book is about ───────────── */
 
@@ -44,9 +44,33 @@ export function parseClass(text: string): ClassRef | null {
   return { level: m[1]!.startsWith("p") ? "p" : "s", no: n };
 }
 
-export function parseTerm(text: string): number | null {
-  const m = /\bterm\s*[-:]?\s*(one|two|three|iii|ii|i|[1-3])\b/i.exec(text);
-  return m ? num(m[1]!) : null;
+export function termsInText(text: string): number[] {
+  const found: number[] = [];
+  const re = /\b(?:term\s*[-:.]?\s*(one|two|three|iii|ii|i|[1-3])|(first|second|third|1st|2nd|3rd)\s+term|t\.?\s*([1-3]))\b/gi;
+  for (const m of text.matchAll(re)) {
+    const ordinal: Record<string, number> = { first: 1, "1st": 1, second: 2, "2nd": 2, third: 3, "3rd": 3 };
+    const value = m[1] ? num(m[1]) : m[2] ? ordinal[m[2].toLowerCase()] : Number(m[3]);
+    if (value && value <= 3) found.push(value);
+  }
+  return found;
+}
+
+export function parseTerm(text: string): number | null { return termsInText(text)[0] ?? null; }
+
+/** Uses both title/catalogue metadata and the document body; repeated body headings beat a mistagged filename. */
+export function inferDocumentTerm(title: string, catalogueTerm: string | null, text: string): { term: number | null; mentioned: number[] } {
+  const titleTerms = [...new Set(termsInText(title))];
+  if (/all\s+terms|terms?\s*(?:1|i|one)\s*(?:-|–|to|&|and)\s*(?:3|iii|three)|t1\s*-?\s*t3/i.test(title)) return { term: null, mentioned: [1, 2, 3] };
+  const counts = new Map<number, number>();
+  for (const t of termsInText(text.slice(0, 250_000))) counts.set(t, (counts.get(t) ?? 0) + 1);
+  const mentioned = [...counts.keys()].sort();
+  const ranked = [...counts].sort((a, b) => b[1] - a[1]);
+  const winner = ranked[0];
+  if (winner && (mentioned.length === 1 || winner[1] >= Math.max(3, (ranked[1]?.[1] ?? 0) * 3))) return { term: winner[0], mentioned };
+  if (mentioned.length > 1) return { term: null, mentioned };
+  if (titleTerms.length === 1) return { term: titleTerms[0]!, mentioned: titleTerms };
+  const catalog = catalogueTerm ? parseTerm(catalogueTerm) : null;
+  return { term: catalog, mentioned: catalog ? [catalog] : [] };
 }
 
 /** Every class a title says it covers: "P4 P6 Package", "P4,p6&p7 MTC Notes", "P.4 - P.6 SST", "Primary 5". */
@@ -104,12 +128,12 @@ export function labelChunks(chunks: Array<{ start: number; content: string }>, e
   });
 }
 
-const MAP_VERSION = 1;
+const MAP_VERSION = 2;
 
 /** Copies one e-library resource (metadata and its whole text) into the school's source store and maps it. */
 export async function ingestResource(runtime: Runtime, organizationId: string, slug: string): Promise<SourceRow> {
   const existing = await runtime.db.query<SourceRow & { mapVersion: number }>(
-    `SELECT id,title,resource_type AS "resourceType",status,chunk_count AS "chunkCount",map_version AS "mapVersion" FROM lrn_sources
+    `SELECT id,title,resource_type AS "resourceType",status,chunk_count AS "chunkCount",map_version AS "mapVersion",terms_covered AS "termsCovered" FROM lrn_sources
       WHERE organization_id=$1 AND provider='ulibtech' AND external_slug=$2`, [organizationId, slug]);
   if (existing.rows[0]?.status === "ready" && existing.rows[0].mapVersion >= MAP_VERSION) return existing.rows[0];
 
@@ -135,9 +159,10 @@ export async function ingestResource(runtime: Runtime, organizationId: string, s
   }
   // A book's own headings win; its catalogue class/term are the fallback when it has none.
   const titleClasses = classesInTitle(`${meta.title} ${meta.className ?? ""}`);
-  const defaults: Scope = { cls: titleClasses.length === 1 ? titleClasses[0] : null, term: titleClassesTerm(meta.title, meta.term) };
+  const inferredTerm = inferDocumentTerm(meta.title, meta.term, text);
+  const defaults: Scope = { cls: titleClasses.length === 1 ? titleClasses[0] : null, term: inferredTerm.term };
   // A book about one class and one term is labelled as a whole; headings only split books that span several.
-  const singleScope = titleClasses.length === 1 && defaults.term !== null;
+  const singleScope = titleClasses.length === 1 && defaults.term !== null && inferredTerm.mentioned.length <= 1;
   const chunks = labelChunks(chunkText(text), singleScope ? [] : mapHeadings(text), defaults);
   const covered = [...new Set(chunks.filter(c => c.cls).map(c => `${c.cls!.level}${c.cls!.no}`))];
   const terms = [...new Set(chunks.map(c => c.term).filter((t): t is number => Boolean(t)))].sort();
@@ -160,13 +185,7 @@ export async function ingestResource(runtime: Runtime, organizationId: string, s
   } finally {
     client.release();
   }
-  return { id, title: meta.title, resourceType: meta.typeSlug, status: chunks.length ? "ready" : "no_text", chunkCount: chunks.length };
-}
-
-/** A title like "Term 1–3" or "All Terms" covers every term; "Term II" just one. */
-function titleClassesTerm(title: string, catalogueTerm: string | null): number | null {
-  if (/all\s+terms|terms?\s*(?:1|i|one)\s*(?:-|–|to|&)\s*(?:3|iii|three)|t1\s*-?\s*t3/i.test(title)) return null;
-  return parseTerm(title) ?? (catalogueTerm ? parseTerm(catalogueTerm) : null);
+  return { id, title: meta.title, resourceType: meta.typeSlug, status: chunks.length ? "ready" : "no_text", chunkCount: chunks.length, termsCovered: terms };
 }
 
 export type Passage = { id: string; sourceId: string; sourceTitle: string; seq: number; content: string };
@@ -227,14 +246,16 @@ export async function openingPassages(runtime: Runtime, organizationId: string, 
   };
   let rows = await run(scope);
   if (!rows.length && scope) rows = await run();
-  const share = Math.floor(budgetChars / new Set(rows.map(r => r.sourceId)).size || budgetChars);
+  const share = Math.max(CHUNK_CHARS, Math.floor(budgetChars / new Set(rows.map(r => r.sourceId)).size || budgetChars));
   const usedBy = new Map<string, number>();
   const picked: Passage[] = [];
+  let totalUsed = 0;
   for (const row of rows) {
     const used = usedBy.get(row.sourceId) ?? 0;
-    if (used + row.content.length > share) continue;
+    if (used + row.content.length > share || totalUsed + row.content.length > budgetChars) continue;
     picked.push(row);
     usedBy.set(row.sourceId, used + row.content.length);
+    totalUsed += row.content.length;
   }
   return picked.sort((a, b) => a.sourceId === b.sourceId ? a.seq - b.seq : 0);
 }

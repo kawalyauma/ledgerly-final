@@ -85,7 +85,7 @@ export function parseJsonReply(text: string): Record<string, unknown> {
 
 export const GROUNDING_RULES = [
   "You are the curriculum engine of Ledgerly AI for a Ugandan school.",
-  "Work ONLY from the passages, page images and records given in this prompt. Do not use outside knowledge, do not invent facts, topics, questions, answers or names.",
+  "Work from the passages, page images and records given in this prompt. Do not invent facts, topics, answers or names. Only when the task explicitly permits it, you may create age-appropriate pedagogical examples or practice questions for a skill already supported by the supplied material, and must label them generated.",
   "If the material does not cover something, leave it out or set the field to null and say so in \"gaps\". Never fill gaps from memory.",
   "Do not run commands, open files or browse. Everything you need is in this prompt.",
   "Reply with ONE JSON object only, exactly matching the requested shape. No prose before or after it.",

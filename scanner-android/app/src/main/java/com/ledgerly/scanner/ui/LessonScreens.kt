@@ -156,7 +156,7 @@ fun SchemeScreen(id: String) {
                     Ring(if (lessons.isEmpty()) 0f else (notes + plans).toFloat() / (2 * lessons.size), "${if (lessons.isEmpty()) 0 else (notes + plans) * 50 / lessons.size}%", C.Brand, 60.dp)
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("${lessons.size} lessons · $weeks weeks · one a day, Mon–Fri", style = MaterialTheme.typography.titleSmall)
+                        Text("${lessons.size} lesson entries · $weeks weeks · ${s.i("periodsPerWeek", 5)} periods a week", style = MaterialTheme.typography.titleSmall)
                         Text("Notes: $notes of ${lessons.size} · Lesson plans: $plans of ${lessons.size}", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(4.dp)); SchemeStatus(s.s("status"))
                     }

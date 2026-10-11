@@ -24,8 +24,8 @@ export async function getTimetableSettings(runtime: Runtime, organizationId: str
             breaks,max_subject_periods_per_day AS "maxSubjectPeriodsPerDay",morning_subjects AS "morningSubjects"
        FROM lrn_timetable_settings WHERE organization_id=$1`, [organizationId]);
   return r.rows[0] ?? {
-    periodMinutes: 40, dayStartsAt: "08:00", periodsPerDay: 8, schoolDays: [1, 2, 3, 4, 5],
-    breaks: [{ afterPeriod: 2, minutes: 20, label: "Break" }, { afterPeriod: 5, minutes: 60, label: "Lunch" }],
+    periodMinutes: 40, dayStartsAt: "07:50", periodsPerDay: 10, schoolDays: [1, 2, 3, 4, 5],
+    breaks: [{ afterPeriod: 3, minutes: 20, label: "Break" }, { afterPeriod: 6, minutes: 60, label: "Lunch" }, { afterPeriod: 8, minutes: 30, label: "Afternoon break" }],
     maxSubjectPeriodsPerDay: 2, morningSubjects: ["mathematics", "english", "science"],
   };
 }
@@ -143,18 +143,20 @@ export async function listLoads(runtime: Runtime, organizationId: string, termId
 /** Pre-fills loads from the school's teaching assignments (teacher and periods per week), then from the term's schemes. */
 export async function loadsFromSchemes(runtime: Runtime, organizationId: string, termId: string) {
   const fromAssignments = await runtime.db.query(
-    `INSERT INTO lrn_subject_loads(id,organization_id,term_id,class_id,subject_id,teacher_staff_id,periods_per_week)
+    `INSERT INTO lrn_subject_loads(id,organization_id,term_id,class_id,subject_id,teacher_staff_id,periods_per_week,double_periods)
      SELECT DISTINCT ON (a.class_id,a.subject_id) 'lload_'||replace(gen_random_uuid()::text,'-',''),a.organization_id,$2,a.class_id,a.subject_id,a.staff_id,
             LEAST(30,GREATEST(1,COALESCE(a.periods_per_week,(SELECT max(sc.periods_per_week) FROM lrn_schemes sc WHERE sc.organization_id=a.organization_id
-              AND sc.term_id=$2 AND sc.class_id=a.class_id AND sc.subject_id=a.subject_id),5)))
+              AND sc.term_id=$2 AND sc.class_id=a.class_id AND sc.subject_id=a.subject_id),5))),
+            LEAST(10,GREATEST(0,LEAST(30,GREATEST(1,COALESCE(a.periods_per_week,(SELECT max(sc.periods_per_week) FROM lrn_schemes sc WHERE sc.organization_id=a.organization_id
+              AND sc.term_id=$2 AND sc.class_id=a.class_id AND sc.subject_id=a.subject_id),5)))-5))
        FROM school_staff_teaching_assignments a
       WHERE a.organization_id=$1 AND a.active AND a.class_id IS NOT NULL AND a.subject_id IS NOT NULL
         AND (a.term_id=$2 OR (a.term_id IS NULL AND a.academic_year_id=(SELECT academic_year_id FROM school_terms WHERE id=$2)))
       ORDER BY a.class_id,a.subject_id,(a.term_id=$2) DESC NULLS LAST,a.updated_at DESC
      ON CONFLICT DO NOTHING RETURNING id`, [organizationId, termId]);
   const fromSchemes = await runtime.db.query(
-    `INSERT INTO lrn_subject_loads(id,organization_id,term_id,class_id,subject_id,periods_per_week)
-     SELECT 'lload_'||replace(gen_random_uuid()::text,'-',''),organization_id,term_id,class_id,subject_id,max(periods_per_week)
+    `INSERT INTO lrn_subject_loads(id,organization_id,term_id,class_id,subject_id,periods_per_week,double_periods)
+     SELECT 'lload_'||replace(gen_random_uuid()::text,'-',''),organization_id,term_id,class_id,subject_id,max(periods_per_week),LEAST(10,GREATEST(0,max(periods_per_week)-5))
        FROM lrn_schemes WHERE organization_id=$1 AND term_id=$2 AND status<>'archived' GROUP BY organization_id,term_id,class_id,subject_id
      ON CONFLICT DO NOTHING RETURNING id`, [organizationId, termId]);
   return { added: (fromAssignments.rowCount ?? 0) + (fromSchemes.rowCount ?? 0), loads: await listLoads(runtime, organizationId, termId) };
@@ -177,7 +179,7 @@ function rng(seed: number) { return () => { seed = (seed * 1664525 + 1013904223)
  */
 export function solveTimetable(input: {
   days: number[]; lessonPeriods: Array<{ id: string; seq: number }>; adjacentPairs: Set<number>;
-  loads: Load[]; blocked: Set<string>; maxPerDay: number; morning: Set<string>; attempts?: number;
+  loads: Load[]; blocked: Set<string>; teacherBlocked?: Set<string>; maxPerDay: number; morning: Set<string>; attempts?: number;
 }) {
   const P = input.lessonPeriods.length;
   let best: { placements: Placement[]; unplaced: Unplaced[]; score: number } | null = null;
@@ -208,7 +210,7 @@ export function solveTimetable(input: {
           if (task.size === 2 && !input.adjacentPairs.has(p)) continue;
           let free = true;
           for (let k = 0; k < task.size; k += 1) {
-            if (classBusy.has(`${l.classId}|${day}|${p + k}`) || (l.teacherStaffId && teacherBusy.has(`${l.teacherStaffId}|${day}|${p + k}`))) { free = false; break; }
+            if (classBusy.has(`${l.classId}|${day}|${p + k}`) || (l.teacherStaffId && (teacherBusy.has(`${l.teacherStaffId}|${day}|${p + k}`) || input.teacherBlocked?.has(`${l.teacherStaffId}|${day}|${p + k}`)))) { free = false; break; }
           }
           if (!free) continue;
           const sameNeighbour = [p - 1, p + task.size].some(q => placements.some(x => x.classId === l.classId && x.weekday === day && x.periodIndex === q && x.load.subjectId === l.subjectId));
@@ -260,12 +262,28 @@ export async function generateTimetable(runtime: Runtime, organizationId: string
     const i = indexOf.get(f.bellPeriodId);
     if (i !== undefined) blocked.add(`${c}|${f.weekday}|${i}`);
   }
+  // Reuse the canonical Academics teacher-availability records. Explicit unavailable windows are hard blocks;
+  // when positive windows exist for a teacher/day, periods outside those windows are also blocked.
+  const availability = (await runtime.db.query<{ teacherStaffId: string; weekday: number; startsAt: string; endsAt: string; available: boolean }>(
+    `SELECT teacher_staff_id AS "teacherStaffId",weekday,to_char(starts_at,'HH24:MI') AS "startsAt",to_char(ends_at,'HH24:MI') AS "endsAt",available
+       FROM school_teacher_availability WHERE organization_id=$1`, [organizationId])).rows;
+  const teacherBlocked = new Set<string>();
+  const teachers = [...new Set(loads.map(l => l.teacherStaffId).filter((x): x is string => Boolean(x)))];
+  for (const teacher of teachers) for (const day of settings.schoolDays) {
+    const windows = availability.filter(a => a.teacherStaffId === teacher && a.weekday === day);
+    const positive = windows.filter(a => a.available);
+    lessonPeriods.forEach((period, i) => {
+      const overlapsNo = windows.some(a => !a.available && a.startsAt < period.endsAt && a.endsAt > period.startsAt);
+      const outsidePositive = positive.length > 0 && !positive.some(a => a.startsAt <= period.startsAt && a.endsAt >= period.endsAt);
+      if (overlapsNo || outsidePositive) teacherBlocked.add(`${teacher}|${day}|${i}`);
+    });
+  }
   // Capacity check per class before solving.
   const capacity = settings.schoolDays.length * lessonPeriods.length;
   const overloaded = classes.map(c => ({ c, need: loads.filter(l => l.classId === c).reduce((n, l) => n + l.periodsPerWeek, 0), fixed: [...blocked].filter(k => k.startsWith(`${c}|`)).length }))
     .filter(x => x.need > capacity - x.fixed);
   const result = solveTimetable({
-    days: settings.schoolDays, lessonPeriods, adjacentPairs, loads, blocked, maxPerDay: settings.maxSubjectPeriodsPerDay,
+    days: settings.schoolDays, lessonPeriods, adjacentPairs, loads, blocked, teacherBlocked, maxPerDay: settings.maxSubjectPeriodsPerDay,
     morning: new Set(settings.morningSubjects.map(m => m.toLowerCase())),
   });
   const id = createId("ltt");
@@ -319,6 +337,12 @@ export async function editSlot(runtime: Runtime, organizationId: string, timetab
         WHERE s.timetable_id=$1 AND s.teacher_staff_id=$2 AND s.weekday=$3 AND s.bell_period_id=$4 AND s.class_id<>$5`,
       [timetableId, v.teacherStaffId, v.weekday, v.bellPeriodId, v.classId]);
     if (clash.rows[0]) throw new AppError(409, "TEACHER_CLASH", `That teacher is already teaching ${clash.rows[0].className} in this period`);
+    const unavailable = await runtime.db.query(
+      `SELECT 1 FROM school_teacher_availability a JOIN lrn_bell_periods b ON b.id=$4 AND b.organization_id=$1
+        WHERE a.organization_id=$1 AND a.teacher_staff_id=$2 AND a.weekday=$3 AND a.available=false
+          AND a.starts_at < b.ends_at AND a.ends_at > b.starts_at LIMIT 1`,
+      [organizationId, v.teacherStaffId, v.weekday, v.bellPeriodId]);
+    if (unavailable.rowCount) throw new AppError(409, "TEACHER_UNAVAILABLE", "That teacher is unavailable during this period");
   }
   if (!v.subjectId && !v.label) {
     await runtime.db.query(`DELETE FROM lrn_timetable_slots WHERE timetable_id=$1 AND class_id=$2 AND weekday=$3 AND bell_period_id=$4`, [timetableId, v.classId, v.weekday, v.bellPeriodId]);
