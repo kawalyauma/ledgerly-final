@@ -70,7 +70,7 @@ export function createLearningRoutes(runtime: Runtime) {
   });
   r.put("/engine", admin, async c => {
     const v = parse(z.object({
-      provider: z.enum(["codex", "claude-code"]).optional(),
+      provider: z.enum(["codex", "claude-code", "manual"]).optional(),
       state: z.enum(["running", "paused", "stopped"]).optional(),
       dailyTaskLimit: z.number().int().min(0).max(5000).optional(),
       maxPromptChars: z.number().int().min(8000).max(200000).optional(),

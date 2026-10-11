@@ -4,7 +4,7 @@ import type { Runtime } from "../../runtime.js";
 import { createId } from "../core-identity/security.js";
 import { getLedgerlyAiFoundationService } from "../ledgerly-ai/runtime-service.js";
 
-export type EngineProvider = "codex" | "claude-code";
+export type EngineProvider = "codex" | "claude-code" | "manual";
 export type EngineState = "running" | "paused" | "stopped";
 export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "lesson.plan" | "page.analyze" | "student.summary" | "figure.generate";
 /** Steps that do not call the AI (and so do not count towards the daily limit). */
@@ -24,11 +24,18 @@ export type TaskContext = {
   task: ClaimedTask;
   settings: EngineSettings;
   /** Runs one bounded AI step and returns the parsed JSON object it produced. */
-  ai(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }>; vision?: boolean }): Promise<Record<string, unknown>>;
+  ai(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }>; vision?: boolean; timeoutMs?: number }): Promise<Record<string, unknown>>;
   /** A Codex step that may create files (e.g. a generated image) in /outputs; returns its reply text and the files. */
   aiWithFiles(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }> }): Promise<{ text: string; files: Array<{ name: string; bytes: Uint8Array }> }>;
   enqueue(kind: TaskKind, subjectRef: string, options?: { priority?: number }): Promise<void>;
 };
+
+/** Thrown when the manual provider has stored a prompt and is waiting for its reply. */
+export class ManualReplyPending extends Error {}
+/** How long a step waits for a manual reply before it is looked at again (storing a reply releases it at once). */
+const MANUAL_HOLD_DAYS = 30;
+/** Codex usage-limit failures: the step waits for the limit to reset instead of using up its retries. */
+const USAGE_LIMIT = /usage limit|rate.?limit|quota|too many requests|\b429\b|Reading additional input from stdin/i;
 
 type Handler = (ctx: TaskContext) => Promise<Record<string, unknown> | void>;
 const handlers = new Map<TaskKind, Handler>();
@@ -121,6 +128,7 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
   const settings = await getSettings(runtime, task.organizationId);
   const ai = getLedgerlyAiFoundationService(runtime);
   const meter = { provider: null as string | null, promptChars: 0, durationMs: 0, usage: [] as unknown[] };
+  let manualCalls = 0;
   // Keep the lease alive and watch for Stop or a cancelled step while the AI works, from any API instance.
   const watcher = setInterval(() => {
     void runtime.db.query<{ cancel: boolean }>(
@@ -135,6 +143,21 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
     runtime, task, settings,
     async ai(input) {
       const provider: EngineProvider = input.images?.length ? settings.visionProvider : settings.provider;
+      if (provider === "manual") {
+        // Each call of a step has its own slot; re-running the step after the reply is stored finds it there.
+        const index = manualCalls++;
+        const prompt = `${GROUNDING_RULES}\n\n${input.prompt}`;
+        const stored = await runtime.db.query<{ reply: string | null }>(`SELECT reply FROM lrn_manual_calls WHERE task_id=$1 AND call_index=$2`, [task.id, index]);
+        if (stored.rows[0]?.reply) {
+          meter.provider = "manual";
+          meter.promptChars += prompt.length;
+          return parseJsonReply(stored.rows[0].reply);
+        }
+        await runtime.db.query(
+          `INSERT INTO lrn_manual_calls(task_id,call_index,organization_id,kind,subject_ref,prompt) VALUES($1,$2,$3,$4,$5,$6)
+           ON CONFLICT(task_id,call_index) DO UPDATE SET prompt=EXCLUDED.prompt`, [task.id, index, task.organizationId, task.kind, task.subjectRef, prompt]);
+        throw new ManualReplyPending(`Waiting for the manual reply to call ${index} of this step.`);
+      }
       const root = path.join(ai.config.LEDGERLY_AI_WORK_ROOT, "learning", task.id);
       const attachmentRoot = path.join(root, "attachments");
       await mkdir(attachmentRoot, { recursive: true, mode: 0o700 });
@@ -150,7 +173,7 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
           id: task.id, organizationId: task.organizationId, userId: task.requestedBy ?? "system:learning-engine",
           correlationId: `lrn:${task.id}`, prompt, taskKind: "analysis", sandbox: "read-only",
           workspacePath: path.join(root, "workspace"), attachmentRoot, imagePaths,
-          providerOverride: provider, timeoutMs: 15 * 60_000,
+          providerOverride: provider, timeoutMs: input.timeoutMs ?? 15 * 60_000,
         });
         meter.provider = result.provider;
         meter.promptChars += prompt.length;
@@ -206,6 +229,21 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
       [task.id, meter.provider, meter.promptChars || null, meter.durationMs || null, JSON.stringify(meter.usage), JSON.stringify(result ?? {})]);
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 4000);
+    const manual = settings.provider === "manual" && manualCalls > 0;
+    // Provider limits can interrupt any AI-backed step. Preserve its retries and resume after
+    // the reset instead of turning a complete-term generation run into permanent failures.
+    const usageLimited = !LOCAL_KINDS.has(task.kind) && USAGE_LIMIT.test(message);
+    if (error instanceof ManualReplyPending || manual || usageLimited) {
+      // A manual reply that did not work is cleared with its error, so it can be answered again; the step keeps its retries.
+      if (manual && !(error instanceof ManualReplyPending)) {
+        await runtime.db.query(`UPDATE lrn_manual_calls SET reply=NULL,error=$3 WHERE task_id=$1 AND call_index=$2`, [task.id, manualCalls - 1, message]);
+      }
+      await runtime.db.query(
+        `UPDATE lrn_ai_tasks SET status=CASE WHEN status='cancelled' THEN 'cancelled' ELSE 'queued' END,attempts=GREATEST(attempts-1,0),lease_until=NULL,
+                available_at=CURRENT_TIMESTAMP + ($3 * INTERVAL '1 minute'),error=$2 WHERE id=$1`,
+        [task.id, message, usageLimited ? 60 : MANUAL_HOLD_DAYS * 24 * 60]);
+      return;
+    }
     const state = await runtime.db.query<{ status: string; stopped: boolean }>(
       `SELECT t.status,COALESCE(s.state,'running')='stopped' AS stopped FROM lrn_ai_tasks t
          LEFT JOIN lrn_engine_settings s ON s.organization_id=t.organization_id WHERE t.id=$1`, [task.id]);
