@@ -585,8 +585,15 @@ export async function queueNextLesson(runtime: Runtime, organizationId: string, 
       WHERE l.scheme_id=$1 AND l.status='pending' AND (l.notes_requested OR sc.write_until_week IS NULL OR COALESCE(l.week,1) <= sc.write_until_week)
       ORDER BY l.seq LIMIT 1`, [schemeId]);
   if (!next.rows[0]) {
+    const incomplete = await runtime.db.query<{ failed: number }>(
+      `SELECT count(*) FILTER (WHERE l.status='failed')::int AS failed FROM lrn_lessons l
+        JOIN lrn_schemes sc ON sc.id=l.scheme_id
+       WHERE l.scheme_id=$1 AND (sc.write_until_week IS NULL OR COALESCE(l.week,1)<=sc.write_until_week)`, [schemeId]);
+    const failed = incomplete.rows[0]?.failed ?? 0;
     await runtime.db.query(
-      `UPDATE lrn_schemes SET status=CASE WHEN status IN ('writing','outlining') THEN 'review' ELSE status END,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [schemeId]);
+      `UPDATE lrn_schemes SET status=CASE WHEN status IN ('writing','outlining') THEN $2 ELSE status END,
+              error=CASE WHEN $3::int>0 THEN $3::text||' lesson(s) did not pass quality checks after three generations.' ELSE NULL END,
+              updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [schemeId, failed ? "failed" : "review", failed]);
     return null;
   }
   await enqueueTask(runtime, organizationId, "lesson.write", next.rows[0].id, { priority: 50 + Math.min(next.rows[0].seq, 49), requestedBy });
@@ -723,13 +730,13 @@ const WEEK_BATCH = 7;
 
 type WeekLesson = {
   id: string; schemeId: string; seq: number; week: number; period: number | null; periods: number; title: string; subtopic: string | null; objectives: string[];
-  sourceChunkIds: string[]; status: string; unitTitle: string; theme: string | null; kind: string;
+  sourceChunkIds: string[]; status: string; generationAttempts: number; unitTitle: string; theme: string | null; kind: string;
 };
 
 /** Step 3..n (AI): one call per subject-week writes every lesson of the week: chalkboard notes, lesson plan, pictures and source activities for the bank. */
 registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const { runtime, task, settings } = ctx;
-  const columns = `l.id,l.scheme_id AS "schemeId",l.seq,COALESCE(l.week,1) AS week,l.period,l.periods,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,u.title AS "unitTitle",u.theme,l.lesson_kind AS kind`;
+  const columns = `l.id,l.scheme_id AS "schemeId",l.seq,COALESCE(l.week,1) AS week,l.period,l.periods,l.title,l.subtopic,l.objectives,l.source_chunk_ids AS "sourceChunkIds",l.status,l.generation_attempts AS "generationAttempts",u.title AS "unitTitle",u.theme,l.lesson_kind AS kind`;
   const anchor = await runtime.db.query<WeekLesson>(
     `SELECT ${columns} FROM lrn_lessons l JOIN lrn_units u ON u.id=l.unit_id WHERE l.id=$1 AND l.organization_id=$2`, [task.subjectRef, task.organizationId]);
   const first = anchor.rows[0];
@@ -741,7 +748,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       WHERE l.scheme_id=$1 AND COALESCE(l.week,1)=$2 AND (l.id=$3 OR l.status IN ('pending','writing')) AND l.seq >= $4 ORDER BY l.seq LIMIT ${WEEK_BATCH}`,
     [scheme.id, first.week, first.id, first.seq]);
   const week = weekRows.rows;
-  await runtime.db.query(`UPDATE lrn_lessons SET status='writing',error=NULL WHERE id=ANY($1::text[])`, [week.map(x => x.id)]);
+  await runtime.db.query(`UPDATE lrn_lessons SET status='writing',error=NULL,generation_attempts=generation_attempts+1 WHERE id=ANY($1::text[])`, [week.map(x => x.id)]);
 
   const periodLength = await runtime.db.query<{ minutes: number }>(
     `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
@@ -866,7 +873,9 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     for (const l of week) {
       const reply = accepted.get(l.id);
       if (!reply) {
-        await client.query(`UPDATE lrn_lessons SET status='failed',error=$2 WHERE id=$1`, [l.id, `LESSON_QUALITY_FAILED: ${(failures.get(l.id) ?? []).join("; ")}`]);
+        const exhausted = l.generationAttempts + 1 >= 3;
+        await client.query(`UPDATE lrn_lessons SET status=$2,error=$3 WHERE id=$1`, [l.id, exhausted ? "failed" : "pending",
+          `LESSON_QUALITY_FAILED (${l.generationAttempts + 1}/3): ${(failures.get(l.id) ?? []).join("; ")}`]);
         continue;
       }
       const usedIds = reply.sourcePassageIds.filter(id => byId.has(id));
@@ -946,7 +955,8 @@ export async function requestWeek(runtime: Runtime, organizationId: string, user
   if (!sc.rows[0]) throw new AppError(404, "NOT_FOUND", "Scheme not found");
   if (["draft", "sourcing", "outlining"].includes(sc.rows[0].status)) throw new AppError(409, "OUTLINE_NOT_READY", "The scheme outline is still being written");
   if (what === "notes") {
-    const r = await runtime.db.query(`UPDATE lrn_lessons SET notes_requested=true,status=CASE WHEN status='failed' THEN 'pending' ELSE status END,error=NULL
+    const r = await runtime.db.query(`UPDATE lrn_lessons SET notes_requested=true,status=CASE WHEN status='failed' THEN 'pending' ELSE status END,
+        generation_attempts=CASE WHEN status='failed' THEN 0 ELSE generation_attempts END,error=NULL
       WHERE scheme_id=$1 AND week=$2 AND status IN ('pending','failed') RETURNING id`, [schemeId, week]);
     if (r.rowCount) await runtime.db.query(`UPDATE lrn_schemes SET status=CASE WHEN status IN ('review','published') THEN status ELSE 'writing' END,updated_at=CURRENT_TIMESTAMP WHERE id=$1`, [schemeId]);
     // Lessons of this week already written but not planned get their plans too.
@@ -1095,7 +1105,7 @@ export async function regenerate(runtime: Runtime, organizationId: string, userI
     await runtime.db.query(`UPDATE lrn_schemes SET status='outlining',error=NULL WHERE id=$1`, [schemeId]);
     await enqueueTask(runtime, organizationId, "scheme.outline", schemeId, { priority: 20, requestedBy: userId });
   } else {
-    await runtime.db.query(`UPDATE lrn_lessons SET status='pending',error=NULL WHERE scheme_id=$1 AND status='failed'`, [schemeId]);
+    await runtime.db.query(`UPDATE lrn_lessons SET status='pending',error=NULL,generation_attempts=0 WHERE scheme_id=$1 AND status='failed'`, [schemeId]);
     await runtime.db.query(`UPDATE lrn_schemes SET status='writing',error=NULL WHERE id=$1`, [schemeId]);
     await queueNextLesson(runtime, organizationId, schemeId, userId);
   }
