@@ -7,6 +7,7 @@ import { ulibtech } from "../school-management/ulibtech.js";
 import { createId } from "../core-identity/security.js";
 import { addPage, assignPageStudent, createBatch, createBatchSchema, getBatch, getPage, pageImage, submitBatch } from "./captures.js";
 import { enqueueTask, getSettings, updateSettings } from "./engine.js";
+import { gitDeskStatus, syncGitDesk } from "./git-desk.js";
 import { coverage, recordTeaching, requestStudentSummary, studentOverview, teachingAt, teachingEventSchema, timeline } from "./insights.js";
 import { alternatives, compareQuestion, listGroups, listQuestions, practiceSet } from "./questions.js";
 import { createScheme, createSchemeSchema, getLesson, getScheme, previewMaterial, regenerate, requestWeek, setPublished, writeUntil } from "./schemes.js";
@@ -70,7 +71,7 @@ export function createLearningRoutes(runtime: Runtime) {
   });
   r.put("/engine", admin, async c => {
     const v = parse(z.object({
-      provider: z.enum(["codex", "claude-code", "manual"]).optional(),
+      provider: z.enum(["codex", "claude-code", "manual", "git"]).optional(),
       state: z.enum(["running", "paused", "stopped"]).optional(),
       dailyTaskLimit: z.number().int().min(0).max(5000).optional(),
       maxPromptChars: z.number().int().min(8000).max(200000).optional(),
@@ -82,6 +83,9 @@ export function createLearningRoutes(runtime: Runtime) {
   });
   r.post("/engine/stop", admin, async c => { const p = c.get("principal"); return c.json({ data: await updateSettings(runtime, p.organizationId, p.userId, { state: "stopped" }) }); });
   r.post("/engine/start", admin, async c => { const p = c.get("principal"); return c.json({ data: await updateSettings(runtime, p.organizationId, p.userId, { state: "running" }) }); });
+  /* The resources bank (git provider): jobs published to GitHub for outside agents, and their answers. */
+  r.get("/engine/git-desk", read, async c => c.json({ data: await gitDeskStatus(runtime, org(c)) }));
+  r.post("/engine/git-desk/sync", admin, async c => c.json({ data: await syncGitDesk(runtime) }));
   r.get("/engine/tasks", read, async c => {
     const f = parse(z.object({ status: z.enum(["queued", "running", "succeeded", "failed", "cancelled"]).optional(), kind: z.string().max(40).optional(), ...paging }), c.req.query());
     const rows = await runtime.db.query(

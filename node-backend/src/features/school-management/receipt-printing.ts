@@ -19,11 +19,50 @@ async function receiptSource(runtime:Runtime,org:string,id:string){
   const row=(await runtime.db.query<Record<string,any>>(`SELECT r.id,r.receipt_number AS "receiptNumber",r.student_id AS "studentId",r.payment_id AS "paymentId",r.payment_date::text AS "paymentDate",r.amount_minor::float8 AS "amountMinor",r.reference,r.print_count AS "printCount",r.amount_in_words AS "amountWords",p.status AS "paymentStatus",p.currency,p.number AS "paymentNumber",p.contact_id AS "payerContactId",c.name AS "payerName",s.admission_number AS "admissionNumber",s.student_number AS "studentNumber",concat_ws(' ',s.first_name,s.middle_name,s.last_name) AS "studentName",cl.name AS "className",st.name AS "streamName",u.display_name AS "receivedBy",o.name AS "organizationName",o.legal_name AS "legalName",o.address,o.branding,sp.motto,sp.phone_numbers AS phones,sp.email_addresses AS emails,sp.website,sp.physical_address AS "physicalAddress",sp.postal_address AS "postalAddress",(EXISTS(SELECT 1 FROM schoolpay_configurations spc WHERE spc.organization_id=r.organization_id AND spc.enabled) OR s.custom_fields->>'source'='SchoolPay' OR EXISTS(SELECT 1 FROM journal_entries je WHERE je.organization_id=r.organization_id AND je.source_type='schoolpay_payment')) AS "schoolPayEnabled" FROM school_fee_receipts r JOIN payments p ON p.id=r.payment_id AND p.organization_id=r.organization_id LEFT JOIN contacts c ON c.id=p.contact_id AND c.organization_id=p.organization_id JOIN school_students s ON s.id=r.student_id AND s.organization_id=r.organization_id LEFT JOIN school_classes cl ON cl.id=s.current_class_id AND cl.organization_id=s.organization_id LEFT JOIN school_streams st ON st.id=s.current_stream_id AND st.organization_id=s.organization_id LEFT JOIN users u ON u.id=r.created_by JOIN organizations o ON o.id=r.organization_id LEFT JOIN school_profiles sp ON sp.organization_id=r.organization_id WHERE r.id=$1 AND r.organization_id=$2`,[id,org])).rows[0];
   if(!row)throw new AppError(404,"FEE_RECEIPT_NOT_FOUND","School fee receipt not found");
   const [allocations,balance]=await Promise.all([
-    runtime.db.query<Record<string,any>>(`SELECT pa.amount_minor::float8 AS "amountMinor",d.number AS "invoiceNumber",fc.name AS "feeCategoryName" FROM payment_allocations pa JOIN documents d ON d.id=pa.document_id AND d.organization_id=pa.organization_id LEFT JOIN school_student_fee_charges ch ON ch.document_id=d.id AND ch.organization_id=d.organization_id LEFT JOIN school_fee_categories fc ON fc.id=ch.fee_category_id AND fc.organization_id=ch.organization_id WHERE pa.payment_id=$1 AND pa.organization_id=$2 AND pa.reversed_at IS NULL ORDER BY pa.created_at,pa.id`,[row.paymentId,org]),
-    runtime.db.query<Record<string,any>>(`SELECT COALESCE(SUM(l.debit_minor-l.credit_minor),0)::float8 AS "balanceMinor" FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2 AND (a.subtype='school_fee_receivable' OR (a.subtype='receivable' AND l.dimensions_json ? 'schoolStudentId')) AND j.status='posted'`,[org,row.studentId]),
+    feeLines(runtime,org,String(row.paymentId)),
+    runtime.db.query<Record<string,any>>(`SELECT COALESCE(SUM(l.debit_minor-l.credit_minor),0)::float8 AS "balanceMinor" FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2 AND (a.subtype='school_fee_receivable' OR (a.subtype='receivable' AND l.dimensions_json ? 'schoolStudentId')) AND j.status='posted' AND j.reversal_of_id IS NULL`,[org,row.studentId]),
   ]);
   const amountInWords=row.amountWords||amountWords(Number(row.amountMinor),String(row.currency));
-  return {...row,amountWords:amountInWords,allocations:allocations.rows,balanceAfterMinor:Number(balance.rows[0]?.balanceMinor||0)};
+  return {...row,amountWords:amountInWords,allocations,balanceAfterMinor:Number(balance.rows[0]?.balanceMinor||0)};
+}
+
+/**
+ * What this payment paid, per fee item. A payment is allocated to a whole invoice; it is shared across the invoice's
+ * fee items with requirements and other items first and tuition last (owner's rule, 2026-10-15). Earlier payments
+ * on the same invoice fill the items first, so each receipt shows only what it paid.
+ */
+async function feeLines(runtime:Runtime,org:string,paymentId:string){
+  const allocations=(await runtime.db.query<{id:string;documentId:string;amountMinor:number;invoiceNumber:string}>(
+    `SELECT pa.id,pa.document_id AS "documentId",pa.amount_minor::float8 AS "amountMinor",d.number AS "invoiceNumber" FROM payment_allocations pa JOIN documents d ON d.id=pa.document_id AND d.organization_id=pa.organization_id WHERE pa.payment_id=$1 AND pa.organization_id=$2 AND pa.reversed_at IS NULL ORDER BY pa.created_at,pa.id`,[paymentId,org])).rows
+  const lines:Array<{amountMinor:number;invoiceNumber:string;feeCategoryName:string|null}>=[]
+  for(const a of allocations){
+    const [charges,prior]=await Promise.all([
+      runtime.db.query<{amountMinor:number;name:string|null}>(`SELECT ch.amount_minor::float8 AS "amountMinor",fc.name FROM school_student_fee_charges ch LEFT JOIN school_fee_categories fc ON fc.id=ch.fee_category_id AND fc.organization_id=ch.organization_id WHERE ch.document_id=$1 AND ch.organization_id=$2 ORDER BY (COALESCE(fc.name,'') ~* 'tuition'),ch.created_at,ch.id`,[a.documentId,org]),
+      runtime.db.query<{n:number}>(`SELECT COALESCE(SUM(o.amount_minor),0)::float8 AS n FROM payment_allocations o, payment_allocations me WHERE me.id=$3 AND o.document_id=$1 AND o.organization_id=$2 AND o.reversed_at IS NULL AND (o.created_at,o.id)<(me.created_at,me.id)`,[a.documentId,org,a.id]),
+    ])
+    let paidBefore=Number(prior.rows[0]?.n||0),left=Number(a.amountMinor)
+    for(const ch of charges.rows){
+      const amount=Number(ch.amountMinor),open=Math.max(0,amount-paidBefore)
+      paidBefore=Math.max(0,paidBefore-amount)
+      const take=Math.min(open,left)
+      if(take>0){lines.push({amountMinor:take,invoiceNumber:a.invoiceNumber,feeCategoryName:ch.name});left-=take}
+      if(left<=0)break
+    }
+    if(left>0)lines.push({amountMinor:left,invoiceNumber:a.invoiceNumber,feeCategoryName:charges.rows.length?"Other":null})
+  }
+  return lines
+}
+
+/** The school's own receipt PDF for a posted payment (for automatic printing); null when the payment is not a school fee receipt. */
+export async function schoolReceiptPdfForPayment(runtime:Runtime,org:string,paymentId:string){
+  const r=(await runtime.db.query<{id:string}>(`SELECT id FROM school_fee_receipts WHERE organization_id=$1 AND payment_id=$2 ORDER BY created_at LIMIT 1`,[org,paymentId])).rows[0]
+  if(!r)return null
+  const source=await receiptSource(runtime,org,r.id) as Record<string,any>
+  if(source.paymentStatus!=="posted")return null
+  const copyNo=Number((await runtime.db.query<{copyNo:number}>(`UPDATE school_fee_receipts SET print_count=print_count+1,printed_at=CURRENT_TIMESTAMP,archived_at=COALESCE(archived_at,CURRENT_TIMESTAMP),amount_in_words=COALESCE(amount_in_words,$1) WHERE id=$2 AND organization_id=$3 RETURNING print_count AS "copyNo"`,[source.amountWords,r.id,org])).rows[0]?.copyNo||1)
+  const base=(runtime.config.LEDGERLY_PUBLIC_URL||"https://erp.notesug.com").replace(/\/$/,"")
+  const bytes=await renderReceipt(source,copyNo===1?"ORIGINAL":`REPRINT #${copyNo}`,`${base}/#verify-receipt/${receiptVerifyToken(runtime.config.JWT_SECRET,r.id)}`)
+  return {bytes,receiptNumber:String(source.receiptNumber),receiptId:r.id,pageSize:"A4" as const}
 }
 
 /** Signed, unguessable token for the public "is this receipt genuine?" page behind the QR code. */

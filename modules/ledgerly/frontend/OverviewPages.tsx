@@ -19,7 +19,7 @@ type Overview = {
   collections: Point[] | null;
   exams: Point[] | null;
   attendance: { marked: number; present: number; absent: number } | null;
-  finance: { revenueMinor: number; expensesMinor: number; cashMinor: number } | null;
+  finance: { revenueMinor: number; expensesMinor: number; cashMinor: number; receivedMinor:number; paidOutMinor:number; feesCollectedMinor:number; otherReceiptsMinor:number; concessionsMinor:number; daily:Array<{date:string;receivedMinor:number;paidOutMinor:number}>; from?: string; to?: string } | null;
   monthly: Array<{ label: string; revenue: number; expenses: number }> | null;
   tasks: { open: number; overdue: number } | null;
   admissions: Point[] | null;
@@ -87,10 +87,10 @@ function MonthlyBars({ rows }: { rows: NonNullable<Overview["monthly"]> }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...rows.flatMap(r => [r.revenue, r.expenses])), W = 960, H = 150, pad = 8;
   const slot = (W - pad * 2) / rows.length, bw = Math.min(28, slot / 3);
-  if (!rows.some(r => r.revenue || r.expenses)) return <p className="ov-empty">No posted income or expenses in the last six months.</p>;
+  if (!rows.some(r => r.revenue || r.expenses)) return <p className="ov-empty">No posted income or expenses in this accounting period.</p>;
   const bar = (x: number, v: number, cls: string) => { const h = (v / max) * (H - 10); return h > 0 ? <path className={cls} d={`M${x},${H} V${H - h + Math.min(4, h)} q0,-4 4,-4 h${bw - 8} q4,0 4,4 V${H} Z`} /> : null; };
   return <div className="ov-chart">
-    <div className="ov-legend"><span><i className="ov-sw ov-sw-rev" />Income</span><span><i className="ov-sw ov-sw-exp" />Expenses</span></div>
+    <div className="ov-legend"><span><i className="ov-sw ov-sw-rev" />Recorded revenue</span><span><i className="ov-sw ov-sw-exp" />Accounting expenses</span></div>
     <svg viewBox={`0 0 ${W} ${H + 22}`} role="img" aria-label="Income and expenses by month" onMouseLeave={() => setHover(null)}>
       <line x1={0} x2={W} y1={H} y2={H} className="ov-axis" />
       {rows.map((r, i) => {
@@ -123,7 +123,8 @@ function Breakdown({ points, format = fmtInt }: { points: Point[]; format?: (n: 
 export function OverviewDashboard() {
   const { data, error, loading, load } = useOverview();
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-  const collected30 = useMemo(() => (data?.collections ?? []).reduce((n, p) => n + p.value, 0), [data]);
+  const cashDays = useMemo(() => (data?.finance?.daily??[]).filter(r=>r.date>=new Date(Date.now()-29*86400000).toISOString().slice(0,10)).map(r=>({label:r.date,value:r.receivedMinor})),[data]);
+  const collected30 = cashDays.reduce((n,p)=>n+p.value,0);
   return <div className="page ov-page">
     <div className="ov-head"><div><h1>Dashboard</h1><p>{today}</p></div><Button variant="secondary" onClick={load} disabled={loading}><RefreshCw size={15} /> Refresh</Button></div>
     {error && <Notice tone="danger">{error}</Notice>}
@@ -131,15 +132,15 @@ export function OverviewDashboard() {
       <div className="ov-tiles">
         {data.students && <Tile label="Active students" value={fmtInt(data.students.active)} hint={`${fmtInt(data.students.total)} on record`} />}
         {data.staff && <Tile label="Staff" value={fmtInt(data.staff.total)} hint={`${fmtInt(data.staff.teachers)} teachers`} />}
-        {data.fees && <Tile label="Fees collected" value={money(data.fees.collectedMinor)} hint={`of ${money(data.fees.billedMinor)} billed`} tone="good" />}
-        {data.fees && <Tile label="Fees outstanding" value={money(data.fees.outstandingMinor)} hint={`${Math.round(data.fees.collectionRate * 100)}% collection rate`} tone={data.fees.outstandingMinor > 0 ? "bad" : undefined} />}
+        {data.finance && <Tile label="Fees collected" value={money(data.finance.feesCollectedMinor)} hint={data.finance.from?`Since ${data.finance.from}`:"Actual fee receipts"} tone="good" />}
+        {data.fees && <Tile label="Learner fee balances" value={money(data.fees.outstandingMinor)} hint="Includes carried learner balances" tone={data.fees.outstandingMinor > 0 ? "bad" : undefined} />}
         {data.finance && <Tile label="Cash & bank" value={money(data.finance.cashMinor)} />}
         {data.attendance && <Tile label="Attendance today" value={data.attendance.marked ? `${Math.round((data.attendance.present / data.attendance.marked) * 100)}%` : "—"} hint={data.attendance.marked ? `${fmtInt(data.attendance.absent)} absent` : "No register marked yet"} />}
         {data.tasks && (data.tasks.open > 0 || data.tasks.overdue > 0) && <Tile label="Open tasks" value={fmtInt(data.tasks.open)} hint={`${fmtInt(data.tasks.overdue)} overdue`} tone={data.tasks.overdue ? "bad" : undefined} />}
       </div>
       <div className="ov-grid">
-        {data.collections && <section className="ov-card ov-wide"><header><h2>Fee collections · last 30 days</h2><span>{moneyFull(collected30)}</span></header><Columns points={data.collections} format={money} ariaLabel="Fee collections per day for the last 30 days" /></section>}
-        {data.monthly && <section className="ov-card ov-wide"><header><h2>Income vs expenses · last 6 months</h2>{data.finance && <span>Net {moneyFull(data.finance.revenueMinor - data.finance.expensesMinor)}</span>}</header><MonthlyBars rows={data.monthly} /></section>}
+        {data.finance && <section className="ov-card ov-wide"><header><h2>Money received · last 30 days</h2><span>{moneyFull(collected30)}</span></header><Columns points={cashDays} format={money} ariaLabel="Actual money received per day for the last 30 days" /></section>}
+        {data.monthly && <section className="ov-card ov-wide"><header><h2>Recorded revenue & accounting expenses</h2>{data.finance && <span>Accrual surplus {moneyFull(data.finance.revenueMinor - data.finance.expensesMinor)}</span>}</header><p>Includes unpaid fees and non-cash expenses. Cash receipts and payments are shown separately.</p><MonthlyBars rows={data.monthly} /></section>}
         {data.students && <section className="ov-card"><header><h2>Students per class</h2><span>{fmtInt(data.students.active)} active</span></header><Breakdown points={data.students.byClass} /></section>}
         {data.exams && <section className="ov-card"><header><h2>Examinations</h2><a href="#exams">Open</a></header><Breakdown points={data.exams.map(p => ({ ...p, label: words(p.label) }))} /></section>}
         {data.admissions && data.admissions.length > 0 && <section className="ov-card"><header><h2>Admissions</h2><a href="#school/admissions">Open</a></header><Breakdown points={data.admissions.map(p => ({ ...p, label: words(p.label) }))} /></section>}

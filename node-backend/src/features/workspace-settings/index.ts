@@ -1,3 +1,5 @@
+import { cashSummary } from "../finance-core/cash-summary.js";
+import { accountingReportDefaults, cashAccountSql } from "../finance-core/reporting-period.js";
 import { Hono } from "hono";
 import { z } from "zod";
 import { AppError } from "../../http/errors.js";
@@ -21,8 +23,10 @@ async function block<T>(fn: () => Promise<T>): Promise<T | null> {
 }
 
 async function buildOverview(runtime: Runtime, org: string) {
+  const { from: accountingStartDate } = await accountingReportDefaults(runtime.db,org);
+  const from = accountingStartDate ?? "0001-01-01";
   const q = async (sql: string, params: unknown[] = [org]) => (await runtime.db.query<Row>(sql, params)).rows;
-  const [students, staff, fees, collections, exams, attendance, finance, monthly, tasks, admissions] = await Promise.all([
+  const [students, staff, fees, collections, exams, attendance, finance, monthly, tasks, admissions, cash] = await Promise.all([
     block(async () => {
       const [totals] = await q(`SELECT COUNT(*) FILTER (WHERE status='active')::int active, COUNT(*)::int total,
           COUNT(*) FILTER (WHERE status='active' AND lower(gender)='male')::int male,
@@ -64,22 +68,24 @@ async function buildOverview(runtime: Runtime, org: string) {
     }),
     block(async () => {
       const [r] = await q(`SELECT
-          COALESCE(SUM(CASE WHEN a.type='revenue' THEN l.credit_minor-l.debit_minor END),0)::float8 revenue,
-          COALESCE(SUM(CASE WHEN a.type='expense' THEN l.debit_minor-l.credit_minor END),0)::float8 expenses,
-          COALESCE(SUM(CASE WHEN a.type='asset' AND a.subtype IN ('cash','bank') THEN l.debit_minor-l.credit_minor END),0)::float8 cash
+          COALESCE(SUM(CASE WHEN a.type='revenue' AND j.posting_date >= $2::date THEN l.base_credit_minor-l.base_debit_minor END),0)::float8 revenue,
+          COALESCE(SUM(CASE WHEN a.type='expense' AND j.posting_date >= $2::date THEN l.base_debit_minor-l.base_credit_minor END),0)::float8 expenses,
+          COALESCE(SUM(CASE WHEN a.type='expense' AND a.subtype='fee_concessions' AND j.posting_date >= $2::date THEN l.base_debit_minor-l.base_credit_minor END),0)::float8 concessions,
+          COALESCE(SUM(CASE WHEN ${cashAccountSql("a")} THEN l.base_debit_minor-l.base_credit_minor END),0)::float8 cash
         FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
         JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
-        WHERE l.organization_id=$1 AND j.status='posted'`);
-      return { revenueMinor: num(r?.revenue), expensesMinor: num(r?.expenses), cashMinor: num(r?.cash) };
+        WHERE l.organization_id=$1 AND j.status IN ('posted','reversed') AND j.posting_date <= CURRENT_DATE`,[org,from]);
+      return { revenueMinor: num(r?.revenue), expensesMinor: num(r?.expenses), cashMinor: num(r?.cash), concessionsMinor:num(r?.concessions), from: accountingStartDate, to: new Date().toISOString().slice(0,10) };
     }),
     block(() => q(`SELECT to_char(date_trunc('month', m),'Mon YYYY') label,
-          COALESCE(SUM(CASE WHEN a.type='revenue' THEN l.credit_minor-l.debit_minor END),0)::float8 revenue,
-          COALESCE(SUM(CASE WHEN a.type='expense' THEN l.debit_minor-l.credit_minor END),0)::float8 expenses
-        FROM generate_series(date_trunc('month', CURRENT_DATE) - interval '5 months', date_trunc('month', CURRENT_DATE), interval '1 month') m
-        LEFT JOIN journal_entries j ON j.organization_id=$1 AND j.status='posted' AND date_trunc('month', j.transaction_date)=m
+          COALESCE(SUM(CASE WHEN a.type='revenue' THEN l.base_credit_minor-l.base_debit_minor END),0)::float8 revenue,
+          COALESCE(SUM(CASE WHEN a.type='expense' THEN l.base_debit_minor-l.base_credit_minor END),0)::float8 expenses
+        FROM generate_series(GREATEST(date_trunc('month', CURRENT_DATE) - interval '5 months',date_trunc('month',$2::date)), date_trunc('month', CURRENT_DATE), interval '1 month') m
+        LEFT JOIN journal_entries j ON j.organization_id=$1 AND j.status IN ('posted','reversed') AND date_trunc('month', j.posting_date)=m
+          AND j.posting_date BETWEEN $2::date AND CURRENT_DATE
         LEFT JOIN journal_lines l ON l.journal_entry_id=j.id AND l.organization_id=j.organization_id
         LEFT JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
-        GROUP BY m ORDER BY m`)),
+        GROUP BY m ORDER BY m`,[org,from])),
     block(async () => {
       const [r] = await q(`SELECT COUNT(*) FILTER (WHERE status NOT IN ('done','cancelled'))::int open,
           COUNT(*) FILTER (WHERE status NOT IN ('done','cancelled') AND due_at < CURRENT_TIMESTAMP)::int overdue
@@ -87,8 +93,9 @@ async function buildOverview(runtime: Runtime, org: string) {
       return { open: num(r?.open), overdue: num(r?.overdue) };
     }),
     block(() => q(`SELECT status label, COUNT(*)::int value FROM school_admission_applications WHERE organization_id=$1 GROUP BY status ORDER BY 2 DESC`)),
+    block(()=>cashSummary(runtime.db,org,from,new Date().toISOString().slice(0,10))),
   ]);
-  return { generatedAt: new Date().toISOString(), students, staff, fees, collections, exams, attendance, finance, monthly, tasks, admissions };
+  return { generatedAt: new Date().toISOString(), students, staff, fees, collections, exams, attendance, finance: finance && cash ? {...finance,...cash} : null, monthly, tasks, admissions };
 }
 
 function createWorkspaceSettingsRoutes(runtime: Runtime) {

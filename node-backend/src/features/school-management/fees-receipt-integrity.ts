@@ -38,13 +38,15 @@ export function createSchoolFeeReceiptIntegrityRoutes(runtime:Runtime){const r=n
   // Transfers between receivable accounts (e.g. 1100 -> 1110) tag both legs with the student,
   // so they are left out: they net to zero but would inflate "billed". Everything that is not a
   // payment counts as a credit, so billed - paid - credited always equals the balance.
+  // A reversed journal is marked 'reversed' and its reversal points back via reversal_of_id;
+  // both are skipped so a voided receipt neither counts as paid nor as a new charge.
   const q=await runtime.db.query<any>(`SELECT COALESCE(SUM(l.debit_minor),0)::float8 billed,
      COALESCE(SUM(CASE WHEN j.source_type IN ('receipt','schoolpay_payment') THEN l.credit_minor ELSE 0 END),0)::float8 paid,
      COALESCE(SUM(CASE WHEN j.source_type IN ('receipt','schoolpay_payment') THEN 0 ELSE l.credit_minor END),0)::float8 credited,
      COALESCE(SUM(l.debit_minor-l.credit_minor),0)::float8 balance
     FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
     JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
-    WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2 AND j.status='posted' AND j.source_type IS DISTINCT FROM 'school_fee_control_transfer'
+    WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2 AND j.status='posted' AND j.reversal_of_id IS NULL AND j.source_type IS DISTINCT FROM 'school_fee_control_transfer'
       AND (a.subtype='school_fee_receivable' OR (a.subtype='receivable' AND l.dimensions_json ? 'schoolStudentId'))`,[p.organizationId,id]);
   const open=await runtime.db.query<any>(`SELECT COUNT(DISTINCT d.id)::int n FROM documents d JOIN school_student_fee_charges ch ON ch.document_id=d.id AND ch.organization_id=d.organization_id WHERE d.organization_id=$1 AND ch.student_id=$2 AND d.type='invoice' AND d.status IN ('open','partially_paid') AND d.total_minor>d.paid_minor`,[p.organizationId,id]);
   const x=q.rows[0]??{};

@@ -78,7 +78,7 @@ export function matchTopic(unit: { title: string; theme?: string | null }, topic
  * Problems with an outline against the required topics: topics with no unit, and topics given far fewer lessons than
  * their share while others take far more. Empty when the outline is acceptable.
  */
-export function coverageProblems(units: Array<{ title: string; theme?: string | null; lessons: unknown[] }>, topics: RequiredTopic[], slots: number): string[] {
+export function coverageProblems(units: Array<{ title: string; theme?: string | null; lessons: unknown[] }>, topics: RequiredTopic[], slots: number, presenceOnly = false): string[] {
   if (!topics.length) return [];
   const shares = topicShares(topics, slots);
   const got = topics.map(() => 0);
@@ -89,7 +89,8 @@ export function coverageProblems(units: Array<{ title: string; theme?: string | 
     // Compare against the share of the lessons actually given, so a short outline is not punished twice.
     const want = Math.max(1, Math.round(shares[i]! * Math.min(1, total / slots)));
     if (!got[i]) problems.push(`NCDC topic ${t.no} "${t.title}" has no unit`);
-    else if (got[i]! < Math.max(1, Math.floor(want * 0.5))) problems.push(`NCDC topic ${t.no} "${t.title}" has only ${got[i]} lessons; it needs about ${want}`);
+    // When the school's schemes of work lead, they decide pacing: an NCDC topic only has to be present.
+    else if (!presenceOnly && got[i]! < Math.max(1, Math.floor(want * 0.5))) problems.push(`NCDC topic ${t.no} "${t.title}" has only ${got[i]} lessons; it needs about ${want}`);
   });
   return problems;
 }
@@ -115,4 +116,17 @@ export function fitToSlots<T extends { kind: string }>(units: T[][], slots: numb
     while (drop > 0) { out.pop(); drop -= 1; }
     return out;
   });
+}
+
+/**
+ * When the school has schemes of work they are the base of the outline: most teaching lessons must cite them.
+ * (An outline built from the NCDC headings alone, citing none of the school's schemes, is rejected.)
+ */
+export function schemeFollowProblems(units: Array<{ title: string; lessons: Array<{ kind?: string | null; sourcePassageIds: string[] }> }>, schemePassages: Set<string>): string[] {
+  if (!schemePassages.size) return [];
+  const teach = units.flatMap(u => u.lessons).filter(l => (l.kind ?? "teach") === "teach");
+  if (!teach.length) return [];
+  const following = teach.filter(l => l.sourcePassageIds.some(id => schemePassages.has(id))).length;
+  if (following / teach.length >= 0.6) return [];
+  return [`only ${following} of ${teach.length} teaching lessons cite the school's schemes of work; they must follow the schemes' topics, subtopics and order (cite their passages)`];
 }

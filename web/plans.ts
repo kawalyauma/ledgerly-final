@@ -8,7 +8,7 @@ export type PlanKey = "free" | "standard" | "premium";
 const ALWAYS = ["ledgerly-core:Organization", "ledgerly-core:System status", "billing:Billing"];
 const FREE = ["ledgerly-core:Dashboards", "school-management:School", "exams:Examinations"];
 const STANDARD = [
-  "attendance:Attendance", "academics:Academics", "communications:Messages & Notifications", "tasks-work:Tasks & Work",
+  "attendance:Attendance", "academics:Academics", "academics:Learning Engine", "communications:Messages & Notifications", "tasks-work:Tasks & Work",
   "contacts:Contacts", "file-manager:Documents", "human-resources:Human Resources", "payroll-payments:Payroll & Payments", "books:Books",
   "ledgerly-core:Accounting", "ledgerly-core:Sales & Purchasing", "ledgerly-core:Operations", "ledgerly-core:Banking & Inventory",
   "ledgerly-core:Tax", "ledgerly-core:Planning & Reporting",

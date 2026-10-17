@@ -18,3 +18,8 @@ data/
 # Local one-off data scripts and exports (contain school records)
 tmp/
 node-backend/scripts/_tmp-*
+
+# Local fee-correction drafts and notices (contain learner records)
+.draft-fees/
+# Per-machine Claude Code permissions
+.claude/settings.local.json

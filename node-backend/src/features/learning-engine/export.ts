@@ -1,4 +1,6 @@
 import { Resvg } from "@resvg/resvg-js";
+import { mathToText } from "./latex.js";
+import { isNoteHeading } from "./print.js";
 import {
   AlignmentType, BorderStyle, Document, HeadingLevel, ImageRun, Packer, PageOrientation, Paragraph, ShadingType, Table, TableCell, TableRow,
   TextRun, WidthType, type ISectionOptions,
@@ -22,7 +24,7 @@ export function svgToPng(svg: string, width = 1280): { png: Uint8Array; width: n
 
 type Plan = {
   competences?: string[]; languageCompetence?: string | null; objectives?: string[]; priorKnowledge?: string | null; methods?: string[]; materials?: string[];
-  references?: string[]; steps?: Array<{ stage: string; minutes?: number | null; teacherActivity: string; learnerActivity: string }>;
+  references?: string[]; steps?: Array<{ stage: string; minutes?: number | null; content?: string | null; teacherActivity: string; learnerActivity: string }>;
   assessment?: string | null; homework?: string | null; lifeSkills?: string[];
 };
 type LessonRow = {
@@ -34,13 +36,16 @@ const border = { style: BorderStyle.SINGLE, size: 4, color: "B8C2CF" };
 const borders = { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border };
 
 /** **bold** and *italic* inside a line, as runs. */
-function runs(text: string, opts: { bold?: boolean; size?: number } = {}): TextRun[] {
+function runs(rawText: string, opts: { bold?: boolean; size?: number; italics?: boolean; underline?: boolean } = {}): TextRun[] {
   const out: TextRun[] = [];
+  // LaTeX maths becomes readable text in Word (3/4, x², ×); the printed page shows it typeset.
+  const text = mathToText(rawText);
   for (const part of text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g)) {
     if (!part) continue;
-    if (part.startsWith("**")) out.push(new TextRun({ text: part.slice(2, -2), bold: true, size: opts.size }));
-    else if (part.startsWith("*") && part.length > 2) out.push(new TextRun({ text: part.slice(1, -1), italics: true, bold: opts.bold, size: opts.size }));
-    else out.push(new TextRun({ text: part.replace(/`/g, ""), bold: opts.bold, size: opts.size }));
+    const style = { size: opts.size, underline: opts.underline ? {} : undefined };
+    if (part.startsWith("**")) out.push(new TextRun({ text: part.slice(2, -2), bold: true, italics: opts.italics, ...style }));
+    else if (part.startsWith("*") && part.length > 2) out.push(new TextRun({ text: part.slice(1, -1), italics: true, bold: opts.bold, ...style }));
+    else out.push(new TextRun({ text: part.replace(/`/g, ""), bold: opts.bold, italics: opts.italics, ...style }));
   }
   return out;
 }
@@ -83,6 +88,7 @@ function diagramBlock(a: { svg: string | null; png?: Uint8Array | null; pending?
 function markdownToDocx(md: string, diagram: (key: string) => Paragraph[]): Array<Paragraph | Table> {
   const out: Array<Paragraph | Table> = [];
   const lines = md.replace(/\r/g, "").split("\n");
+  let note = false;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
     const d = /^\s*\[\[diagram:([a-z0-9-]+)\]\]\s*$/.exec(line);
@@ -98,9 +104,14 @@ function markdownToDocx(md: string, diagram: (key: string) => Paragraph[]): Arra
       continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
-    if (h) { out.push(new Paragraph({ heading: [HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_4][h[1]!.length - 1], children: runs(h[2]!) })); continue; }
-    const li = /^\s*(?:([-*•])|(\d+)[.)])\s+(.*)$/.exec(line);
-    if (li) { out.push(new Paragraph({ children: [new TextRun(li[1] ? "•  " : `${li[2]}.  `), ...runs(li[3]!)], indent: { left: 360, hanging: 260 }, spacing: { after: 40 } })); continue; }
+    if (h) {
+      // Notebook style: section headings underlined, '### Note' as "Note:" with ticked, italic points.
+      note = isNoteHeading(h[2]!);
+      out.push(new Paragraph({ heading: [HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_4][h[1]!.length - 1], children: runs(note ? "Note:" : h[2]!, { underline: h[1]!.length >= 3 }) }));
+      continue;
+    }
+    const li = /^\s*(?:([-*•❖])|(\d+)[.)])\s+(.*)$/.exec(line);
+    if (li) { out.push(new Paragraph({ children: [new TextRun(li[1] ? (note ? "✓  " : "❖  ") : `${li[2]}.  `), ...runs(li[3]!, { italics: note && Boolean(li[1]) })], indent: { left: 360, hanging: 260 }, spacing: { after: 40 } })); continue; }
     if (!line.trim()) continue;
     out.push(new Paragraph({ children: runs(line), spacing: { after: 100 } }));
   }
@@ -208,8 +219,8 @@ export async function schemeDocx(runtime: Runtime, organizationId: string, schem
       children.push(label("Objectives"), ...list(p.objectives));
       if (p.priorKnowledge) children.push(label("Prior knowledge"), new Paragraph({ children: runs(p.priorKnowledge) }));
       children.push(label("Methods"), ...list(p.methods), label("Instructional materials"), ...list(p.materials));
-      children.push(label("Lesson procedure"), table(["Stage", "Time", "Teacher's activity", "Learners' activity"],
-        (p.steps ?? []).map(st => [st.stage, st.minutes ? `${st.minutes} min` : "", st.teacherActivity, st.learnerActivity]), [18, 8, 37, 37]));
+      children.push(label("Lesson procedure"), table(["Stage", "Time", "Content", "Teacher's activity", "Learners' activity"],
+        (p.steps ?? []).map(st => [st.stage, st.minutes ? `${st.minutes} min` : "", st.content ?? "", st.teacherActivity, st.learnerActivity]), [14, 7, 25, 27, 27]));
       if (p.assessment) children.push(label("Assessment"), new Paragraph({ children: runs(p.assessment) }));
       if (p.homework) children.push(label("Homework"), new Paragraph({ children: runs(p.homework) }));
       if (p.lifeSkills?.length) children.push(label("Life skills and values"), ...list(p.lifeSkills));

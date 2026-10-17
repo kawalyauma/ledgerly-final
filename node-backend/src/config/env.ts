@@ -33,6 +33,7 @@ const schema = z.object({
   NEXDRIVE_WORKSPACE_ID: emptyToUndefined(z.string().uuid().optional()),
   NEXDRIVE_API_KEY: emptyToUndefined(z.string().startsWith("nd_").optional()),
   NEXDRIVE_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(120000),
+  STORAGE_LOCAL_ORGANIZATION_IDS: z.string().default(""),
   STORAGE_LOCAL_ROOT: z.string().min(1).default("./data/storage"),
   S3_ENDPOINT: z.string().url().optional(),
   S3_REGION: z.string().min(1).default("us-east-1"),

@@ -37,7 +37,7 @@ const feesRead: LedgerlyAiToolDefinition = {
            JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
            JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
           WHERE l.organization_id=$1 AND l.dimensions_json->>'schoolStudentId'=$2
-            AND a.subtype='school_fee_receivable' AND j.status='posted'
+            AND a.subtype='school_fee_receivable' AND j.status='posted' AND j.reversal_of_id IS NULL
           ORDER BY j.transaction_date DESC,j.created_at DESC LIMIT 200`,
         [ctx.principal.organizationId, input.studentId],
       ),

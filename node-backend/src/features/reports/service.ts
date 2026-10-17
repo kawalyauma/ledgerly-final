@@ -1,9 +1,14 @@
+import { cashSummary, CASH_DESCRIPTION } from "../finance-core/cash-summary.js";
 import type { Pool } from "pg";
+import { accountingAging, accountingCounterpartyBalances } from "./accounting-balances.js";
 import { AppError } from "../../http/errors.js";
 import type { Runtime } from "../../runtime.js";
+import { accountingReportDefaults, accountingFilters, cashAccountSql } from "../finance-core/reporting-period.js";
+export { accountingReportDefaults } from "../finance-core/reporting-period.js";
 
 export const reportCatalog = [
-  { id: "profit-loss", name: "Profit & Loss", available: true },
+  { id: "cash-collections", name: "Money Received & Paid Out", available: true },
+  { id: "profit-loss", name: "Profit & Loss (includes unpaid fees)", available: true },
   { id: "balance-sheet", name: "Balance Sheet", available: true },
   { id: "cash-flow", name: "Cash Flow", available: true },
   { id: "trial-balance", name: "Trial Balance", available: true },
@@ -55,6 +60,8 @@ export type ReportFilters = {
 export type ReportResult = {
   reportType: ReportType;
   generatedAt: string;
+  basis?: "cash" | "accrual";
+  description?: string;
   filters: ReportFilters;
   columns: string[];
   rows: Record<string, unknown>[];
@@ -83,7 +90,7 @@ function availableDefinition(type: string) {
 }
 
 function range(filters: ReportFilters) {
-  return { from: filters.from ?? MIN_DATE, to: filters.to ?? filters.asOf ?? MAX_DATE };
+  return { from: filters.from ?? MIN_DATE, to: filters.asOf ?? filters.to ?? MAX_DATE };
 }
 
 function dimensions(filters: ReportFilters, alias: string, startIndex: number) {
@@ -225,16 +232,27 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
   availableDefinition(reportType);
   const type = reportType as ReportType;
   const db = runtime.db;
+  const defaults = ["customer-statement", "supplier-statement"].includes(type) ? {} : await accountingReportDefaults(db, organizationId);
+  filters = accountingFilters(filters, defaults.from);
+  const cutover = defaults.from && (filters.asOf ?? filters.to ?? MAX_DATE) >= defaults.from ? defaults.from : undefined;
   const generatedAt = new Date().toISOString();
   let rows: Record<string, unknown>[] = [];
   let columns: string[] = [];
   let totals: Record<string, number> | undefined;
 
+  if (cutover && (type === "receivables-ageing" || type === "payables-ageing")) return accountingAging(db, organizationId, cutover, type === "receivables-ageing", filters);
   if (type === "receivables-ageing") return aging(db, organizationId, "invoice", filters);
   if (type === "payables-ageing") return aging(db, organizationId, "bill", filters);
   if (type === "customer-statement") return statement(db, organizationId, true, filters);
   if (type === "supplier-statement") return statement(db, organizationId, false, filters);
 
+  if (type === "cash-collections") {
+    if (filters.accountId || filters.contactId || filters.projectId) throw new AppError(422,"CASH_REPORT_FILTER","The collections summary covers all cash and bank accounts. Clear the account, contact and project filters.");
+    const period=range(filters),cash=await cashSummary(db,organizationId,period.from,period.to);
+    const {daily,...totals}=cash;
+    return {reportType:type,generatedAt,filters,basis:"cash",description:CASH_DESCRIPTION,
+      columns:["date","receivedMinor","paidOutMinor","feesCollectedMinor","otherReceiptsMinor","netCashMovementMinor"],rows:daily,totals};
+  }
   if (type === "profit-loss") {
     const ledger = await ledgerSummary(db, organizationId, filters, ["revenue","expense"]);
     rows = ledger.map((row) => ({ ...row, amountMinor: normalAmount(row) }));
@@ -246,7 +264,7 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     const asOf = filters.asOf ?? filters.to ?? MAX_DATE;
     const base = { ...filters, from: MIN_DATE, to: asOf };
     const ledger = await ledgerSummary(db, organizationId, base, ["asset","liability","equity"]);
-    rows = ledger.map((row) => ({ ...row, amountMinor: normalAmount(row) }));
+    rows = ledger.filter(row => !cutover || row.netDebitMinor !== 0).map((row) => ({ ...row, amountMinor: normalAmount(row) }));
     const income = await ledgerSummary(db, organizationId, base, ["revenue","expense"]);
     const currentEarningsMinor = income.reduce((sum, row) => sum + (row.type === "revenue" ? normalAmount(row) : -normalAmount(row)), 0);
     if (currentEarningsMinor !== 0) rows.push({ accountId: "current-earnings", code: "CURRENT-EARNINGS", name: "Current earnings", type: "equity", subtype: "current_earnings", amountMinor: currentEarningsMinor });
@@ -256,8 +274,14 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     totals = { assetMinor, liabilityMinor, equityMinor, differenceMinor: assetMinor - liabilityMinor - equityMinor };
     columns = ["code","name","type","subtype","amountMinor"];
   } else if (type === "trial-balance") {
-    const ledger = await ledgerSummary(db, organizationId, filters);
-    rows = ledger;
+    const includeOpening = cutover;
+    const ledger = await ledgerSummary(db, organizationId, includeOpening ? { ...filters, from: MIN_DATE } : filters);
+    // A cutover trial balance includes carried balances, rather than only term movements.
+    if (includeOpening) for (const row of ledger) {
+      row.debitMinor = Math.max(row.netDebitMinor, 0);
+      row.creditMinor = Math.max(-row.netDebitMinor, 0);
+    }
+    rows = includeOpening ? ledger.filter(row => row.netDebitMinor !== 0) : ledger;
     totals = { debitMinor: ledger.reduce((sum, row) => sum + row.debitMinor, 0), creditMinor: ledger.reduce((sum, row) => sum + row.creditMinor, 0) };
     columns = ["code","name","type","debitMinor","creditMinor","netDebitMinor"];
   } else if (type === "general-ledger" || type === "transaction-detail" || type === "account-activity") {
@@ -274,13 +298,20 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
        WHERE l.organization_id=$1 AND j.status IN ('posted','reversed') AND j.posting_date BETWEEN $2::date AND $3::date${dim.sql}
        ORDER BY j.posting_date,j.entry_number,l.id LIMIT 20000`, params);
     rows = result.rows;
+    if (cutover && type !== "transaction-detail" && filters.from) {
+      const before = new Date(`${filters.from}T00:00:00Z`); before.setUTCDate(before.getUTCDate()-1);
+      const opening = await ledgerSummary(db,organizationId,{...filters,from:MIN_DATE,to:before.toISOString().slice(0,10)});
+      rows = [...opening.filter(r=>r.netDebitMinor!==0).map(r=>({ entryNumber:"OPENING", postingDate:filters.from, accountCode:r.code,accountName:r.name,
+        journalDescription:"Balance brought forward",description:"Opening accounting balance",sourceType:"opening_balance",
+        debitMinor:Math.max(r.netDebitMinor,0),creditMinor:Math.max(-r.netDebitMinor,0) })),...rows];
+    }
     totals = { debitMinor: rows.reduce((n, r) => n + Number(r.debitMinor), 0), creditMinor: rows.reduce((n, r) => n + Number(r.creditMinor), 0) };
     columns = ["entryNumber","postingDate","accountCode","accountName","journalDescription","description","debitMinor","creditMinor","contact","projectId","sourceType"];
   } else if (type === "cash-flow") {
     const { from, to } = range(filters);
     const result = await db.query(
       `WITH cash_accounts AS (
-         SELECT id FROM accounts WHERE organization_id=$1 AND (subtype='cash' OR id IN (SELECT ledger_account_id FROM bank_accounts WHERE organization_id=$1))
+         SELECT a.id FROM accounts a WHERE a.organization_id=$1 AND ${cashAccountSql("a")}
        ), cash_entries AS (
          SELECT DISTINCT l.journal_entry_id FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
          WHERE l.organization_id=$1 AND l.account_id IN (SELECT id FROM cash_accounts) AND j.status IN ('posted','reversed') AND j.posting_date BETWEEN $2::date AND $3::date
@@ -343,7 +374,14 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
   } else if (type === "changes-in-equity" || type === "retained-earnings") {
     const ledger = await ledgerSummary(db, organizationId, filters, ["equity","revenue","expense"]);
     rows = ledger.map((row) => ({ ...row, amountMinor: row.type === "expense" ? -normalAmount(row) : normalAmount(row) }));
-    totals = { changeMinor: rows.reduce((n, r) => n + Number(r.amountMinor), 0) };
+    const changeMinor = rows.reduce((n, r) => n + Number(r.amountMinor), 0);
+    if (cutover && filters.from) {
+      const before = new Date(`${filters.from}T00:00:00Z`); before.setUTCDate(before.getUTCDate()-1);
+      const opening = await ledgerSummary(db,organizationId,{...filters,from:MIN_DATE,to:before.toISOString().slice(0,10)},["equity","revenue","expense"]);
+      const openingMinor = opening.reduce((n,r)=>n+(r.type==="expense" ? -normalAmount(r) : normalAmount(r)),0);
+      rows.unshift({ code:"OPENING",name:"Equity brought forward",type:"equity",amountMinor:openingMinor });
+      totals = { openingMinor,changeMinor,closingMinor:openingMinor+changeMinor };
+    } else totals = { changeMinor };
     columns = ["code","name","type","amountMinor"];
   } else if (type === "bank-reconciliation" || type === "reconciliation-summary") {
     const asOf = filters.asOf ?? filters.to ?? MAX_DATE;
@@ -408,6 +446,11 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     rows = result.rows.map((row) => ({ ...row, unallocatedMinor: Number(row.amountMinor)-Number(row.allocatedMinor) }));
     columns = ["type","status","currency","count","amountMinor","allocatedMinor","unallocatedMinor"];
   } else if (type === "contact-balances") {
+    if (cutover) {
+      rows = (await accountingCounterpartyBalances(db,organizationId,cutover,filters)).map(r=>({...r,name:r.contact}));
+      columns = ["code","name","type","receivableMinor","payableMinor"];
+      totals = { receivableMinor: rows.reduce((n,r)=>n+Number(r.receivableMinor),0), payableMinor: rows.reduce((n,r)=>n+Number(r.payableMinor),0) };
+    } else {
     const asOf = filters.asOf ?? filters.to ?? new Date().toISOString().slice(0,10);
     const result = await db.query(
       `SELECT c.id AS "contactId",c.code,c.name,c.type,
@@ -416,18 +459,32 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
        FROM contacts c LEFT JOIN documents d ON d.contact_id=c.id AND d.organization_id=c.organization_id AND d.status IN ('open','partially_paid') AND d.issue_date <= $2::date
        WHERE c.organization_id=$1 AND c.archived_at IS NULL GROUP BY c.id,c.code,c.name,c.type ORDER BY c.name`, [organizationId, asOf]);
     rows = result.rows; columns = ["code","name","type","receivableMinor","payableMinor"];
+    }
   } else if (type === "cash-bank-summary") {
     const asOf = filters.asOf ?? filters.to ?? MAX_DATE;
     const result = await db.query(
       `SELECT b.id AS "bankAccountId",b.name,b.bank_name AS "bankName",b.currency,a.code AS "ledgerCode",a.name AS "ledgerName",
-        (b.opening_balance_minor+COALESCE(SUM(CASE WHEN j.posting_date <= $2::date AND j.status IN ('posted','reversed') THEN l.debit_minor-l.credit_minor ELSE 0 END),0))::float8 AS "ledgerBalanceMinor",
-        COUNT(bt.id) FILTER (WHERE bt.status='unmatched' AND bt.transaction_date <= $2::date)::int AS "unmatchedCount"
+        ((CASE WHEN $3::date IS NULL THEN b.opening_balance_minor ELSE 0 END)+COALESCE((
+          SELECT SUM(l.debit_minor-l.credit_minor) FROM journal_lines l
+          JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+          WHERE l.organization_id=b.organization_id AND l.account_id=b.ledger_account_id
+            AND j.posting_date <= $2::date AND j.status IN ('posted','reversed')
+        ),0))::float8 AS "ledgerBalanceMinor",
+        (SELECT COUNT(*)::int FROM bank_transactions bt WHERE bt.organization_id=b.organization_id AND bt.bank_account_id=b.id
+          AND bt.status='unmatched' AND bt.transaction_date <= $2::date AND ($3::date IS NULL OR bt.transaction_date >= $3::date)) AS "unmatchedCount"
        FROM bank_accounts b JOIN accounts a ON a.id=b.ledger_account_id AND a.organization_id=b.organization_id
-       LEFT JOIN journal_lines l ON l.account_id=b.ledger_account_id AND l.organization_id=b.organization_id
-       LEFT JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
-       LEFT JOIN bank_transactions bt ON bt.bank_account_id=b.id AND bt.organization_id=b.organization_id
-       WHERE b.organization_id=$1 GROUP BY b.id,b.name,b.bank_name,b.currency,b.opening_balance_minor,a.code,a.name ORDER BY b.name`, [organizationId, asOf]);
+       WHERE b.organization_id=$1
+       UNION ALL
+       SELECT a.id,a.name,NULL,o.base_currency,a.code,a.name,
+         COALESCE((SELECT SUM(l.base_debit_minor-l.base_credit_minor) FROM journal_lines l
+           JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
+           WHERE l.organization_id=a.organization_id AND l.account_id=a.id AND j.status IN ('posted','reversed') AND j.posting_date <= $2::date),0)::float8,0
+       FROM accounts a JOIN organizations o ON o.id=a.organization_id
+       WHERE a.organization_id=$1 AND ${cashAccountSql("a")}
+         AND NOT EXISTS (SELECT 1 FROM bank_accounts b WHERE b.organization_id=a.organization_id AND b.ledger_account_id=a.id)
+       ORDER BY name`, [organizationId, asOf, cutover ?? null]);
     rows = result.rows; columns = ["name","bankName","currency","ledgerCode","ledgerName","ledgerBalanceMinor","unmatchedCount"];
+    totals = { ledgerBalanceMinor: rows.reduce((n,r)=>n+Number(r.ledgerBalanceMinor),0) };
   } else if (type === "bank-transactions") {
     const { from, to } = range(filters);
     const result = await db.query(
@@ -443,7 +500,7 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
       `SELECT y.name AS "fiscalYear",y.status AS "yearStatus",p.name AS period,p.starts_on::text AS "startsOn",p.ends_on::text AS "endsOn",p.status,
         p.closed_at AS "closedAt",p.locked_at AS "lockedAt"
        FROM fiscal_periods p LEFT JOIN fiscal_years y ON y.id=p.fiscal_year_id AND y.organization_id=p.organization_id
-       WHERE p.organization_id=$1 ORDER BY p.starts_on DESC`, [organizationId]);
+       WHERE p.organization_id=$1 AND p.ends_on >= $2::date AND p.starts_on <= $3::date ORDER BY p.starts_on DESC`, [organizationId, range(filters).from, range(filters).to]);
     rows = result.rows; columns = ["fiscalYear","yearStatus","period","startsOn","endsOn","status","closedAt","lockedAt"];
   } else if (type === "financial-ratios") {
     const asOf = filters.asOf ?? filters.to ?? MAX_DATE;
@@ -451,7 +508,8 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     const pl = await ledgerSummary(db, organizationId, filters, ["revenue","expense"]);
     const assets = bs.filter(r=>r.type==="asset").reduce((n,r)=>n+normalAmount(r),0);
     const liabilities = bs.filter(r=>r.type==="liability").reduce((n,r)=>n+normalAmount(r),0);
-    const equity = bs.filter(r=>r.type==="equity").reduce((n,r)=>n+normalAmount(r),0);
+    const earned = await ledgerSummary(db,organizationId,{...filters,from:MIN_DATE,to:asOf},["revenue","expense"]);
+    const equity = bs.filter(r=>r.type==="equity").reduce((n,r)=>n+normalAmount(r),0)+earned.reduce((n,r)=>n+(r.type==="expense"?-normalAmount(r):normalAmount(r)),0);
     const cash = bs.filter(r=>r.type==="asset" && r.subtype==="cash").reduce((n,r)=>n+normalAmount(r),0);
     const receivables = bs.filter(r=>r.type==="asset" && r.subtype==="receivable").reduce((n,r)=>n+normalAmount(r),0);
     const payables = bs.filter(r=>r.type==="liability" && r.subtype==="payable").reduce((n,r)=>n+normalAmount(r),0);
@@ -468,10 +526,10 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     columns = ["ratio","value"];
   } else if (type === "draft-transactions") {
     const result = await db.query(
-      `SELECT 'journal' AS source,id,entry_number AS number,posting_date::text AS date,status,description FROM journal_entries WHERE organization_id=$1 AND status='draft'
-       UNION ALL SELECT 'document',id,number,issue_date::text,status,type FROM documents WHERE organization_id=$1 AND status='draft'
-       UNION ALL SELECT 'payment',id,number,payment_date::text,status,type FROM payments WHERE organization_id=$1 AND status='draft'
-       ORDER BY date,source,number`, [organizationId]);
+      `SELECT 'journal' AS source,id,entry_number AS number,posting_date::text AS date,status,description FROM journal_entries WHERE organization_id=$1 AND status='draft' AND posting_date BETWEEN $2::date AND $3::date
+       UNION ALL SELECT 'document',id,number,issue_date::text,status,type FROM documents WHERE organization_id=$1 AND status='draft' AND issue_date BETWEEN $2::date AND $3::date
+       UNION ALL SELECT 'payment',id,number,payment_date::text,status,type FROM payments WHERE organization_id=$1 AND status='draft' AND payment_date BETWEEN $2::date AND $3::date
+       ORDER BY date,source,number`, [organizationId, range(filters).from, range(filters).to]);
     rows = result.rows; columns = ["source","id","number","date","status","description"];
   } else if (type === "audit-trail") {
     const { from, to } = range(filters);
@@ -483,7 +541,7 @@ export async function generateReport(runtime: Pick<Runtime,"db">, organizationId
     rows = result.rows; columns = ["createdAt","actorId","action","entityType","entityId","before","after"];
   }
 
-  return { reportType: type, generatedAt, filters, columns, rows, ...(totals ? { totals } : {}) };
+  return { reportType: type, generatedAt, filters, columns, rows, ...(type==="profit-loss" ? {basis:"accrual" as const,description:"Recorded revenue includes fees still unpaid. Expenses include non-cash bursaries and concessions. Use Money Received & Paid Out for actual collections and payments."} : {}), ...(totals ? { totals } : {}) };
 }
 
 export function toCsv(report: ReportResult): string {

@@ -210,7 +210,7 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
         SELECT COALESCE(SUM(l.debit_minor-l.credit_minor),0) AS balanceMinor,COUNT(DISTINCT j.id) AS transactionCount
         FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
         JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
-        WHERE l.organization_id=? AND l.dimensions_json->>'schoolStudentId'=? AND a.subtype='school_fee_receivable' AND j.status='posted'
+        WHERE l.organization_id=? AND l.dimensions_json->>'schoolStudentId'=? AND a.subtype='school_fee_receivable' AND j.status='posted' AND j.reversal_of_id IS NULL
       `).bind(organizationId, String(student.id)).first<any>();
       return { found: true, student, balanceMinor: Number(balance?.balanceMinor || 0), transactionCount: Number(balance?.transactionCount || 0) };
     }
@@ -224,7 +224,7 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
         FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
         JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
         JOIN school_students s ON s.id=l.dimensions_json->>'schoolStudentId' AND s.organization_id=l.organization_id
-        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted' GROUP BY s.id
+        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted' AND j.reversal_of_id IS NULL GROUP BY s.id
         HAVING SUM(l.debit_minor-l.credit_minor)>0 ORDER BY balanceMinor DESC LIMIT ?
       `).bind(organizationId, limit).all();
       return { arrears: rows.results };
@@ -240,7 +240,7 @@ export async function executeTool(ctx: ToolContext, name: string, raw: unknown) 
                COALESCE(SUM(l.debit_minor-l.credit_minor),0) AS outstandingMinor
         FROM journal_lines l JOIN journal_entries j ON j.id=l.journal_entry_id AND j.organization_id=l.organization_id
         JOIN accounts a ON a.id=l.account_id AND a.organization_id=l.organization_id
-        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted'
+        WHERE l.organization_id=? AND a.subtype='school_fee_receivable' AND j.status='posted' AND j.reversal_of_id IS NULL
       `).bind(organizationId).first<any>();
       return { billedMinor: Number(row?.billedMinor || 0), paidMinor: Number(row?.paidMinor || 0), creditedMinor: Number(row?.creditedMinor || 0), writtenOffMinor: Number(row?.writtenOffMinor || 0), outstandingMinor: Number(row?.outstandingMinor || 0) };
     }

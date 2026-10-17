@@ -4,7 +4,7 @@ import type { Runtime } from "../../runtime.js";
 import { createId } from "../core-identity/security.js";
 import { getLedgerlyAiFoundationService } from "../ledgerly-ai/runtime-service.js";
 
-export type EngineProvider = "codex" | "claude-code" | "manual";
+export type EngineProvider = "codex" | "claude-code" | "manual" | "git";
 export type EngineState = "running" | "paused" | "stopped";
 export type TaskKind = "scheme.source" | "scheme.outline" | "lesson.write" | "lesson.plan" | "page.analyze" | "student.summary" | "figure.generate";
 /** Steps that do not call the AI (and so do not count towards the daily limit). */
@@ -24,13 +24,23 @@ export type TaskContext = {
   task: ClaimedTask;
   settings: EngineSettings;
   /** Runs one bounded AI step and returns the parsed JSON object it produced. */
-  ai(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }>; vision?: boolean; timeoutMs?: number }): Promise<Record<string, unknown>>;
+  ai(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }>; vision?: boolean; timeoutMs?: number; job?: GitJobMeta }): Promise<Record<string, unknown>>;
   /** A Codex step that may create files (e.g. a generated image) in /outputs; returns its reply text and the files. */
   aiWithFiles(input: { prompt: string; images?: Array<{ name: string; bytes: Uint8Array }> }): Promise<{ text: string; files: Array<{ name: string; bytes: Uint8Array }> }>;
   enqueue(kind: TaskKind, subjectRef: string, options?: { priority?: number }): Promise<void>;
 };
 
-/** Thrown when the manual provider has stored a prompt and is waiting for its reply. */
+/** What the git desk needs to publish a call as a job: which scheme/lessons it is for. */
+export type GitJobMeta = {
+  schemeId: string;
+  week?: number;
+  weeks?: number;
+  periodsPerWeek?: number;
+  lessons?: Array<{ id: string; title: string; subtopic: string | null; kind: string; week: number; periods: number }>;
+  repairOf?: number;
+};
+
+/** Thrown when the manual or git provider has stored a prompt and is waiting for its reply. */
 export class ManualReplyPending extends Error {}
 /** How long a step waits for a manual reply before it is looked at again (storing a reply releases it at once). */
 const MANUAL_HOLD_DAYS = 30;
@@ -92,7 +102,7 @@ export function parseJsonReply(text: string): Record<string, unknown> {
 
 export const GROUNDING_RULES = [
   "You are the curriculum engine of Ledgerly AI for a Ugandan school.",
-  "Work from the passages, page images and records given in this prompt. Do not invent facts, topics, answers or names. Only when the task explicitly permits it, you may create age-appropriate pedagogical examples or practice questions for a skill already supported by the supplied material, and must label them generated.",
+  "Work from the passages, page images and records given in this prompt. Do not invent facts, topics, notes, examples, activities, questions, answers or names: every one of them is taken from the passages. You choose, order, tidy and format the material; you never make it up.",
   "If the material does not cover something, leave it out or set the field to null and say so in \"gaps\". Never fill gaps from memory.",
   "Do not run commands, open files or browse. Everything you need is in this prompt.",
   "Reply with ONE JSON object only, exactly matching the requested shape. No prose before or after it.",
@@ -143,7 +153,7 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
     runtime, task, settings,
     async ai(input) {
       const provider: EngineProvider = input.images?.length ? settings.visionProvider : settings.provider;
-      if (provider === "manual") {
+      if (provider === "manual" || provider === "git") {
         // Each call of a step has its own slot; re-running the step after the reply is stored finds it there.
         const index = manualCalls++;
         const prompt = `${GROUNDING_RULES}\n\n${input.prompt}`;
@@ -154,9 +164,10 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
           return parseJsonReply(stored.rows[0].reply);
         }
         await runtime.db.query(
-          `INSERT INTO lrn_manual_calls(task_id,call_index,organization_id,kind,subject_ref,prompt) VALUES($1,$2,$3,$4,$5,$6)
-           ON CONFLICT(task_id,call_index) DO UPDATE SET prompt=EXCLUDED.prompt`, [task.id, index, task.organizationId, task.kind, task.subjectRef, prompt]);
-        throw new ManualReplyPending(`Waiting for the manual reply to call ${index} of this step.`);
+          `INSERT INTO lrn_manual_calls(task_id,call_index,organization_id,kind,subject_ref,prompt,channel,job) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+           ON CONFLICT(task_id,call_index) DO UPDATE SET prompt=EXCLUDED.prompt,channel=EXCLUDED.channel,job=EXCLUDED.job`,
+          [task.id, index, task.organizationId, task.kind, task.subjectRef, prompt, provider, input.job ? JSON.stringify(input.job) : null]);
+        throw new ManualReplyPending(provider === "git" ? `Waiting for an agent to answer job ${task.id}-${index} in the resources bank.` : `Waiting for the manual reply to call ${index} of this step.`);
       }
       const root = path.join(ai.config.LEDGERLY_AI_WORK_ROOT, "learning", task.id);
       const attachmentRoot = path.join(root, "attachments");
@@ -229,14 +240,15 @@ async function runTask(runtime: Runtime, task: ClaimedTask) {
       [task.id, meter.provider, meter.promptChars || null, meter.durationMs || null, JSON.stringify(meter.usage), JSON.stringify(result ?? {})]);
   } catch (error) {
     const message = (error instanceof Error ? error.message : String(error)).slice(0, 4000);
-    const manual = settings.provider === "manual" && manualCalls > 0;
+    const manual = (settings.provider === "manual" || settings.provider === "git") && manualCalls > 0;
     // Provider limits can interrupt any AI-backed step. Preserve its retries and resume after
     // the reset instead of turning a complete-term generation run into permanent failures.
     const usageLimited = !LOCAL_KINDS.has(task.kind) && USAGE_LIMIT.test(message);
     if (error instanceof ManualReplyPending || manual || usageLimited) {
       // A manual reply that did not work is cleared with its error, so it can be answered again; the step keeps its retries.
       if (manual && !(error instanceof ManualReplyPending)) {
-        await runtime.db.query(`UPDATE lrn_manual_calls SET reply=NULL,error=$3 WHERE task_id=$1 AND call_index=$2`, [task.id, manualCalls - 1, message]);
+        // The git desk sees the error, writes it to jobs/feedback and reopens the job for the next attempt.
+        await runtime.db.query(`UPDATE lrn_manual_calls SET reply=NULL,error=$3,problems=jsonb_build_array($3::text) WHERE task_id=$1 AND call_index=$2`, [task.id, manualCalls - 1, message]);
       }
       await runtime.db.query(
         `UPDATE lrn_ai_tasks SET status=CASE WHEN status='cancelled' THEN 'cancelled' ELSE 'queued' END,attempts=GREATEST(attempts-1,0),lease_until=NULL,
@@ -268,6 +280,16 @@ type FailureHook = (runtime: Runtime, task: ClaimedTask, message: string) => Pro
 const failureHooks = new Map<TaskKind, FailureHook>();
 /** Called once a step has used up its retries, so the scheme, lesson or page can show the failure. */
 export function onTaskFailed(kind: TaskKind, hook: FailureHook) { failureHooks.set(kind, hook); }
+
+/** Fails a queued step from outside the worker (the git desk gives up on a job) and runs its failure hook. */
+export async function failQueuedTask(runtime: Runtime, taskId: string, message: string) {
+  const r = await runtime.db.query<ClaimedTask>(
+    `UPDATE lrn_ai_tasks SET status='failed',error=$2,finished_at=CURRENT_TIMESTAMP,lease_until=NULL WHERE id=$1 AND status='queued'
+     RETURNING id,organization_id AS "organizationId",kind,subject_ref AS "subjectRef",attempts,max_attempts AS "maxAttempts",requested_by AS "requestedBy"`,
+    [taskId, message.slice(0, 4000)]);
+  const task = r.rows[0];
+  if (task) await failureHooks.get(task.kind)?.(runtime, task, message).catch(() => undefined);
+}
 
 const started = new WeakSet<Runtime>();
 /** Starts the engine loop in this process. Steps run one at a time per process; leases make several processes safe. */

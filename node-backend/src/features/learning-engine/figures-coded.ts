@@ -10,6 +10,11 @@ export const codedSpecSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("number-line"), from: z.number().min(-1000).max(1000), to: z.number().min(-1000).max(1000), step: z.number().positive().max(1000), marks: z.array(z.number()).max(12).default([]) }),
   z.object({ type: z.literal("clock"), hour: z.number().int().min(0).max(23), minute: z.number().int().min(0).max(59) }),
   z.object({ type: z.literal("map"), region: z.literal("uganda").default("uganda"), layers: z.array(z.enum(MAP_LAYERS)).min(1).max(7).default(["lakes", "rivers", "neighbours"]), highlight: z.array(z.string().max(60)).max(10).default([]) }),
+  /** Primary vertical working: numbers set out in columns, as teachers write them on the board. */
+  z.object({ type: z.literal("column-sum"), operation: z.enum(["add", "subtract", "multiply"]), numbers: z.array(z.number().int().min(0).max(99_999_999)).min(2).max(4), showAnswer: z.boolean().default(true) }),
+  z.object({ type: z.literal("long-division"), dividend: z.number().int().min(1).max(9_999_999), divisor: z.number().int().min(1).max(999), showWorking: z.boolean().default(true) }),
+  z.object({ type: z.literal("angle"), degrees: z.number().min(1).max(359), label: z.string().max(12).default("") }),
+  z.object({ type: z.literal("venn"), sets: z.array(z.object({ label: z.string().min(1).max(30), items: z.array(z.string().min(1).max(20)).max(10).default([]) })).min(2).max(3), both: z.array(z.string().min(1).max(20)).max(8).default([]) }),
   z.object({ type: z.literal("bar-chart"), title: z.string().max(120).default(""), yLabel: z.string().max(60).default(""), bars: z.array(z.object({ label: z.string().min(1).max(30), value: z.number().min(0).max(1e9) })).min(1).max(12) }),
 ]);
 export type CodedSpec = z.infer<typeof codedSpecSchema>;
@@ -123,6 +128,94 @@ export function codedFigure(spec: CodedSpec): { conceptKey: string; title: strin
       const layers = [...new Set(spec.layers)].sort();
       const m = ugandaMap(layers, spec.highlight);
       return { conceptKey: key(["map", spec.region, ...layers, ...spec.highlight.map(h => h.toLowerCase())]), title: m.title, subject: "social-studies", svg: m.svg, width: m.width, height: m.height, anchors: m.anchors };
+    }
+    case "column-sum": {
+      const nums = spec.operation === "subtract" ? [...spec.numbers].sort((x, y) => y - x) : spec.numbers;
+      const answer = spec.operation === "add" ? nums.reduce((t, v) => t + v, 0) : spec.operation === "subtract" ? nums.slice(1).reduce((t, v) => t - v, nums[0]!) : nums.reduce((t, v) => t * v, 1);
+      const rows = [...nums.map(String), ...(spec.showAnswer ? [String(answer)] : [])];
+      const digits = Math.max(...rows.map(r => r.length)) + 1, cw = 34, right = 360 + (digits * cw) / 2, top = 70, lh = 52;
+      const sign = { add: "+", subtract: "−", multiply: "×" }[spec.operation];
+      let body = "";
+      const row = (text: string, y: number) => [...text].reverse().forEach((d, i) => { body += `<text x="${n(right - i * cw)}" y="${y}" font-size="38" text-anchor="end" font-family="Liberation Mono">${d}</text>`; });
+      nums.forEach((v, i) => row(String(v), top + i * lh));
+      const lineY = top + (nums.length - 1) * lh + 18;
+      body += `<text x="${n(right - digits * cw - 6)}" y="${top + (nums.length - 1) * lh}" font-size="38" text-anchor="middle">${sign}</text>`;
+      body += `<line x1="${n(right - digits * cw - 24)}" y1="${lineY}" x2="${right + 8}" y2="${lineY}" ${STROKE}/>`;
+      const ansY = lineY + 46;
+      if (spec.showAnswer) row(String(answer), ansY);
+      body += `<line x1="${n(right - digits * cw - 24)}" y1="${ansY + 16}" x2="${right + 8}" y2="${ansY + 16}" ${STROKE}/><line x1="${n(right - digits * cw - 24)}" y1="${ansY + 22}" x2="${right + 8}" y2="${ansY + 22}" ${STROKE}/>`;
+      const h = Math.max(H, ansY + 60);
+      return { conceptKey: key(["column-sum", spec.operation, ...spec.numbers, String(spec.showAnswer)]), title: `${nums.join(` ${sign} `)}${spec.showAnswer ? ` = ${answer}` : ""}`, subject: "mathematics",
+        svg: svgWrap(body, W, h), width: W, height: h, anchors: [anchor("answer", "Answer", right - (digits * cw) / 2, ansY - 12, W, h)] };
+    }
+    case "long-division": {
+      const { dividend, divisor } = spec;
+      const ds = String(dividend), cw = 34, lh = 46;
+      const quotient = Math.floor(dividend / divisor), remainder = dividend % divisor;
+      // The school method: bring down one digit at a time; each step writes the product under the part divided and the difference below it.
+      const steps: Array<{ product: number; diff: number; end: number }> = [];
+      let part = 0, started = false;
+      for (let i = 0; i < ds.length; i += 1) {
+        part = part * 10 + Number(ds[i]);
+        if (!started && part < divisor && i < ds.length - 1) continue;
+        started = true;
+        const q = Math.floor(part / divisor);
+        steps.push({ product: q * divisor, diff: part - q * divisor, end: i });
+        part -= q * divisor;
+      }
+      const left = 240, divX = left + 10, top = 90;
+      const x = (col: number) => divX + 20 + (col + 1) * cw;
+      let body = `<text x="${left - 8}" y="${top + lh}" font-size="38" text-anchor="end" font-family="Liberation Mono">${divisor}</text>`;
+      body += `<path d="M${divX},${top + lh + 12} Q${divX + 16},${top + lh / 2 + 6} ${divX},${top + 4}" fill="none" stroke="#000" stroke-width="3"/><line x1="${divX}" y1="${top + 4}" x2="${x(ds.length - 1) + 14}" y2="${top + 4}" ${STROKE}/>`;
+      [...ds].forEach((d, i) => { body += `<text x="${n(x(i))}" y="${top + lh}" font-size="38" text-anchor="end" font-family="Liberation Mono">${d}</text>`; });
+      const qs = String(quotient);
+      [...qs].forEach((d, i) => { body += `<text x="${n(x(ds.length - qs.length + i))}" y="${top - 12}" font-size="38" text-anchor="end" font-family="Liberation Mono">${d}</text>`; });
+      let y = top + lh;
+      if (spec.showWorking) for (const [k, st] of steps.entries()) {
+        y += lh;
+        const ps = String(st.product);
+        [...ps].forEach((d, i) => { body += `<text x="${n(x(st.end - ps.length + 1 + i))}" y="${y}" font-size="34" text-anchor="end" font-family="Liberation Mono">${d}</text>`; });
+        body += `<text x="${n(x(st.end - ps.length) - 6)}" y="${y}" font-size="30" text-anchor="end">−</text><line x1="${n(x(st.end - ps.length) - 4)}" y1="${y + 12}" x2="${n(x(st.end) + 6)}" y2="${y + 12}" stroke="#000" stroke-width="2.5"/>`;
+        y += lh;
+        const next = k < steps.length - 1 ? steps[k + 1]!.end : st.end;
+        const shown = String(st.diff) + ds.slice(st.end + 1, next + 1);
+        const text = k < steps.length - 1 ? shown.replace(/^0+(?=\d)/, "") : String(st.diff);
+        [...text].forEach((d, i) => { body += `<text x="${n(x(next - text.length + 1 + i))}" y="${y}" font-size="34" text-anchor="end" font-family="Liberation Mono">${d}</text>`; });
+      }
+      const h = Math.max(H, y + 40);
+      return { conceptKey: key(["long-division", dividend, divisor, String(spec.showWorking)]), title: `${dividend} ÷ ${divisor} = ${quotient}${remainder ? ` remainder ${remainder}` : ""}`, subject: "mathematics",
+        svg: svgWrap(body, W, h), width: W, height: h, anchors: [anchor("quotient", "Quotient", x(ds.length - 1) - 20, top - 24, W, h), anchor("divisor", "Divisor", left - 30, top + lh - 12, W, h)] };
+    }
+    case "angle": {
+      const cx = 200, cy = 330, len = 300, t = (-spec.degrees * Math.PI) / 180, r = 70;
+      const ex = cx + len * Math.cos(t), ey = cy + len * Math.sin(t);
+      const big = spec.degrees > 180 ? 1 : 0;
+      let body = `<line x1="${cx}" y1="${cy}" x2="${cx + len}" y2="${cy}" ${STROKE}/><line x1="${cx}" y1="${cy}" x2="${n(ex)}" y2="${n(ey)}" ${STROKE}/>`;
+      body += spec.degrees === 90
+        ? `<path d="M${cx + 34},${cy} v-34 h-34" fill="none" stroke="#000" stroke-width="2.5"/>`
+        : `<path d="M${cx + r},${cy} A${r},${r} 0 ${big} 0 ${n(cx + r * Math.cos(t))},${n(cy + r * Math.sin(t))}" fill="none" stroke="#000" stroke-width="2.5"/>`;
+      const lt = t / 2, label = spec.label || `${spec.degrees}°`;
+      body += `<text x="${n(cx + (r + 34) * Math.cos(lt))}" y="${n(cy + (r + 34) * Math.sin(lt) + 8)}" font-size="24" text-anchor="middle">${esc(label)}</text>`;
+      return { conceptKey: key(["angle", spec.degrees, spec.label]), title: `An angle of ${spec.degrees}°`, subject: "mathematics", svg: svgWrap(body), width: W, height: H,
+        anchors: [anchor("vertex", "Vertex", cx, cy), anchor("arm-1", "Arm", cx + len * 0.7, cy), anchor("arm-2", "Arm", cx + len * 0.7 * Math.cos(t), cy + len * 0.7 * Math.sin(t))] };
+    }
+    case "venn": {
+      const three = spec.sets.length === 3;
+      const centres: Array<[number, number]> = three ? [[250, 175], [390, 175], [320, 290]] : [[245, 215], [395, 215]];
+      const rad = three ? 120 : 145;
+      let body = `<rect x="20" y="20" width="600" height="${H - 40}" fill="none" stroke="#000" stroke-width="2.5"/>`;
+      spec.sets.forEach((set, i) => {
+        const [x0, y0] = centres[i]!;
+        body += `<circle cx="${x0}" cy="${y0}" r="${rad}" fill="none" stroke="#000" stroke-width="3"/>`;
+        const lx = three ? (i === 2 ? x0 : x0 + (i ? 1 : -1) * 95) : x0 + (i ? 1 : -1) * 95, ly = three ? (i === 2 ? y0 + rad + 22 : y0 - rad - 10) : y0 - rad - 12;
+        body += `<text x="${lx}" y="${ly}" font-size="20" font-weight="bold" text-anchor="middle">${esc(set.label)}</text>`;
+        const ox = three ? (i === 2 ? x0 : x0 + (i ? 1 : -1) * 55) : x0 + (i ? 1 : -1) * 65, oy = three ? (i === 2 ? y0 + 45 : y0 - 45) : y0;
+        set.items.forEach((item, k) => { body += `<text x="${ox}" y="${n(oy - ((set.items.length - 1) * 22) / 2 + k * 22 + 6)}" font-size="18" text-anchor="middle">${esc(item)}</text>`; });
+      });
+      const [bx, by] = three ? [320, 215] : [320, 215];
+      spec.both.forEach((item, k) => { body += `<text x="${bx}" y="${n(by - ((spec.both.length - 1) * 22) / 2 + k * 22 + 6)}" font-size="18" text-anchor="middle">${esc(item)}</text>`; });
+      return { conceptKey: key(["venn", ...spec.sets.flatMap(s => [s.label, ...s.items]), "both", ...spec.both]), title: `Venn diagram: ${spec.sets.map(s => s.label).join(" and ")}`, subject: "mathematics",
+        svg: svgWrap(body), width: W, height: H, anchors: spec.sets.map((s, i) => anchor(`set-${i + 1}`, s.label, centres[i]![0]!, centres[i]![1]!)) };
     }
     case "bar-chart": {
       const max = Math.max(...spec.bars.map(b => b.value), 1);

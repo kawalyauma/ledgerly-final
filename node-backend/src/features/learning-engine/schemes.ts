@@ -9,8 +9,9 @@ import { quoteAppearsIn } from "./signature.js";
 import { sanitizeSvg } from "./svg.js";
 import { codedFigureRow, labelFigure, requestFigure } from "./figures.js";
 import { codedSpecSchema } from "./figures-coded.js";
+import { mathToText } from "./latex.js";
 import { methodNames } from "./export.js";
-import { coverageProblems, fitToSlots, topicShares, topicsInCurriculum } from "./coverage.js";
+import { coverageProblems, fitToSlots, schemeFollowProblems, topicShares, topicsInCurriculum } from "./coverage.js";
 import { BASE_ROLE, baseDocumentsFor, classesInTitle, formatPassages, ingestBaseDocument, ingestResource, openingPassages, scopedText, parseTerm, relevantPassages, type Passage, type Scope } from "./sources.js";
 
 const WORDS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
@@ -119,7 +120,7 @@ export async function createScheme(runtime: Runtime, organizationId: string, use
   return { id, status: "sourcing", library, weeks: input.weeks ?? TERM_WEEKS, periodsPerWeek };
 }
 
-type SchemeRow = {
+export type SchemeRow = {
   id: string; organizationId: string; termId: string; classId: string; subjectId: string; title: string; status: string;
   weeks: number; periodsPerWeek: number; library: { classSlug: string | null; subjectSlug: string | null; termSlug: string | null; resourceSlugs: string[]; extraSlugs?: string[];
     /** The NCDC topics of the term with their periods, set by the DOS when the curriculum text cannot be read reliably. */
@@ -127,7 +128,7 @@ type SchemeRow = {
   className: string; subjectName: string; termName: string;
 };
 
-async function loadScheme(runtime: Runtime, organizationId: string, id: string): Promise<SchemeRow> {
+export async function loadScheme(runtime: Runtime, organizationId: string, id: string): Promise<SchemeRow> {
   const row = await runtime.db.query<SchemeRow>(
     `SELECT sc.id,sc.organization_id AS "organizationId",sc.term_id AS "termId",sc.class_id AS "classId",sc.subject_id AS "subjectId",
             sc.title,sc.status,sc.weeks,sc.periods_per_week AS "periodsPerWeek",sc.library_filters AS library,
@@ -365,7 +366,7 @@ registerTaskHandler("scheme.source", async ({ runtime, task }) => {
   return { sources: ingested };
 });
 
-async function schemeSources(runtime: Runtime, schemeId: string) {
+export async function schemeSources(runtime: Runtime, schemeId: string) {
   const rows = await runtime.db.query<{ id: string; role: string; title: string; provider: string }>(
     `SELECT s.id,ss.role,s.title,s.provider FROM lrn_scheme_sources ss JOIN lrn_sources s ON s.id=ss.source_id WHERE ss.scheme_id=$1
       ORDER BY CASE ss.role WHEN 'curriculum' THEN 0 WHEN 'scheme' THEN 1 WHEN 'lesson_plans' THEN 2 WHEN 'notes' THEN 3 WHEN 'reference' THEN 4 ELSE 5 END,s.title`, [schemeId]);
@@ -415,6 +416,9 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   // Curriculum and reference schemes define coverage/order; strong notes supply depth; exams reveal expected application.
   // The NCDC curriculum has its own share so its whole term (every topic) reaches the model, whatever else is attached.
   const ncdc = sources.filter(s => s.provider === "ncdc" && s.role === "curriculum").map(s => s.id);
+  // The school's own schemes of work decide the topics, subtopics and order; NCDC fills gaps (owner's rule, 2026-10-15).
+  const schoolSchemes = new Set(sources.filter(s => s.role === "scheme").map(s => s.id));
+  const schemesFirst = schoolSchemes.size > 0;
   const governance = sources.filter(s => ["curriculum", "scheme"].includes(s.role) && !ncdc.includes(s.id)).map(s => s.id);
   const themeOnly = sources.filter(s => s.role === "theme");
   const teaching = sources.filter(s => ["notes", "lesson_plans", "reference"].includes(s.role)).map(s => s.id);
@@ -424,7 +428,7 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   const setTotal = set.reduce((n, t) => n + t.periods, 0);
   const topics = set.length ? set.map(t => ({ no: t.no, title: t.title, weight: t.periods / setTotal })) : topicsInCurriculum(ncdcText);
   // The whole NCDC term goes in when it fits (up to 55% of the prompt); the other material shares the rest.
-  const baseShare = ncdc.length ? Math.min(0.55, (ncdcText.length + 2000) / budget) : 0;
+  const baseShare = ncdc.length ? Math.min(schemesFirst ? 0.3 : 0.55, (ncdcText.length + 2000) / budget) : 0;
   const rest = 1 - baseShare;
   const parts = await Promise.all([
     openingPassages(runtime, task.organizationId, ncdc, Math.floor(budget * baseShare), scope),
@@ -437,6 +441,10 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   if (!passages.length) passages = await openingPassages(runtime, task.organizationId, sources.map(s => s.id), budget, scope);
   if (!passages.length) throw new Error("The scheme has no source passages to work from.");
   const allowed = new Set(passages.map(p => p.id));
+  // Agents on the git desk work from the whole resource pack (the git desk verifies every quote against it), so their
+  // citations of pack passages outside this prompt are kept; otherwise those lessons would lose their sources.
+  if (settings.provider === "git") for (const r of (await runtime.db.query<{ id: string }>(
+    `SELECT id FROM lrn_source_chunks WHERE source_id=ANY($1::text[]) AND organization_id=$2`, [sources.map(x => x.id), task.organizationId])).rows) allowed.add(r.id);
   // Every lesson is one 40-minute period, so a subject has as many lessons a week as periods (several on some days).
   const entriesPerWeek = Math.max(1, Math.min(10, scheme.periodsPerWeek));
   const hasReview = weeklyReview(scheme.className, scheme.periodsPerWeek);
@@ -444,11 +452,14 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
   // Without weekly reviews the last period of the term is kept for the end of term assessment.
   const totalSlots = scheme.weeks * teachingEntries - (hasReview ? 0 : 1);
   const shares = topicShares(topics, totalSlots);
-  const required = topics.length ? [
+  const required = !topics.length ? "" : schemesFirst ? [
+    `NCDC topics for ${scheme.className}, ${scheme.termName} that must ALSO be covered. Each needs at least one unit whose title or theme names it; the school's schemes of work decide where it goes and how many lessons it gets:`,
+    ...topics.map(t => `  ${t.no}. ${t.title}`),
+  ].join("\n") : [
     `REQUIRED NCDC topics/themes for ${scheme.className}, ${scheme.termName} (from the NCDC curriculum, in this order). Every one MUST have at least one unit whose title or theme names it, with about this many teaching/practice lessons:`,
     ...topics.map((t, i) => `  ${t.no}. ${t.title}: about ${shares[i]} lessons`),
     "Keep to these evidence-based shares. A broad topic may take substantially more lessons than a small topic when its NCDC scope, competences and subtopics justify it.",
-  ].join("\n") : "";
+  ].join("\n");
   const prompt = [
       `Task: draft the OUTLINE of a scheme of work for ${scheme.subjectName}, ${scheme.className}, ${scheme.termName}.`,
       `The term has ${scheme.weeks} teaching weeks and this subject has ${scheme.periodsPerWeek} periods per week. Every lesson is ONE ${40}-minute period, so keep each lesson small enough to teach in 40 minutes.`,
@@ -458,9 +469,15 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
       "When the material is thin (common in lower primary), follow each teaching lesson with a practice lesson. Split big subtopics over several teaching lessons.",
       "Never pad with content the passages do not have: if they cannot fill the term, return fewer lessons and list what is missing in gaps. Ledgerly fills the remaining weeks with revision.",
       "You are composing the SCHOOL'S OWN scheme. The passages below (the official NCDC curriculum and guides, plus schemes of work, lesson plans, notes and past papers from the school e-library) are reference material:",
-      "The NCDC documents (titles starting \"NCDC\") are the BASE: their topics, competences and order for this class and term are what the scheme must cover. NCDC lower-primary thematic curricula list every learning area side by side in table columns separated by \" | \": take only the " + scheme.subjectName + " column.",
-      "Every topic the NCDC curriculum lists for this class and term MUST become a unit, in the NCDC order. Share the weeks between ALL of them according to their NCDC periods, competences, content and subtopics. Large topics should receive more lessons than small topics.",
-      "combine them in this authority order: curriculum for required coverage; all relevant schemes for sequence and pacing; the strongest detailed notes for accurate teaching depth; past papers for expected applications and activities. Do not copy one reference scheme blindly.",
+      ...(schemesFirst ? [
+        `The school's SCHEMES OF WORK for this class and term (${sources.filter(s => schoolSchemes.has(s.id)).map(s => `"${s.title}"`).join(", ")}) are the BASE: follow the topics, subtopics and week-by-week order they agree on. Every topic they list for this term MUST become a unit, in their order, and their subtopics become the lessons, with about the pacing they give. Cite their passages in sourcePassageIds of every lesson that follows them.`,
+        "The NCDC documents (titles starting \"NCDC\") only FILL GAPS: a topic NCDC lists for this term that the schemes lack gets its own unit where it fits best. Never drop or rename a schemes-of-work topic to fit NCDC. NCDC lower-primary thematic curricula list every learning area side by side in table columns separated by \" | \": take only the " + scheme.subjectName + " column.",
+        "Combine them in this authority order: the school's schemes of work for topics, sequence and pacing; NCDC for anything they miss; the strongest detailed notes for accurate teaching depth; past papers for expected applications and activities.",
+      ] : [
+        "The NCDC documents (titles starting \"NCDC\") are the BASE: their topics, competences and order for this class and term are what the scheme must cover. NCDC lower-primary thematic curricula list every learning area side by side in table columns separated by \" | \": take only the " + scheme.subjectName + " column.",
+        "Every topic the NCDC curriculum lists for this class and term MUST become a unit, in the NCDC order. Share the weeks between ALL of them according to their NCDC periods, competences, content and subtopics. Large topics should receive more lessons than small topics.",
+        "combine them in this authority order: curriculum for required coverage; all relevant schemes for sequence and pacing; the strongest detailed notes for accurate teaching depth; past papers for expected applications and activities. Do not copy one reference scheme blindly.",
+      ]),
       `Use this term's part of the material (${scheme.termName}) when the passages cover several terms.`,
       themeOnly.length ? `Theme-only references (${themeOnly.map(s => s.title).join("; ")}): general thematic schemes covering every learning area. Use them ONLY for the term's theme name and week order; ignore their content for other learning areas (reading, spelling, drawing, literacy, songs). Every lesson must be ${scheme.subjectName} content.` : "",
       required,
@@ -474,13 +491,18 @@ registerTaskHandler("scheme.outline", async (ctx: TaskContext) => {
       "</passages>",
     ].join("\n");
   // The outline must cover every NCDC topic of the term with a fair share; otherwise it is redone (twice at most).
-  let reply = parseLenient(outlineReply, await ctx.ai({ prompt }));
-  let problems = coverageProblems(reply.units, topics, totalSlots);
+  const job = { schemeId: scheme.id, weeks: scheme.weeks, periodsPerWeek: scheme.periodsPerWeek };
+  let reply = parseLenient(outlineReply, await ctx.ai({ prompt, job }));
+  // Every passage of the school's schemes counts (agents on the git desk see the whole resource pack, not only the prompt).
+  const schemePassages = new Set(schemesFirst ? (await runtime.db.query<{ id: string }>(
+    `SELECT id FROM lrn_source_chunks WHERE source_id=ANY($1::text[]) AND organization_id=$2`, [[...schoolSchemes], task.organizationId])).rows.map(r => r.id) : []);
+  const check = (r: typeof reply) => [...coverageProblems(r.units, topics, totalSlots, schemesFirst), ...schemeFollowProblems(r.units, schemePassages)];
+  let problems = check(reply);
   for (let attempt = 0; problems.length && attempt < 2; attempt += 1) {
     const retry = parseLenient(outlineReply, await ctx.ai({ prompt: [prompt, "",
-      "Your previous outline was rejected because it does not follow the NCDC curriculum for this term:", ...problems.map(p => `- ${p}`),
-      "Redo the WHOLE outline so every required topic has its own unit(s) with about its share of lessons."].join("\n") }));
-    const retryProblems = coverageProblems(retry.units, topics, totalSlots);
+      `Your previous outline was rejected because it does not follow ${schemesFirst ? "the school's schemes of work and the required topics" : "the NCDC curriculum"} for this term:`, ...problems.map(p => `- ${p}`),
+      schemesFirst ? "Redo the WHOLE outline from the school's schemes of work (their topics, subtopics and order, citing their passages), adding any missing NCDC topic." : "Redo the WHOLE outline so every required topic has its own unit(s) with about its share of lessons."].join("\n"), job: { ...job, repairOf: attempt } }));
+    const retryProblems = check(retry);
     if (retryProblems.length <= problems.length) { reply = retry; problems = retryProblems; }
   }
   if (problems.length) throw new Error(`SCHEME_COVERAGE_FAILED: ${problems.join("; ")}`);
@@ -619,6 +641,7 @@ const lessonReply = z.object({
     steps: z.array(z.object({
       stage: z.string().max(80),
       minutes: z.number().int().min(1).max(120).nullish(),
+      content: z.string().max(3000).nullish(),
       teacherActivity: z.string().max(2000),
       learnerActivity: z.string().max(2000),
     })).min(1).max(10),
@@ -663,48 +686,139 @@ export const CHALKBOARD_NOTES_RULES = [
   "- notes: the CHALKBOARD NOTES the teacher writes on the board for learners to copy into their exercise books, in Markdown, at exactly this class level.",
   "  Use the detailed notes in the passages as the factual base, not merely the short scheme wording.",
   "  Learner-facing CONTENT ONLY. Never write instructions or activities in the notes: no 'discuss', 'in your groups', 'tell the story', 'sing', 'act out', 'read with your teacher', 'say aloud', 'think of'. Those go in methods.",
-  "  Write the content itself: state the facts, meanings, examples and lists. For a Bible or Quran passage, give the reference AND what it says or teaches in one or two sentences (not 'read John 8:12').",
+  "  Write the content itself: state the facts, meanings, examples and lists. For a Bible or Quran passage, give the reference AND what it says or teaches in one short point (not 'read John 8:12').",
+  "  HOUSE STYLE: POINT FORM, like a good Ugandan pupil's notebook. NO PARAGRAPHS. Every content line is a short point starting with '- ': one fact per point, about 3 to 15 words, in the passages' own wording.",
+  "    A meaning is a point too ('- Altitude is the height above the sea level.'). Lists of names are one name per point with no explanation ('- Mbale', '- Kapchorwa').",
+  "    Never pad or link points: no 'This shows…', 'These help…', 'In the supplied notes…', 'according to the passages', 'In this lesson…', no summary sentence at the end of a section. Shorten; never stretch.",
   "  Structure:",
   "    # TOPIC: <unit title in capitals>",
   "    ## SUB-TOPIC: <lesson title>",
-  "    then short sections, each under a ### heading that names its content (e.g. ### Meaning of independence, ### Symbols of Uganda, ### Ways Christ is the light of the world, ### Importance of a census, ### Example 1).",
-  "    Inside a section: a definition or short explanation in one to three plain sentences, then numbered points (1. 2. 3.) for lists, each a short complete sentence a learner can copy.",
-  "    Bold the key words. Use a small Markdown table only for comparisons (e.g. organ of government | its work). Maths: worked examples set out step by step.",
+  "    then sections, each under a ### heading in the usual notebook wording: ### <Thing> (its meaning), ### Examples of …, ### Reasons why …, ### Importance of …, ### Advantages of …, ### Disadvantages of …,",
+  "    ### Causes of …, ### Effects of …, ### Economic activities carried out in …, ### Problems faced by …, ### Possible solutions to the problems …, ### Ways of …, ### Duties/Roles of … (use whichever the passages support).",
+  "    ### Note at the end of the content: 2 to 5 key facts or exam tips from the passages that a learner must remember (e.g. '- Heavy rainfall is the major cause of landslides in highland areas.'). Leave it out when the passages give none.",
+  "    Bold only the key word being defined. Use a small Markdown table only for comparisons (e.g. organ of government | its work).",
+  "    Examples ('### Example 1', '### Example 2', ...) are ONLY for Mathematics, English and Reading: worked examples taken from the passages, set out step by step (each step on its own line). Other subjects have no Example sections.",
+  "    Write mathematics in LaTeX: $\\frac{3}{4}$ inline, $$...$$ on its own line. Column sums and long division are coded diagrams, not LaTeX.",
   "    When the curriculum names new words, list them once near the top as '### New words' followed by the words separated by commas (no tables, no pronunciation drills).",
   "    End with '### Exercise': 3–8 numbered questions on this lesson, taken from the activities, for learners to answer in their books.",
-  "  Keep it board-sized: about as long as a teacher would write in one lesson; no greetings, no 'In this lesson we will', no notes to the teacher.",
+  "  Keep it board-sized: as much as a teacher writes in one lesson; no greetings, no 'In this lesson we will', no notes to the teacher.",
 ];
 
 const KIND_BRIEF: Record<string, string> = {
-  practice: "This is a PRACTICE lesson on the subtopic taught in the lesson before it. notes = '### Remember' with the key points (numbered, 4–8 lines), then '### Exercise' with the numbered exercises learners copy and answer, taken from the passages. Oral work, drawing and group activities go in methods. activities = those exercises.",
-  review: "This is the FRIDAY REVIEW of this week's lessons (listed in the objectives). notes = a '### Summary' heading per lesson with its key points (numbered), then '### Exercise' with review questions taken from the passages. activities = those questions.",
-  revision: "This is a REVISION lesson for the unit. notes = the unit's key points under ### headings (numbered), then '### Exercise' with practice questions taken from the passages. activities = those questions.",
+  practice: "This is a PART B lesson: it continues the subtopic taught in the lesson before it. notes = '### Remember' with the key points ('- ' points, 4–8 lines); in Mathematics, English and Reading then NEW '### Example' sections not used in Part A; then '### Exercise' with NEW numbered activities learners copy and answer. All of it is taken from other passages (other notes, workbooks, past papers), never invented. Oral work, drawing and group activities go in methods. activities = those exercises.",
+  review: "This is the FRIDAY REVIEW of this week's lessons (listed in the objectives). notes = a '### Summary' heading per lesson with its key points ('- ' points), then '### Exercise' with review questions taken from the passages. activities = those questions.",
+  revision: "This is a REVISION lesson for the unit. notes = the unit's key points under ### headings ('- ' points), then '### Exercise' with practice questions taken from the passages. activities = those questions.",
   assessment: "This is the END OF TERM ASSESSMENT. notes = an assessment paper of 15–25 questions from the passages covering the term's units, numbered, with a marking guide (answers) at the end where the passages give them. activities = the questions.",
 };
 
-function classDepthBrief(className: string) {
+export function classDepthBrief(className: string) {
   const ref = classesInTitle(className)[0];
   const n = ref?.level === "p" ? ref.no : null;
   const levels: Record<number, string> = {
-    1: "P1: one 40-minute lesson: 1–2 small ideas; 100–220 words; very short sentences; concrete/local examples; 3–5 oral, matching, tracing or picture-led activities.",
-    2: "P2: one 40-minute lesson: 2–3 small ideas; 150–300 words; concrete examples; 4–6 short guided activities.",
-    3: "P3: one 40-minute lesson: 2–3 ideas; 200–380 words; simple explanations and worked examples; 4–6 activities.",
-    4: "P4: one 40-minute lesson: 2–4 ideas; 250–450 words; definitions, examples and application; 5–7 activities.",
-    5: "P5: one 40-minute lesson: 3–4 ideas; 300–500 words; connected explanations and application; 5–8 activities.",
-    6: "P6: one 40-minute lesson: 3–5 ideas; 350–600 words; clear explanation, worked examples and exam-style application; 6–8 activities.",
-    7: "P7: one 40-minute lesson: 3–5 ideas; 400–650 words; concise candidate-level treatment, worked examples and exam practice; 6–10 activities.",
+    1: "P1: one 40-minute lesson: 1–2 small ideas; about 6–14 short points; very short words; concrete/local examples; 3–5 oral, matching, tracing or picture-led activities.",
+    2: "P2: one 40-minute lesson: 2–3 small ideas; about 8–16 short points; concrete examples; 4–6 short guided activities.",
+    3: "P3: one 40-minute lesson: 2–3 ideas; about 10–20 points; simple meanings and worked examples; 4–6 activities.",
+    4: "P4: one 40-minute lesson: 2–4 sections; about 12–24 points; meanings, examples and uses; 5–7 activities.",
+    5: "P5: one 40-minute lesson: 3–5 sections; about 14–28 points (meaning, examples, reasons, problems and solutions as the passages give); 5–8 activities.",
+    6: "P6: one 40-minute lesson: 3–6 sections; about 16–32 points; worked examples and exam-style points; 6–8 activities.",
+    7: "P7: one 40-minute lesson: 3–6 sections; about 18–36 points; concise candidate-level points, worked examples and exam tips; 6–10 activities.",
   };
   return n ? levels[n] : "Match vocabulary, number of concepts, explanation depth and activities to the named class; never copy upper-class depth into a lower class.";
 }
 
 const INSTRUCTION_PHRASES = /\b(?:discuss(?:ing)?|in (?:your|their|small) groups?|tell (?:the|a|your) (?:story|partner|class)|sing (?:a |the )?songs?|act out|dramati[sz]e|read (?:it |this |these |the passages? )?(?:aloud|with your teacher)|say (?:each|the|these) words?|think (?:of|about) a|with your teacher|your teacher will)\b/gi;
 
+const FILLER = /\b(?:(?:the )?supplied (?:notes|passages|material)|according to the (?:notes|passages|sources)|the passages? (?:say|says|state|states|show|shows)|this shows|these (?:show|help|responsibilities show)|in this lesson|as (?:we|you) (?:have )?(?:seen|learnt|learned))\b/gi;
+const WORKED = /math|english|reading|literacy|language|phonics/i;
+
+/** Point form: content lines are '- ' points; no paragraphs, no over-long points, no padding phrases. */
+export function pointFormProblems(notes: string, subjectName: string) {
+  const problems: string[] = [];
+  const wordsIn = (t: string) => t.match(/\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu)?.length ?? 0;
+  let section = "";
+  const paragraphs: string[] = [], longPoints: string[] = [];
+  for (const raw of notes.replace(/<!--[\s\S]*?-->/g, "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    const h = /^#{1,6}\s+(.*)$/.exec(line);
+    if (h) { section = h[1]!.toLowerCase(); continue; }
+    if (/^\|/.test(line) || /^\[\[diagram:/.test(line) || /^\$\$/.test(line)) continue;
+    // Worked examples and new-word lists are not points.
+    if (/^(example|new words|exercise)/.test(section)) continue;
+    const point = /^(?:[-*•❖]|\d+[.)])\s+(.*)$/.exec(line);
+    if (point) { if (wordsIn(point[1]!) > 30) longPoints.push(point[1]!.slice(0, 60)); continue; }
+    if (WORKED.test(subjectName) && wordsIn(line) <= 30) continue;
+    paragraphs.push(line.slice(0, 60));
+  }
+  if (paragraphs.length) problems.push(`notes must be in point form ('- ' points, no paragraphs); rewrite: ${paragraphs.slice(0, 3).map(p => `"${p}…"`).join(", ")}`);
+  if (longPoints.length) problems.push(`points must be short (at most 30 words, one fact each); split: ${longPoints.slice(0, 3).map(p => `"${p}…"`).join(", ")}`);
+  const filler = notes.match(FILLER) ?? [];
+  if (filler.length) problems.push(`notes contain padding (${[...new Set(filler.map(x => x.toLowerCase()))].slice(0, 4).join(", ")}); state the facts only`);
+  return problems;
+}
+
+/** The lesson plan standard (owner's rule, 2026-10-15: plans were one generic line per step). Used by every plan prompt. */
+export const PLAN_RULES = [
+  "- lessonPlan: a COMPLETE lesson plan in the Ugandan format that a head teacher or supervisor would accept, written from this lesson's notes:",
+  "  competences: 2-4 subject competences, each 'The learner ...' with a concrete verb (defines, names, explains, draws, calculates, locates) and this lesson's actual content.",
+  "  languageCompetence: the key words of the lesson learners pronounce, spell, read and write (name them).",
+  "  objectives: 2-4 measurable objectives ('By the end of the lesson, learners should be able to ...'), not copies of the competences.",
+  "  priorKnowledge: what learners already know that this lesson builds on (the previous lesson or everyday experience), in one or two sentences.",
+  "  methods: at least 3 method names. materials: at least 2 specific teaching aids (e.g. 'chart of the three arms of government', not only 'chalkboard'). references: the source titles, with page numbers when the passages give them.",
+  "  steps: 4-7 steps whose minutes add up exactly to the lesson's minutes: Introduction (how the teacher links to prior knowledge, with the starter question asked); one Lesson development step for each notes section (or two small sections together); a Practice / Exercise step; and a Conclusion (summary and evaluation).",
+  "  Every step has: stage; minutes; content = the exact points taught or written on the board in that step, taken from the notes; teacherActivity = what the teacher does and says in 2-4 sentences, quoting the actual questions asked and the examples used; learnerActivity = what learners do in 1-3 sentences (answer, copy, discuss in pairs, draw, read aloud, demonstrate, act).",
+  "  Never write generic steps such as 'Explain key terms', 'Give questions' or 'Review the lesson': name the terms, quote the questions, say what is reviewed.",
+  "  assessment: how learning is checked, listing at least 3 actual oral or written questions (from the notes' Exercise). homework: one specific task. lifeSkills: 2-4 life skills and values shown in the lesson.",
+];
+
+const PLAN_STOP = new Set(["meaning", "examples", "example", "reasons", "importance", "problems", "solutions", "possible", "ways", "causes", "effects",
+  "types", "duties", "roles", "people", "living", "faced", "which", "their", "with", "from", "that", "this", "about", "what", "uganda"]);
+const wordCount = (t?: string | null) => (t ?? "").match(/\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu)?.length ?? 0;
+
+type PlanShape = { competences: string[]; objectives: string[]; priorKnowledge?: string | null; methods: string[]; materials: string[];
+  steps: Array<{ stage: string; minutes?: number | null; content?: string | null; teacherActivity: string; learnerActivity: string }>; assessment?: string | null; homework?: string | null };
+
+/** A shallow plan is rejected with the reasons (the same rules as tools/check.py in the resources bank). */
+export function planProblems(plan: PlanShape, notes: string, minutes: number, kind = "teach") {
+  const problems: string[] = [];
+  const teach = kind === "teach";
+  const minSteps = teach ? 4 : 3;
+  if (plan.steps.length < minSteps) problems.push(`the plan needs at least ${minSteps} steps (introduction, a development step per notes section, practice, conclusion); it has ${plan.steps.length}`);
+  const total = plan.steps.reduce((n, x) => n + Number(x.minutes ?? 0), 0);
+  if (Math.abs(total - minutes) > 3) problems.push(`the plan steps add up to ${total} minutes; the lesson is ${minutes}`);
+  const thinTeacher = plan.steps.filter(x => wordCount(x.teacherActivity) < 20).map(x => x.stage);
+  if (thinTeacher.length) problems.push(`teacher activity too thin (under 20 words: say what is taught and quote the questions asked) in: ${thinTeacher.slice(0, 4).join(", ")}`);
+  const thinLearner = plan.steps.filter(x => wordCount(x.learnerActivity) < 10).map(x => x.stage);
+  if (thinLearner.length) problems.push(`learner activity too thin (under 10 words) in: ${thinLearner.slice(0, 4).join(", ")}`);
+  const noContent = plan.steps.filter(x => !/intro|conclu/i.test(x.stage) && wordCount(x.content) < 6).map(x => x.stage);
+  if (noContent.length) problems.push(`steps need 'content' (the points taught or written on the board in that step) in: ${noContent.slice(0, 4).join(", ")}`);
+  if (plan.competences.length < 2) problems.push("the plan needs at least 2 subject competences");
+  if (plan.objectives.length < 2) problems.push("the plan needs at least 2 measurable objectives");
+  if (wordCount(plan.priorKnowledge) < 8) problems.push("the plan needs prior knowledge (what learners already know that the lesson builds on)");
+  if (plan.methods.length < 3) problems.push("the plan needs at least 3 methods");
+  if (plan.materials.length < 2) problems.push("the plan needs at least 2 specific teaching aids");
+  if (wordCount(plan.assessment) < 15) problems.push("assessment must list the actual oral or written questions used to check learning");
+  if (teach && wordCount(plan.homework) < 4) problems.push("the plan needs a specific homework task");
+  if (teach) {
+    const taught = plan.steps.map(x => `${x.stage} ${x.content ?? ""} ${x.teacherActivity}`).join(" ").toLowerCase();
+    const sections = [...notes.matchAll(/^###\s+(.+)$/gm)].map(m => m[1]!.trim())
+      .filter(h => !/^(exercise|new words|note|nb|n\.b|example|remember|summary)\b/i.test(h));
+    const missed = sections.filter(h => {
+      const keys = (h.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter(k => !PLAN_STOP.has(k)).map(k => k.replace(/(ies|es|s)$/, ""));
+      return keys.length > 0 && !keys.some(k => taught.includes(k));
+    });
+    if (missed.length) problems.push(`the plan does not teach these notes sections: ${missed.slice(0, 5).join(", ")}`);
+  }
+  return problems;
+}
+
 export function lessonQualityProblems(input: { notes: string; activities: unknown[]; sourcePassageIds: string[] }, className: string, subjectName: string, kind = "teach") {
   const problems: string[] = [];
   const ref = classesInTitle(className)[0];
   const n = ref?.level === "p" ? ref.no : 4;
   const words = input.notes.match(/\b[\p{L}\p{N}][\p{L}\p{N}'’-]*\b/gu)?.length ?? 0;
-  const minimumWords = kind === "teach" ? ({ 1: 80, 2: 120, 3: 160, 4: 200, 5: 240, 6: 280, 7: 320 }[n] ?? 200)
+  // Point-form notes are short by design; these floors only catch empty or stub notes (the checks below catch padding).
+  const minimumWords = kind === "teach" ? ({ 1: 50, 2: 70, 3: 90, 4: 110, 5: 130, 6: 150, 7: 170 }[n] ?? 110)
     : kind === "assessment" ? 120 : 70;
   const minimumActivities = kind === "assessment" ? 15 : kind === "teach" ? Math.min(5, Math.max(3, n - 1)) : 3;
   if (words < minimumWords) problems.push(`notes are too shallow (${words} words; need at least ${minimumWords} for ${className})`);
@@ -715,6 +829,9 @@ export function lessonQualityProblems(input: { notes: string; activities: unknow
   // Chalkboard notes: content under headings, no classroom instructions (those belong to methods and the lesson plan).
   const instructions = input.notes.match(INSTRUCTION_PHRASES) ?? [];
   if (instructions.length >= 2) problems.push(`notes contain classroom instructions (${[...new Set(instructions.map(x => x.toLowerCase()))].slice(0, 5).join(", ")}); move activities to methods and write only the content learners copy`);
+  // House style: point form, no padding (owner's rule, 2026-10-14: notes like a good pupil's notebook).
+  const prose = pointFormProblems(input.notes, subjectName);
+  problems.push(...prose);
   const headings = input.notes.match(/^###\s+\S/gm)?.length ?? 0;
   if (kind === "teach" && (!/^##\s+SUB-TOPIC/im.test(input.notes) || headings < 2)) problems.push("notes need the chalkboard layout: '## SUB-TOPIC: ...' and content sections under ### headings");
   if (kind !== "assessment" && !/^###\s+Exercise/im.test(input.notes)) problems.push("notes must end with a '### Exercise' section of numbered questions");
@@ -753,8 +870,8 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   const periodLength = await runtime.db.query<{ minutes: number }>(
     `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
   const minutesOf = (l: WeekLesson) => (periodLength.rows[0]?.minutes ?? 40) * Math.max(1, l.periods ?? 1);
-  // Every subject may add practice questions on what the notes teach; they enter the bank as generated (unverified).
-  const maySupplement = true;
+  // Nothing is invented: notes, examples and activities all come from the resources (owner's rule, 2026-10-13).
+  const maySupplement = false;
   const listOf = (list: WeekLesson[]) => list.map(l => [
     `lessonId=${l.id}: lesson ${l.seq}, ${dayName(l.period)}, ${l.periods ?? 1} period(s), ${minutesOf(l)} minutes.`,
     `  Unit: ${l.unitTitle}${l.theme ? ` (theme: ${l.theme})` : ""}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
@@ -775,16 +892,15 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     "- methods: ONLY the names of the teaching methods, comma separated, for the scheme of work's Methods column (e.g. 'Story telling, Discussion, Guided Bible reading, Question and answer'). At most 6 names, no sentences.",
     "- teachingGuide: the CLASS ACTIVITIES, step by step: what the teacher does and what learners do (discussion, group work, story telling, songs, dramatisation, guided Bible/Quran reading, oral work, drawing, games), as given or implied in the passages. Everything taken out of the notes because it is an instruction goes here.",
     "- materials, lifeSkills, assessment: as given or implied in the passages; null when the passages are silent.",
-    "- lessonPlan: the LESSON PLAN in the Ugandan format: competences (subject and language competence), objectives, prior knowledge, methods, materials, references (titles of the passages used),",
-    "  and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes adding up to the lesson's minutes, each with the teacher's and the learners' activity, plus assessment, homework and life skills.",
+    ...PLAN_RULES,
     "  The content of the plan comes from this lesson's notes; plan when the teacher writes each part on the board, and put the class activities from teachingGuide into the steps.",
-    "- activities: questions and exercises for learners copied from the passages (especially relevant examples and past-paper items). Set origin='source'.",
+    "- activities (activities and exercise questions are the same thing): questions for learners copied from the passages, drawn from the variety of notes, workbooks and past papers supplied. Set origin='source'.",
     "  For each one set sourcePassageId and sourceQuote = the question's exact words copied from that passage, so it can be verified.",
     "  Give answer only when the passage gives it or it is plain arithmetic; otherwise null. concept = the subtopic it tests, skill = what the learner does (e.g. 'identify', 'compute', 'explain').",
     "  kind is one of: " + QUESTION_KINDS.join(", ") + ". cognitiveLevel is one of: " + COGNITIVE_LEVELS.join(", ") + ".",
     maySupplement
       ? "- If the supplied material has too few questions, add age-appropriate worked examples and practice questions that test ONLY the facts and skills already in this lesson's notes and passages. Set origin='generated', sourcePassageId=null and sourceQuote=null. Never add a new topic or unsupported factual claim."
-      : "- Do not generate extra questions outside the supplied source material for this subject.",
+      : "- Never write a question, example or activity that is not in the passages, and never change a sourced question's numbers to make a new one. If the passages have too few, use what there is and list the shortfall in gaps.",
     "- diagrams: up to 3 teaching pictures per lesson of things the passages describe that learners must SEE. Skip them when nothing in the lesson is visual.",
     "  NEVER make a table, list or text box into a diagram; tables belong in the notes as Markdown tables. Choose a method per picture:",
     "  * method \"illustration\" for real things: animals, plants, body parts and organs, tools, apparatus, objects, scenes (e.g. the external parts of a domestic fowl, a beehive, a flower).",
@@ -795,6 +911,8 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     "    {\"type\":\"fraction\",\"shape\":\"circle|bar\",\"numerator\":3,\"denominator\":4}   {\"type\":\"number-line\",\"from\":0,\"to\":10,\"step\":1,\"marks\":[3,7]}",
     "    {\"type\":\"map\",\"region\":\"uganda\",\"layers\":[\"lakes\",\"rivers\",\"mountains\",\"towns\",\"neighbours\",\"regions\",\"equator\"],\"highlight\":[\"Northern\"]} for any map of Uganda (pick the layers needed; parts = the lakes, rivers, mountains, towns, neighbours or regions to label, e.g. 'Lake Kyoga', 'River Victoria Nile', 'Mount Elgon', 'Kenya', 'Northern Region'),",
     "    {\"type\":\"clock\",\"hour\":3,\"minute\":30}   {\"type\":\"bar-chart\",\"title\":\"...\",\"yLabel\":\"...\",\"bars\":[{\"label\":\"Mon\",\"value\":4}]} (only with data given in the passages)",
+    "    {\"type\":\"column-sum\",\"operation\":\"add|subtract|multiply\",\"numbers\":[345,278],\"showAnswer\":true} for vertical working   {\"type\":\"long-division\",\"dividend\":756,\"divisor\":6,\"showWorking\":true}",
+    "    {\"type\":\"angle\",\"degrees\":60,\"label\":\"x\"}   {\"type\":\"venn\",\"sets\":[{\"label\":\"Even\",\"items\":[\"4\"]},{\"label\":\"Prime\",\"items\":[\"3\"]}],\"both\":[\"2\"]} (numbers always from the sourced question)",
     "  All pictures are printed in BLACK: black outlines on white, mostly outline, simple grey or hatched shading only where needed, never colour.",
     "  * method \"svg\" for simple schematics only (cycles, food chains, flow of a process): a self-contained SVG, viewBox=\"0 0 640 420\", white background, black outlined shapes (fills white or light grey #e6e6e6 only),",
     "    labels font-size 16-18 joined by leader lines, arrows via <marker>, a title at the top, nothing outside the viewBox. No scripts, images, links, CSS or external fonts.",
@@ -803,7 +921,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     "",
     "Reply shape:",
     `{"lessons":[{"lessonId":string,"notes":string,"methods":string|null,"teachingGuide":string|null,"materials":string|null,"lifeSkills":string|null,"assessment":string|null,"sourcePassageIds":[string],` +
-    `"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]},` +
+    `"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"content":string,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]},` +
     `"diagrams":[{"key":string,"title":string,"caption":string|null,"method":"illustration"|"coded"|"svg","concept":string|null,"parts":[string],"coded":object|null,"svg":string|null,"sourcePassageId":string|null}],"activities":[{"question":string,"answer":string|null,"options":[string]|null,"kind":string,"concept":string,"skill":string,"cognitiveLevel":string,"difficulty":1-5,"origin":"source"|"generated","sourcePassageId":string|null,"sourceQuote":string|null}],"gaps":[string]}]}`,
   ].join("\n");
 
@@ -829,6 +947,17 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
   }
   if (!passages.length) throw new Error("No e-library passages cover this week.");
   const byId = new Map(passages.map(p => [p.id, p]));
+  // Agents may cite any passage of this scheme's resources (the git desk publishes them all), not only the ones in the prompt.
+  const widen = async (replies: Array<z.infer<typeof weekReply>["lessons"][number]>) => {
+    const wanted = [...new Set(replies.flatMap(r => [...r.sourcePassageIds, ...r.activities.map(a => a.sourcePassageId ?? ""), ...r.diagrams.map(d => d.sourcePassageId ?? "")]))]
+      .filter(id => id && !byId.has(id));
+    if (!wanted.length) return replies;
+    const extra = await runtime.db.query<Passage>(
+      `SELECT c.id,c.source_id AS "sourceId",s.title AS "sourceTitle",c.seq,c.content FROM lrn_source_chunks c JOIN lrn_sources s ON s.id=c.source_id
+        WHERE c.id=ANY($1::text[]) AND c.organization_id=$2 AND c.source_id=ANY($3::text[])`, [wanted, task.organizationId, sourceRows.map(r => r.id)]);
+    for (const p of extra.rows) byId.set(p.id, p);
+    return replies;
+  };
   const promptFor = (list: WeekLesson[], extra: string[] = []) =>
     [instructions(list), ...extra, "", "<passages>", formatPassages(passages), "</passages>"].join("\n");
 
@@ -841,6 +970,7 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
     if (!reply) return ["the weekly reply left this lesson out"];
     const problems = lessonQualityProblems({ ...reply, activities: validActivities(reply) }, scheme.className, scheme.subjectName, l.kind);
     if (!reply.sourcePassageIds.some(id => byId.has(id))) problems.push("the notes did not cite any of the supplied passages");
+    if (reply.lessonPlan) problems.push(...planProblems(reply.lessonPlan, reply.notes, minutesOf(l), l.kind));
     return problems;
   };
   const accepted = new Map<string, z.infer<typeof lessonReply>>();
@@ -854,14 +984,16 @@ registerTaskHandler("lesson.write", async (ctx: TaskContext) => {
       else if (!failures.has(l.id) || problems.length <= failures.get(l.id)!.length) failures.set(l.id, problems);
     }
   };
-  judge(week, parseLenient(weekReply, await ctx.ai({ prompt: promptFor(week), timeoutMs: 30 * 60_000 })).lessons);
+  const jobFor = (list: WeekLesson[], repairOf?: number) => ({ schemeId: scheme.id, week: first.week, repairOf,
+    lessons: list.map(l => ({ id: l.id, title: l.title, subtopic: l.subtopic, kind: l.kind, week: l.week, periods: l.periods ?? 1 })) });
+  judge(week, await widen(parseLenient(weekReply, await ctx.ai({ prompt: promptFor(week), timeoutMs: 30 * 60_000, job: jobFor(week) })).lessons));
   // At most one repair call per week, for the rejected lessons only.
   const rejectedLessons = week.filter(l => failures.has(l.id));
   if (rejectedLessons.length) {
     const repair = await ctx.ai({ prompt: promptFor(rejectedLessons, ["", "Your previous reply for these lessons was rejected by the quality gate:",
       ...rejectedLessons.map(l => `- lessonId=${l.id}: ${failures.get(l.id)!.join("; ")}`),
-      "Rewrite each of these lessons in full, with its lesson plan. Keep every fact grounded in the passages, remove repetition, and meet the class depth and activity requirements."]), timeoutMs: 30 * 60_000 })
-      .then(r => parseLenient(weekReply, r).lessons).catch(error => { if (error instanceof ManualReplyPending) throw error; return []; });
+      "Rewrite each of these lessons in full, with its lesson plan. Keep every fact grounded in the passages, remove repetition, and meet the class depth and activity requirements."]), timeoutMs: 30 * 60_000, job: jobFor(rejectedLessons, 0) })
+      .then(r => widen(parseLenient(weekReply, r).lessons)).catch(error => { if (error instanceof ManualReplyPending) throw error; return []; });
     judge(rejectedLessons, repair);
   }
 
@@ -1000,26 +1132,34 @@ registerTaskHandler("lesson.plan", async (ctx: TaskContext) => {
   const periodLength = await runtime.db.query<{ minutes: number }>(
     `SELECT period_minutes AS minutes FROM lrn_timetable_settings WHERE organization_id=$1`, [task.organizationId]).catch(() => ({ rows: [] as Array<{ minutes: number }> }));
   const minutes = (periodLength.rows[0]?.minutes ?? 40) * Math.max(1, l.periods);
-  const reply = parseLenient(planReply, await ctx.ai({
-    prompt: [
+  const planJob = { schemeId: scheme.id, week: l.week ?? 1, lessons: [{ id: l.id, title: l.title, subtopic: l.subtopic, kind: "teach", week: l.week ?? 1, periods: l.periods }] };
+  const planPrompt = [
       `Task: write the LESSON PLAN for lesson ${l.seq} of the ${scheme.subjectName} scheme for ${scheme.className}, ${scheme.termName}: week ${l.week ?? 1}, ${dayName(l.period)}, ${l.periods} period(s) totalling ${minutes} minutes.`,
       `Unit: ${l.unit}. Lesson: ${l.title}${l.subtopic ? ` — ${l.subtopic}` : ""}.`,
       l.objectives?.length ? `Objectives: ${l.objectives.join("; ")}` : "",
-      "Use the Ugandan lesson plan format: competences (subject and language competence), objectives, prior knowledge, methods, materials, references,",
-      `and steps (Introduction, Lesson development, Conclusion; split development into parts when useful) with minutes adding up to ${minutes}, and both the teacher's and the learners' activity, plus assessment, homework and life skills.`,
+      `The lesson is ${minutes} minutes: the steps' minutes must add up to exactly ${minutes}.`,
+      ...PLAN_RULES,
       "The content (facts, examples, questions) must come from the lesson notes below; the structure and timing are yours. References are the source titles listed.",
       "The notes are the chalkboard notes learners copy: plan when the teacher writes each part on the board. The class activities (discussion, group work, stories, songs, dramatisation, guided reading) are in the methods below: put them into the steps.",
       "",
       "Reply shape:",
-      `{"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]}}`,
+      `{"lessonPlan":{"competences":[string],"languageCompetence":string|null,"objectives":[string],"priorKnowledge":string|null,"methods":[string],"materials":[string],"references":[string],"steps":[{"stage":string,"minutes":int,"content":string,"teacherActivity":string,"learnerActivity":string}],"assessment":string|null,"homework":string|null,"lifeSkills":[string]}}`,
       "",
       `Sources: ${sources.rows.map(s => s.title).join("; ") || "the school e-library"}`,
       l.methods ? `Teaching methods: ${l.methods}` : "",
       l.teachingGuide ? `Class activities from the sources (put them into the steps): ${l.teachingGuide}` : "",
       l.materials ? `Materials suggested by the sources: ${l.materials}` : "",
       "<notes>", l.notes.replace(/\[\[diagram:[^\]]+\]\]/g, "[diagram]"), "</notes>",
-    ].filter(Boolean).join("\n"),
-  }));
+    ].filter(Boolean).join("\n");
+  let reply = parseLenient(planReply, await ctx.ai({ prompt: planPrompt, job: planJob }));
+  let problems = planProblems(reply.lessonPlan, l.notes, minutes);
+  if (problems.length) {
+    // One repair with the reasons; a plan that is still shallow fails the step (and goes back to the agent on the git desk).
+    reply = parseLenient(planReply, await ctx.ai({ prompt: [planPrompt, "", "Your previous plan was rejected:", ...problems.map(x => `- ${x}`),
+      "Rewrite the WHOLE plan so it meets every rule above."].join("\n"), job: { ...planJob, repairOf: 0 } }));
+    problems = planProblems(reply.lessonPlan, l.notes, minutes);
+    if (problems.length) throw new Error(`LESSON_PLAN_QUALITY_FAILED: ${problems.join("; ")}`);
+  }
   await runtime.db.query(`UPDATE lrn_lessons SET lesson_plan=$2::jsonb,plan_status='written',plan_error=NULL WHERE id=$1`, [l.id, JSON.stringify(reply.lessonPlan)]);
   await queueNextPlan(runtime, task.organizationId, scheme.id, task.requestedBy);
   return { steps: reply.lessonPlan.steps.length };
@@ -1088,7 +1228,7 @@ export async function getLesson(runtime: Runtime, organizationId: string, id: st
     `SELECT id,kind,asset_key AS key,title,caption FROM lrn_lesson_assets WHERE lesson_id=$1 ORDER BY created_at`, [id]);
   return {
     id: l.id, schemeId: l.scheme_id, kind: l.lesson_kind, unit: l.unit_title, seq: l.seq, week: l.week, periods: l.periods, title: l.title, subtopic: l.subtopic, objectives: l.objectives,
-    notes: l.notes_markdown, lessonPlan: l.lesson_plan, methods: l.methods, teachingGuide: l.teaching_guide, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
+    notes: l.notes_markdown, notesDisplay: l.notes_markdown ? String(l.notes_markdown).split("\n").map(mathToText).join("\n") : null, lessonPlan: l.lesson_plan, methods: l.methods, teachingGuide: l.teaching_guide, materials: l.materials, lifeSkills: l.life_skills, assessment: l.assessment,
     diagrams: assets.rows.map((a: { id: string }) => ({ ...a, url: `/api/v1/learn/lessons/${id}/assets/${a.id}.svg` })),
     status: l.status, error: l.error, writtenAt: l.written_at, citations: citations.rows, day: l.period, dayName: dayName(l.period as number | null), planStatus: l.plan_status,
   };

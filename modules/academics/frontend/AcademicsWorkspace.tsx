@@ -6,6 +6,8 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ArrowUpRight,
+  Sparkles,
   BarChart3,
   BookMarked,
   BookOpenCheck,
@@ -31,7 +33,7 @@ import {
   post,
   uploadFile,
 } from "../../../web/api";
-import { useHashView } from "../../../web/navigation";
+import { navigateTo, useHashView } from "../../../web/navigation";
 import {
   Badge,
   Button,
@@ -306,70 +308,26 @@ export function AcademicsWorkspace() {
 
 function Dashboard() {
   const x = useLoad<R>(`${base}/dashboard`, {} as R);
-  return (
-    <div className="acad-page">
-      <Head
-        title="Academic dashboard"
-        text="One workspace for teaching preparation, delivery, coverage, timetabling and supervision."
-        actions={
-          <Button variant="secondary" onClick={x.load}>
-            <RefreshCw size={15} /> Refresh
-          </Button>
-        }
-      />
-      {x.loading ? (
-        <Spinner />
-      ) : (
-        <>
-          <div className="acad-metrics">
-            <Metric label="Schemes" value={x.data.schemes || 0} icon={BookMarked} />
-            <Metric label="Topics" value={x.data.topics || 0} icon={FileText} />
-            <Metric label="Lessons" value={x.data.lessons || 0} icon={BookOpenCheck} />
-            <Metric label="Lesson plans" value={x.data.plans || 0} icon={FileText} />
-            <Metric label="Assessed lessons" value={x.data.assessed || 0} icon={ClipboardCheck} />
-            <Metric label="Coverage" value={`${x.data.coveragePercent || 0}%`} icon={GraduationCap} />
-            <Metric label="Timetables" value={x.data.timetables || 0} icon={CalendarClock} />
-            <Metric label="Rooms" value={x.data.rooms || 0} icon={Building2} />
-            <Metric label="Today's lessons" value={x.data.todaysLessons || 0} icon={Clock3} />
-            <Metric label="Open observations" value={x.data.openObservations || 0} icon={Eye} />
-            <Metric label="Open inspections" value={x.data.openInspections || 0} icon={ClipboardCheck} />
-            <Metric label="Pending scheme approvals" value={x.data.pendingSchemeApprovals || 0} icon={ShieldCheck} />
-            <Metric label="Pending plan approvals" value={x.data.pendingPlanApprovals || 0} icon={ShieldCheck} />
-          </div>
-          <div className="acad-grid-2">
-            <Card>
-              <h2>Academic control cycle</h2>
-              <div className="acad-flow">
-                <span>Scheme</span><i>→</i>
-                <span>Topic</span><i>→</i>
-                <span>Lesson</span><i>→</i>
-                <span>Plan</span><i>→</i>
-                <span>Delivery</span><i>→</i>
-                <span>Marks</span>
-              </div>
-              <p>
-                A scheme is the term's curriculum. Lesson plans are created against a scheme's topics, then
-                delivered and assessed — coverage compares planned work against what was actually taught.
-              </p>
-            </Card>
-            <Card>
-              <h2>Supervision cycle</h2>
-              <div className="acad-flow">
-                <span>Observe</span><i>→</i>
-                <span>Feedback</span><i>→</i>
-                <span>Acknowledge</span><i>→</i>
-                <span>Follow-up</span>
-              </div>
-              <p>
-                HODs, DOS and school leaders review lesson preparation, classroom delivery and teacher
-                academic records, with photographic evidence attached.
-              </p>
-            </Card>
-          </div>
-        </>
-      )}
-    </div>
-  );
+  const go = (view: string) => navigateTo(`academics/${view}`);
+  const count = (key: string) => Number(x.data[key] ?? 0);
+  const coverage = Math.max(0, Math.min(100, count("coveragePercent")));
+  return <div className="acad-page acad-overview">
+    <header className="acad-overview-heading"><div><span className="acad-eyebrow">TEACHING & LEARNING</span><h1>Every lesson, connected.</h1><p>Your academic workspace — from the first plan to learner progress.</p></div><Button variant="secondary" disabled={x.loading} onClick={x.load}><RefreshCw size={15} /> Refresh overview</Button></header>
+    <section className="acad-ai-banner" aria-labelledby="academic-ai-title"><div className="acad-ai-symbol"><Sparkles size={27} /></div><div className="acad-ai-copy"><span className="acad-ai-label">AI-ASSISTED PREPARATION</span><h2 id="academic-ai-title">Less paperwork. More time to teach.</h2><p>Upload a lesson-plan image and let AI fill the empty fields in your draft. Review and refine it before submitting.</p><Button onClick={() => go("schemes")}>Open lesson workspace <ArrowUpRight size={16} /></Button></div><div className="acad-ai-steps"><span><Upload size={16} /> Upload your plan</span><span><Sparkles size={16} /> AI prepares the draft</span><span><ShieldCheck size={16} /> You review and submit</span></div></section>
+    <div className="acad-section-heading"><h2>Academic overview</h2><span>Across your academic records</span></div>
+    {x.error ? <Notice tone="danger">Could not load the overview. {x.error} Use Refresh overview to try again.</Notice> : x.loading ? <Spinner /> : <>
+      <div className="acad-overview-metrics"><Metric label="Today's scheduled lessons" value={count("todaysLessons")} icon={Clock3} /><Metric label="Schemes of work" value={count("schemes")} icon={BookMarked} /><Metric label="Lesson plans" value={count("plans")} icon={FileText} /><Metric label="Assessed lessons" value={count("assessed")} icon={ClipboardCheck} /></div>
+      <div className="acad-overview-columns"><Card className="acad-coverage-card"><div className="acad-section-heading"><h2>Curriculum coverage</h2><GraduationCap size={20} /></div><div className="acad-coverage-number">{coverage}<span>%</span></div><p>{count("lessons") ? "Planned lessons recorded as delivered." : "Add schemes and lessons to start tracking coverage."}</p><div className="acad-coverage-track" role="progressbar" aria-label="Curriculum coverage" aria-valuenow={coverage} aria-valuemin={0} aria-valuemax={100}><span style={{width: coverage + "%"}} /></div><div className="acad-coverage-meta"><span><b>{count("topics")}</b> topics</span><span><b>{count("lessons")}</b> planned lessons</span></div><button className="acad-overview-link" onClick={() => go("schemes")}>Explore schemes and delivery <ArrowUpRight size={16} /></button></Card>
+      <Card className="acad-attention-card"><div className="acad-section-heading"><h2>Review & follow-up</h2><span>Your next steps</span></div><p>Keep preparation and teaching support moving.</p><div className="acad-review-list">{[["Pending scheme approvals", "pendingSchemeApprovals", "schemes"], ["Pending lesson-plan approvals", "pendingPlanApprovals", "schemes"], ["Open observations", "openObservations", "supervision"], ["Open record inspections", "openInspections", "supervision"]].map(([label, key, view]) => <button key={key} onClick={() => go(view)}><span>{label}</span><b className={count(key) ? "has-items" : ""}>{count(key)}</b><ArrowUpRight size={15} /></button>)}</div></Card></div>
+    </>}
+    <div className="acad-section-heading"><h2>Keep the learning cycle moving</h2><span>Plan · Teach · Assess · Improve</span></div>
+    <div className="acad-workflow-grid">{[
+      {view: "schemes", icon: BookMarked, title: "Plan your teaching", text: "Organise schemes, topics and lesson plans in one connected workspace.", label: "Schemes & lessons"},
+      {view: "timetables", icon: CalendarClock, title: "Make time for learning", text: "Coordinate classes, teachers and rooms, and check scheduling conflicts.", label: "Open timetables"},
+      {view: "supervision", icon: UserCheck, title: "Support great teaching", text: "Review classroom practice, capture evidence and follow up on feedback.", label: "Open supervision"}
+    ].map(({view, icon: Icon, title, text, label}, index) => <button key={view} className="acad-workflow-card" onClick={() => go(view)}><div className="acad-workflow-top"><Icon size={22}/><span>0{index + 1}</span></div><h3>{title}</h3><p>{text}</p><span className="acad-workflow-action">{label}<ArrowUpRight size={17}/></span></button>)}</div>
+    <div className="acad-import-strip"><div><Upload size={20}/><span><b>Already have academic records?</b><small>Bring existing data into your workspace.</small></span></div><Button variant="secondary" onClick={() => go("imports")}>Open imports <ArrowUpRight size={15}/></Button></div>
+  </div>;
 }
 
 function Timetables() {

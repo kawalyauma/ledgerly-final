@@ -18,6 +18,7 @@ export type SchoolPayConfigRow = {
   bankAccountId: string;
   controlAccountId: string;
   importStartDate: string;
+  importStartTimestamp?: string | null;
   enabled: boolean;
   autoAllocate: boolean;
   lastWebhookAt: string | null;
@@ -86,10 +87,12 @@ function paymentDate(value: string) {
   return match[1]!;
 }
 
-function paymentAmountMinor(value: string | number) {
+export function paymentAmountMinor(value: string | number) {
   const parsed = typeof value === "number" ? value : Number(value.replace(/,/g, "").trim());
   if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new AppError(422, "INVALID_SCHOOLPAY_AMOUNT", "SchoolPay amount must be a positive whole UGX amount");
-  return parsed;
+  const minor = parsed * 100;
+  if (!Number.isSafeInteger(minor)) throw new AppError(422, "INVALID_SCHOOLPAY_AMOUNT", "SchoolPay amount is too large");
+  return minor;
 }
 
 function completedStatus(value: string | null | undefined) {
@@ -102,7 +105,9 @@ async function configByWebhookKey(runtime: Runtime, webhookKey: string): Promise
     `SELECT organization_id AS "organizationId",school_code AS "schoolCode",
       api_password_ciphertext AS "apiPasswordCiphertext",api_password_iv AS "apiPasswordIv",api_password_tag AS "apiPasswordTag",
       webhook_key AS "webhookKey",bank_account_id AS "bankAccountId",control_account_id AS "controlAccountId",
-      import_start_date::text AS "importStartDate",enabled,auto_allocate AS "autoAllocate",
+      import_start_date::text AS "importStartDate",
+      (SELECT system_preferences->>'schoolPayImportStartTimestamp' FROM school_profiles WHERE organization_id=schoolpay_configurations.organization_id) AS "importStartTimestamp",
+      enabled,auto_allocate AS "autoAllocate",
       last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
      FROM schoolpay_configurations WHERE webhook_key=$1 AND enabled=true`, [webhookKey])).rows[0];
 }
@@ -112,7 +117,9 @@ export async function schoolPayConfigByOrganization(runtime: Runtime, organizati
     `SELECT organization_id AS "organizationId",school_code AS "schoolCode",
       api_password_ciphertext AS "apiPasswordCiphertext",api_password_iv AS "apiPasswordIv",api_password_tag AS "apiPasswordTag",
       webhook_key AS "webhookKey",bank_account_id AS "bankAccountId",control_account_id AS "controlAccountId",
-      import_start_date::text AS "importStartDate",enabled,auto_allocate AS "autoAllocate",
+      import_start_date::text AS "importStartDate",
+      (SELECT system_preferences->>'schoolPayImportStartTimestamp' FROM school_profiles WHERE organization_id=schoolpay_configurations.organization_id) AS "importStartTimestamp",
+      enabled,auto_allocate AS "autoAllocate",
       last_webhook_at AS "lastWebhookAt",last_reconciled_at AS "lastReconciledAt"
      FROM schoolpay_configurations WHERE organization_id=$1${enabledOnly ? " AND enabled=true" : ""}`, [organizationId])).rows[0];
 }
@@ -199,8 +206,23 @@ async function postCapturedEvent(runtime: Runtime, config: SchoolPayConfigRow, e
   }
   if (event.status === "ignored") return { status: "ignored" as const };
 
+  // Reuse verified legacy receipts instead of crediting the same payment twice.
+  const legacy = await runtime.db.query<{ paymentId: string; receiptId: string }>(
+    `SELECT p.id AS "paymentId",r.id AS "receiptId" FROM payments p
+     JOIN school_fee_receipts r ON r.payment_id=p.id AND r.organization_id=p.organization_id
+     JOIN school_students s ON s.id=r.student_id AND s.organization_id=p.organization_id
+     WHERE p.organization_id=$1 AND p.status='posted' AND p.currency='UGX'
+       AND p.amount_minor=$2 AND p.payment_date=$3 AND (s.id=$4 OR s.student_number=$4)
+       AND (p.reference LIKE '%Receipt: ' || $5 || ' -%' OR p.number='SP-' || $5)`,
+    [config.organizationId,event.amountMinor,event.paymentDate,event.studentPaymentCode,event.receiptNumber]);
+  if (legacy.rows.length === 1) {
+    await markEvent(runtime, config.organizationId, event.id, "posted", { paymentId: legacy.rows[0]!.paymentId, schoolFeeReceiptId: legacy.rows[0]!.receiptId });
+    return { status: "posted" as const, duplicate: true, ...legacy.rows[0] };
+  }
+  if (legacy.rows.length > 1) throw new Error("Multiple existing receipts match this SchoolPay transaction");
+
   const student = (await runtime.db.query<{ id: string; contactId: string | null }>(
-    `SELECT id,contact_id AS "contactId" FROM school_students WHERE id=$1 AND organization_id=$2 AND deleted_at IS NULL AND status='active'`,
+    `SELECT id,contact_id AS "contactId" FROM school_students WHERE (id=$1 OR student_number=$1) AND organization_id=$2 AND deleted_at IS NULL AND status='active'`,
     [event.studentPaymentCode, config.organizationId])).rows[0];
   if (!student?.contactId) {
     await markEvent(runtime, config.organizationId, event.id, "unmatched", { error: "No active Ledgerly student with this SchoolPay payment code and finance contact" });
@@ -242,7 +264,10 @@ export async function captureSchoolPayProviderPayment(runtime: Runtime, config: 
   const amountMinor = paymentAmountMinor(payment.amount);
   const date = paymentDate(payment.paymentDateAndTime);
   const completed = completedStatus(payment.transactionCompletionStatus);
-  const beforeImportStart = date < config.importStartDate;
+  const cutoff = config.importStartTimestamp ? Date.parse(config.importStartTimestamp) : null;
+  const timestamp = Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/.test(payment.paymentDateAndTime) ? payment.paymentDateAndTime : payment.paymentDateAndTime.replace(" ", "T") + "+03:00");
+  if (cutoff !== null && !Number.isFinite(timestamp)) throw new AppError(422, "INVALID_SCHOOLPAY_DATE", "SchoolPay timestamp is invalid");
+  const beforeImportStart = date < config.importStartDate || (cutoff !== null && timestamp < cutoff);
   const eligible = completed && !beforeImportStart;
   const ignoredReason = beforeImportStart
     ? `SchoolPay payment date ${date} is before configured import start date ${config.importStartDate}`

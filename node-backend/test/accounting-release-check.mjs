@@ -1,0 +1,62 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+const require=createRequire('/app/package.json');
+const {Client}=require('pg');
+const root=process.env.REPORT_BUILD_ROOT || '/tmp/accounting-candidate/dist';
+const {generateReport,reportCatalog}=await import(`${root}/features/reports/service.js`);
+const {createDashboardRoutes}=await import(`${root}/features/report-management/routes.js`);
+const {workspaceSettingsFeature}=await import(`${root}/features/workspace-settings/index.js`);
+const {Hono}=require('hono');
+const url=new URL(process.env.DATABASE_URL);url.pathname='/ledgerly_report_verify_20261015_1015';
+assert.equal(url.pathname,'/ledgerly_report_verify_20261015_1015');
+const db=new Client({connectionString:url.href});
+await db.connect();
+const runtime={db};const org='org_cutover_release_check';
+const q=(sql,args=[])=>db.query(sql,args);
+try{
+ await q('BEGIN');
+ await q(`INSERT INTO organizations(id,name) VALUES($1,'Cutover verification')`,[org]);
+ await q(`INSERT INTO users(id,email,display_name) VALUES('release_user','accounting-check@example.invalid','Verification')`);
+ const accounts=[['cash','1000','asset','cash','debit'],['ar','1110','asset','receivable','debit'],['equity','3900','equity','opening_balance','credit'],['rev','4100','revenue','school_fees','credit'],['exp','6200','expense','fee_concessions','debit']];
+ for(const [id,code,type,subtype,normal] of accounts)await q(`INSERT INTO accounts(id,organization_id,code,name,type,subtype,normal_balance) VALUES($1,$2,$3,$1,$4,$5,$6)`,[id,org,code,type,subtype,normal]);
+ await q(`INSERT INTO contacts(id,organization_id,type,code,name) VALUES('customer',$1,'customer','C1','Customer')`,[org]);
+ await q(`INSERT INTO school_students(id,organization_id,admission_number,student_number,first_name,last_name,admission_date) VALUES('learner',$1,'S1','S1','Learner','One','2026-01-01'),('bad_debt',$1,'S2','S2','Cleared','Debt','2026-01-01')`,[org]);
+ let n=0;
+ async function journal(date,lines,source='manual',meta={}){
+  const id=`j${++n}`;await q(`INSERT INTO journal_entries(id,organization_id,entry_number,transaction_date,posting_date,description,source_type,status,currency,metadata) VALUES($1,$2,$3,$4,$4,'Test',$5,'posted','UGX',$6::jsonb)`,[id,org,`JE-${n}`,date,source,JSON.stringify(meta)]);
+  for(let i=0;i<lines.length;i++){const [account,debit,credit,student]=lines[i];await q(`INSERT INTO journal_lines(id,organization_id,journal_entry_id,account_id,debit_minor,credit_minor,base_debit_minor,base_credit_minor,contact_id,dimensions_json) VALUES($1,$2,$3,$4,$5,$6,$5,$6,$7,$8::jsonb)`,[`${id}l${i}`,org,id,account,debit,credit,account==='ar'&&!student?'customer':null,JSON.stringify(student?{schoolStudentId:student}:{})]);}
+  return id;
+ }
+ await journal('2026-08-01',[['ar',1000,0,'learner'],['rev',0,1000]]);
+ await journal('2026-08-02',[['cash',500,0],['ar',0,500,'learner']]);
+ await journal('2026-08-03',[['exp',100,0],['ar',0,100,'learner']],'school_fee_writeoff');
+ await journal('2026-08-04',[['ar',200,0,'bad_debt'],['rev',0,200]]);
+ await journal('2026-08-05',[['exp',200,0],['ar',0,200,'bad_debt']],'school_fee_writeoff');
+ await journal('2026-08-31',[['cash',0,500],['rev',1200,0],['exp',0,300],['equity',0,400]],'accounting_cutover',{accountingStartDate:'2026-09-01'});
+ const feeHistory=JSON.stringify((await q(`SELECT id,debit_minor,credit_minor,dimensions_json FROM journal_lines WHERE dimensions_json ? 'schoolStudentId' ORDER BY id`)).rows);
+ await journal('2026-09-05',[['ar',1000,0,'learner'],['rev',0,1000]]);
+ await journal('2026-09-06',[['cash',600,0],['ar',0,600,'learner']]);
+ await journal('2026-09-07',[['exp',200,0],['cash',0,200]]);
+ await journal('2026-09-08',[['cash',100,0],['ar',0,100]]);
+ await q(`INSERT INTO bank_accounts(id,organization_id,ledger_account_id,name,currency,opening_balance_minor) VALUES('bank',$1,'cash','Bank','UGX',700)`,[org]);
+ await q(`INSERT INTO bank_statement_imports(id,organization_id,bank_account_id,filename,import_fingerprint,imported_by) VALUES('import',$1,'bank','test.csv','check','release_user')`,[org]);
+ for(let i=0;i<3;i++)await q(`INSERT INTO bank_transactions(id,organization_id,bank_account_id,import_id,transaction_date,description,amount_minor) VALUES($1,$2,'bank','import','2026-09-08','Test',1)`,[`bt${i}`,org]);
+ const filters={from:'2026-01-01',to:'2026-10-15'};
+ const pl=await generateReport(runtime,org,'profit-loss',filters);assert.equal(pl.filters.from,'2026-09-01');assert.deepEqual(pl.totals,{revenueMinor:1000,expenseMinor:200,netProfitMinor:800});
+ const {renderReport}=await import(`${root}/features/reports/render.js`);for(const format of ['json','csv','xlsx','pdf'])assert.ok((await renderReport(pl,format,'Verification')).byteLength>0);
+ const bs=await generateReport(runtime,org,'balance-sheet',{asOf:'2026-10-15'});assert.equal(bs.totals.differenceMinor,0);assert.equal(bs.totals.assetMinor,1200);
+ const opening=await generateReport(runtime,org,'balance-sheet',{asOf:'2026-09-01'});assert.equal(opening.totals.assetMinor,400);assert.equal(opening.totals.equityMinor,400);assert.equal(opening.rows.find(r=>r.code==='1000')?.amountMinor??0,0);
+ const ar=await generateReport(runtime,org,'receivables-ageing',{asOf:'2026-10-15'});assert.equal(ar.totals.outstandingMinor,700);assert.equal(ar.rows.some(r=>r.contactId==='bad_debt'),false);
+ const cash=await generateReport(runtime,org,'cash-bank-summary',{asOf:'2026-10-15'});assert.equal(cash.totals.ledgerBalanceMinor,500);assert.equal(cash.rows[0].unmatchedCount,3);
+ const cashOpening=await generateReport(runtime,org,'cash-bank-summary',{asOf:'2026-09-01'});assert.equal(cashOpening.totals.ledgerBalanceMinor,0);
+ const gl=await generateReport(runtime,org,'general-ledger',filters);assert.ok(gl.rows.some(r=>r.entryNumber==='OPENING'&&r.accountCode==='1110'&&r.debitMinor===400));assert.ok(gl.rows.every(r=>r.postingDate>='2026-09-01'));
+ const equityReport=await generateReport(runtime,org,'changes-in-equity',filters);assert.equal(equityReport.totals.openingMinor,400);assert.equal(equityReport.totals.closingMinor,1200);
+ const trial=await generateReport(runtime,org,'trial-balance',filters);assert.equal(trial.totals.debitMinor,trial.totals.creditMinor);
+ for(const report of reportCatalog.filter(r=>r.available))await generateReport(runtime,org,report.id,filters);
+ const app=new Hono();app.use('*',async(c,next)=>{c.set('principal',{organizationId:org,userId:'release_user',role:'owner',scopes:['reports:read']});await next()});app.route('/dashboards',createDashboardRoutes(runtime));workspaceSettingsFeature.mount(app,runtime);
+ const resp=await app.request('/dashboards/summary');assert.equal(resp.status,200);const summary=(await resp.json()).data;assert.equal(summary.period.from,'2026-09-01');assert.equal(summary.metrics.balanceMinor,500);assert.equal(summary.metrics.outstandingMinor,700);assert.deepEqual(summary.cashFlow.map(r=>r.month),['2026-09','2026-10']);
+ const overview=(await (await app.request('/api/v1/workspace/overview')).json()).data;assert.equal(overview.finance.revenueMinor,1000);assert.equal(overview.finance.expensesMinor,200);assert.equal(overview.finance.cashMinor,500);assert.deepEqual(overview.monthly.map(r=>r.label),['Sep 2026','Oct 2026']);
+ const oldHistory=JSON.stringify((await q(`SELECT id,debit_minor,credit_minor,dimensions_json FROM journal_lines WHERE dimensions_json ? 'schoolStudentId' AND journal_entry_id IN ('j1','j2','j3','j4','j5','j6') ORDER BY id`)).rows);assert.equal(oldHistory,feeHistory);
+ console.log('PASS isolated integration: all 33 accounting reports execute, correct term income, balanced statements, net receivables, cleared bad debts, zero opening cash, no multiplied cash, brought-forward ledger, dashboard/overview parity, learner history preserved');
+ await q('ROLLBACK');
+}finally{await db.end()}

@@ -1,15 +1,27 @@
 import type { Runtime } from "../../runtime.js";
 import { getLesson } from "./schemes.js";
+import { latexToMathml, splitMath } from "./latex.js";
 
 const esc = (v: unknown) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+export const isNoteHeading = (heading: string) => /^(?:note|nb|n\.b\.?)\s*:?$/i.test(heading.trim());
+
 /** Small, safe Markdown subset (headings, lists, bold, italics, tables, paragraphs); everything is escaped first. */
 export function markdownToHtml(md: string, diagram: (key: string) => string): string {
-  const inline = (t: string) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*(?!\s)(.+?)\*/g, "$1<i>$2</i>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  const text = (t: string) => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*(?!\s)(.+?)\*/g, "$1<i>$2</i>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  // LaTeX maths is typeset as MathML (KaTeX escapes it; no scripts or links are possible).
+  const inline = (t: string) => splitMath(t).map(p => (p.math ? latexToMathml(p.text, p.display) : text(p.text))).join("");
   const out: string[] = [];
   const lines = md.replace(/\r/g, "").split("\n");
-  let list: "ul" | "ol" | null = null;
-  const close = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  let list: "ul" | "ol" | null = null, items: string[] = [], section = "";
+  // Notebook style: points under '### Note' get ticks; four or more one-to-four-word points (names, examples) go in two columns.
+  const close = () => {
+    if (!list) return;
+    const plain = items.map(i => i.replace(/<[^>]+>/g, ""));
+    const cls = list === "ul" ? [isNoteHeading(section) ? "note" : "", items.length >= 4 && plain.every(i => i.split(/\s+/).length <= 4) ? "cols" : ""].filter(Boolean).join(" ") : "";
+    out.push(`<${list}${cls ? ` class="${cls}"` : ""}>${items.map(i => `<li>${i}</li>`).join("")}</${list}>`);
+    list = null; items = [];
+  };
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i]!;
     const d = /^\s*\[\[diagram:([a-z0-9-]+)\]\]\s*$/.exec(line);
@@ -23,9 +35,9 @@ export function markdownToHtml(md: string, diagram: (key: string) => string): st
       i -= 1; out.push("</table>"); continue;
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(line);
-    if (h) { close(); const n = Math.min(4, h[1]!.length + 1); out.push(`<h${n}>${inline(h[2]!)}</h${n}>`); continue; }
-    const li = /^\s*(?:([-*•])|(\d+)[.)])\s+(.*)$/.exec(line);
-    if (li) { const kind = li[1] ? "ul" : "ol"; if (list !== kind) { close(); out.push(`<${kind}>`); list = kind; } out.push(`<li>${inline(li[3]!)}</li>`); continue; }
+    if (h) { close(); section = h[2]!; const n = Math.min(4, h[1]!.length + 1); out.push(`<h${n}>${inline(isNoteHeading(section) ? "Note:" : h[2]!)}</h${n}>`); continue; }
+    const li = /^\s*(?:([-*•❖])|(\d+)[.)])\s+(.*)$/.exec(line);
+    if (li) { const kind = li[1] ? "ul" : "ol"; if (list !== kind) { close(); list = kind; } items.push(inline(li[3]!)); continue; }
     if (!line.trim()) { close(); continue; }
     close(); out.push(`<p>${inline(line)}</p>`);
   }
@@ -34,7 +46,7 @@ export function markdownToHtml(md: string, diagram: (key: string) => string): st
 }
 
 type Plan = { competences?: string[]; languageCompetence?: string | null; objectives?: string[]; priorKnowledge?: string | null; methods?: string[]; materials?: string[];
-  references?: string[]; steps?: Array<{ stage: string; minutes?: number | null; teacherActivity: string; learnerActivity: string }>; assessment?: string | null; homework?: string | null; lifeSkills?: string[] };
+  references?: string[]; steps?: Array<{ stage: string; minutes?: number | null; content?: string | null; teacherActivity: string; learnerActivity: string }>; assessment?: string | null; homework?: string | null; lifeSkills?: string[] };
 
 /** A printable page for one lesson: sample lesson plan, learner notes with diagrams inline, and the sources used. */
 export async function lessonPrintHtml(runtime: Runtime, organizationId: string, lessonId: string) {
@@ -75,8 +87,8 @@ export async function lessonPrintHtml(runtime: Runtime, organizationId: string, 
       ${p.priorKnowledge ? `<h3>Prior knowledge</h3><p>${esc(p.priorKnowledge)}</p>` : ""}
       <div class="two"><div><h3>Methods</h3>${list(p.methods)}</div><div><h3>Materials</h3>${list(p.materials)}</div></div>
       <h3>Lesson procedure</h3>
-      <table><tr><th>Stage</th><th>Time</th><th>Teacher's activity</th><th>Learners' activity</th></tr>
-        ${(p.steps ?? []).map(s => `<tr><td><b>${esc(s.stage)}</b></td><td>${s.minutes ? `${esc(s.minutes)} min` : ""}</td><td>${esc(s.teacherActivity)}</td><td>${esc(s.learnerActivity)}</td></tr>`).join("")}
+      <table><tr><th>Stage</th><th>Time</th><th>Content</th><th>Teacher's activity</th><th>Learners' activity</th></tr>
+        ${(p.steps ?? []).map(s => `<tr><td><b>${esc(s.stage)}</b></td><td>${s.minutes ? `${esc(s.minutes)} min` : ""}</td><td>${esc(s.content ?? "")}</td><td>${esc(s.teacherActivity)}</td><td>${esc(s.learnerActivity)}</td></tr>`).join("")}
       </table>
       ${p.assessment ? `<h3>Assessment</h3><p>${esc(p.assessment)}</p>` : ""}${p.homework ? `<h3>Homework</h3><p>${esc(p.homework)}</p>` : ""}
       ${p.lifeSkills?.length ? `<h3>Life skills and values</h3>${list(p.lifeSkills)}` : ""}
@@ -91,11 +103,14 @@ h1{font-size:24px;margin:4px 0}h2{font-size:20px;margin:28px 0 8px;color:#123d8a
 table{border-collapse:collapse;width:100%;margin:8px 0;font-size:14px}th,td{border:1px solid #cfd7e2;padding:6px 8px;text-align:left;vertical-align:top}th{background:#f0f3f8}
 table.kv th{width:16%}figure{margin:16px 0;text-align:center;break-inside:avoid}figure img{max-width:100%;height:auto;border:1px solid #e3e8ef;border-radius:8px;background:#fff}
 figcaption{font-size:13px;color:#5b6878;margin-top:4px}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}.sources{font-size:13px;color:#5b6878}
+.notes h3{font-size:15px;text-decoration:underline;text-underline-offset:3px;margin:14px 0 4px}.notes h4{text-decoration:underline}
+.notes ul{list-style:none;padding-left:6px;margin:4px 0 10px}.notes ul>li{padding-left:1.4em;text-indent:-1.4em;margin:2px 0}.notes ul>li::before{content:"\\2756";display:inline-block;width:1.4em;text-indent:0}
+.notes ul.cols{columns:2;column-gap:28px}.notes ul.cols>li{break-inside:avoid}.notes ul.note>li{font-style:italic}.notes ul.note>li::before{content:"\\2713";font-style:normal}
 @media print{body{padding:0}header{border-color:#000}a{color:inherit}}
 </style></head><body>
 <header><small>${esc(m?.school)} · ${esc(m?.subject)} · ${esc(m?.className)} · ${esc(m?.term)}</small><h1>Lesson ${esc(l.seq)}: ${esc(l.title)}</h1><small>${esc(l.unit)}${l.subtopic ? ` › ${esc(l.subtopic)}` : ""}</small></header>
 ${plan}
-<section><h2>Lesson notes</h2>${notes}${extra}</section>
+<section class="notes"><h2>Lesson notes</h2>${notes}${extra}</section>
 <section class="sources"><h2>Sources</h2><ul>${(l.citations as Array<{ title: string; pageUrl: string | null; part: number }>).map(c => `<li>${esc(c.title)} (part ${esc(c.part)})${c.pageUrl ? ` — <a href="${esc(c.pageUrl)}">${esc(c.pageUrl)}</a>` : ""}</li>`).join("")}</ul>
 <p>Written by Ledgerly AI from the school e-library sources above; review before use.</p></section>
 </body></html>`;

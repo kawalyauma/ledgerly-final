@@ -4,6 +4,7 @@ import { schoolPaySyncHash, validateSchoolPayDateRange } from "../src/features/s
 import { schoolPayAdhocRecoveryDelayMinutes } from "../src/features/schoolpay/recovery.js";
 import { ipMatchesRule, normalizeIp } from "../src/features/schoolpay/security.js";
 import {
+  paymentAmountMinor,
   decryptSchoolPaySecret,
   encryptSchoolPaySecret,
   schoolPayWebhookSignature,
@@ -54,5 +55,15 @@ describe("SchoolPay gateway crypto", () => {
     expect(envelope.ciphertext).not.toContain("school-specific-password");
     expect(decryptSchoolPaySecret(envelope, "a-very-long-ledgerly-schoolpay-master-key-123456")).toBe("school-specific-password");
     expect(() => decryptSchoolPaySecret(envelope, "another-long-but-wrong-schoolpay-master-key-654321")).toThrow();
+  });
+});
+
+describe("SchoolPay ledger amounts", () => {
+  it("converts whole shillings into Ledgerly hundredths", () => {
+    expect(paymentAmountMinor("60,000")).toBe(6000000);
+    expect(paymentAmountMinor(24000)).toBe(2400000);
+    expect(() => paymentAmountMinor(0)).toThrow();
+    expect(() => paymentAmountMinor(1.5)).toThrow();
+    expect(() => paymentAmountMinor(Number.MAX_SAFE_INTEGER)).toThrow();
   });
 });

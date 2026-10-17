@@ -28,6 +28,11 @@ export function toXlsx(report: ReportResult): Uint8Array {
   const sheet = XLSX.utils.json_to_sheet(report.rows, { header: report.columns });
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, "Report");
+  if (report.basis || report.description) XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([
+    ["Report",report.reportType],["Basis",report.basis??""],["Explanation",report.description??""],
+    ["From",report.filters.from??""],["To",report.filters.asOf??report.filters.to??""],
+    ...Object.entries(report.totals??{})
+  ]),"About");
   workbook.Props = { Title: report.reportType, CreatedDate: new Date(report.generatedAt) };
   return XLSX.write(workbook, { type: "array", bookType: "xlsx", compression: true }) as Uint8Array;
 }
@@ -56,7 +61,10 @@ export async function toPdf(report: ReportResult, organizationName = "Ledgerly")
     page.drawText(report.reportType.replaceAll("-"," ").toUpperCase(), { x: margin, y, font: bold, size: 17, color: rgb(0.05,0.2,0.35) });
     const range = report.filters.asOf ? `As of ${report.filters.asOf}` : [report.filters.from, report.filters.to].filter(Boolean).join(" to ");
     if (range) page.drawText(range, { x: width - margin - font.widthOfTextAtSize(range, 8), y, font, size: 8 });
-    y -= 28;
+    y -= 16;
+    if (report.basis) { page.drawText(report.basis==="cash" ? "ACTUAL CASH RECEIPTS AND PAYMENTS" : "ACCRUAL: INCLUDES UNPAID FEES AND NON-CASH EXPENSES",{x:margin,y,font:bold,size:8});y-=12; }
+    if (report.description) { page.drawText(fit(report.description,width-margin*2,7),{x:margin,y,font,size:7});y-=12; }
+    y -= 12;
     page.drawRectangle({ x: margin, y: y - rowHeight + 5, width: width - margin * 2, height: rowHeight, color: rgb(0.08,0.16,0.26) });
     let x = margin;
     columns.forEach((column,index) => {

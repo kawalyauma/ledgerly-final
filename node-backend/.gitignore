@@ -4,5 +4,7 @@ dist/
 .env.*
 !.env.example
 data/
+# Source data compiled into the app (e.g. the Uganda map geometry) is code, not local data.
+!src/**/data/
 coverage/
 *.log
